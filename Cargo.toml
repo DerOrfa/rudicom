@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 dicom = "0.5"
+anyhow = "1.0"
+clap = "4.3"
