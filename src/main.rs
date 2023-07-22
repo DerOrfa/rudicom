@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use clap::Parser;
 use dicom::object::mem::InMemElement;
-use futures_lite::future;
 
 
 #[derive(Parser)]
@@ -88,13 +87,14 @@ fn read_dicom<P>(filename:P, instance_extract:HashMap<&str,Tag>, series_extract:
     })
 }
 
-fn main() -> Result<()>
+#[tokio::main]
+async fn main() -> Result<()>
 {
     let args = Cli::parse();
-    let a = future::block_on(async_store::read_file(args.filename));
+    let a = async_store::read_file(args.filename).await?;
+    async_store::write_file("/tmp/delme.dcm".into(), &a).await?;
 
     // let obj = read_dicom(args.filename, [].into(), [].into(), [("OperatorsName","(0008,1070)".parse()?)].into() )?;
-    // let extracted = extract_by_name(&obj,vec!["(0008,1070)","OperatorsName"]);
-
-    Ok(println!("{a:#?}"))
+    let extracted = extract_by_name(&a,vec!["(0008,1070)","OperatorsName"]);
+    Ok(println!("{extracted:#?}"))
 }
