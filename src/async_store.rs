@@ -1,4 +1,4 @@
-use std::io::{Cursor, Seek, SeekFrom, Write};
+use std::io::{Cursor, Seek, SeekFrom};
 use std::path::PathBuf;
 use dicom::object::{DefaultDicomObject, from_reader};
 use anyhow::Result;

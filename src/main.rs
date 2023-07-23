@@ -1,34 +1,26 @@
 mod async_store;
+mod db;
+mod dicom_serde;
 
 use std::collections::HashMap;
 use std::path::Path;
 use dicom::object::{DefaultDicomObject, open_file, StandardDataDictionary};
-use dicom::core::{DataDictionary, Tag};
-use anyhow::Result;
+use dicom::core::{DataDictionary, DataElement, Tag};
+use anyhow::{Context, Result};
 use dicom::dictionary_std::tags;
 use std::path::PathBuf;
 use std::str::FromStr;
 use clap::Parser;
 use dicom::object::mem::InMemElement;
+use glob::glob;
+use serde::{Serialize, Serializer};
 
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    // file to open
+    // file or globbing to open
     filename: PathBuf,
-}
-
-#[derive(Debug)]
-struct Entry{
-    uid: String,
-    meta: HashMap<String,Option<InMemElement>>}
-
-#[derive(Debug)]
-struct InstanceEntry{
-    instance : Entry,
-    series : Entry,
-    study : Entry
 }
 
 fn extract_by_name<'a>(obj:&'a DefaultDicomObject, names: Vec<&str>) -> Result<HashMap<String,Option<&'a InMemElement>>>
@@ -57,44 +49,57 @@ fn extract<'a>(obj:&'a DefaultDicomObject, requested:HashMap<&str,Tag>) -> Resul
     Ok(ret)
 }
 
-fn read_dicom<P>(filename:P, instance_extract:HashMap<&str,Tag>, series_extract:HashMap<&str,Tag>, study_extract:HashMap<&str,Tag>)
-    -> Result<InstanceEntry> where P:AsRef<Path>
-{
-    let obj = open_file(filename)?;
-    let instance_meta = extract(&obj, instance_extract)?;
-    let series_meta = extract(&obj, series_extract)?;
-    let study_meta = extract(&obj, study_extract)?;
-
-    Ok(InstanceEntry {
-        instance : Entry{
-            uid: obj.element(tags::SOP_INSTANCE_UID)?.to_str()?.to_string(),
-            meta: instance_meta.into_iter()
-                .map(|(k,v)|(k,v.cloned()))
-                .collect()
-        },
-        series: Entry {
-            uid:obj.element(tags::SERIES_INSTANCE_UID)?.to_str()?.to_string(),
-            meta: series_meta.into_iter()
-                .map(|(k,v)|(k,v.cloned()))
-                .collect()
-        },
-        study : Entry{
-            uid:obj.element(tags::STUDY_INSTANCE_UID)?.to_str()?.to_string(),
-            meta: study_meta.into_iter()
-                .map(|(k,v)|(k,v.cloned()))
-                .collect()
-        },
-    })
-}
+// fn read_dicom<P>(filename:P, instance_extract:HashMap<&str,Tag>, series_extract:HashMap<&str,Tag>, study_extract:HashMap<&str,Tag>)
+//     -> Result<InstanceEntry> where P:AsRef<Path>
+// {
+//     let obj = open_file(filename)?;
+//     let instance_meta = extract(&obj, instance_extract)?;
+//     let series_meta = extract(&obj, series_extract)?;
+//     let study_meta = extract(&obj, study_extract)?;
+//
+//     Ok(InstanceEntry {
+//         instance : Entry{
+//             uid: obj.element(tags::SOP_INSTANCE_UID)?.to_str()?.to_string(),
+//             meta: instance_meta.into_iter()
+//                 .map(|(k,v)|(k,v.cloned()))
+//                 .collect()
+//         },
+//         series: Entry {
+//             uid:obj.element(tags::SERIES_INSTANCE_UID)?.to_str()?.to_string(),
+//             meta: series_meta.into_iter()
+//                 .map(|(k,v)|(k,v.cloned()))
+//                 .collect()
+//         },
+//         study : Entry{
+//             uid:obj.element(tags::STUDY_INSTANCE_UID)?.to_str()?.to_string(),
+//             meta: study_meta.into_iter()
+//                 .map(|(k,v)|(k,v.cloned()))
+//                 .collect()
+//         },
+//     })
+// }
 
 #[tokio::main]
 async fn main() -> Result<()>
 {
     let args = Cli::parse();
-    let a = async_store::read_file(args.filename).await?;
-    async_store::write_file("/tmp/delme.dcm".into(), &a).await?;
+    db::init("ws://localhost:8000").await.context(format!("Failed connecting to ws://localhost:8000"))?;
 
-    // let obj = read_dicom(args.filename, [].into(), [].into(), [("OperatorsName","(0008,1070)".parse()?)].into() )?;
-    let extracted = extract_by_name(&a,vec!["(0008,1070)","OperatorsName"]);
-    Ok(println!("{extracted:#?}"))
+    let pattern = args.filename.to_str().expect("Invalid string");
+    for entry in glob(pattern).expect("Failed to read glob pattern") {
+        match entry {
+            Ok(path) => {
+                let obj = async_store::read_file(path).await?;
+                let uid = &*obj.element(tags::SOP_INSTANCE_UID)?.to_str()?;
+                let extracted = extract_by_name(&obj,vec!["OperatorsName"])?;
+                match db::register(uid,extracted).await {
+                    Ok(_) => {}
+                    Err(e) => {println!("Failed to register {uid}:{e}")}
+                }
+
+            },
+            Err(e) => println!("{e:?}")
+        }
+    }
+    Ok(())
 }
