@@ -1,11 +1,9 @@
 mod async_store;
 mod db;
-mod dicom_serde;
 
-use std::collections::HashMap;
-use std::path::Path;
-use dicom::object::{DefaultDicomObject, open_file, StandardDataDictionary};
-use dicom::core::{DataDictionary, DataElement, Tag};
+use std::collections::{BTreeMap, HashMap};
+use dicom::object::{DefaultDicomObject, StandardDataDictionary};
+use dicom::core::{DataDictionary, Tag};
 use anyhow::{Context, Result};
 use dicom::dictionary_std::tags;
 use std::path::PathBuf;
@@ -13,7 +11,7 @@ use std::str::FromStr;
 use clap::Parser;
 use dicom::object::mem::InMemElement;
 use glob::glob;
-use serde::{Serialize, Serializer};
+use crate::db::IntoDbValue;
 
 
 #[derive(Parser)]
@@ -49,36 +47,6 @@ fn extract<'a>(obj:&'a DefaultDicomObject, requested:HashMap<&str,Tag>) -> Resul
     Ok(ret)
 }
 
-// fn read_dicom<P>(filename:P, instance_extract:HashMap<&str,Tag>, series_extract:HashMap<&str,Tag>, study_extract:HashMap<&str,Tag>)
-//     -> Result<InstanceEntry> where P:AsRef<Path>
-// {
-//     let obj = open_file(filename)?;
-//     let instance_meta = extract(&obj, instance_extract)?;
-//     let series_meta = extract(&obj, series_extract)?;
-//     let study_meta = extract(&obj, study_extract)?;
-//
-//     Ok(InstanceEntry {
-//         instance : Entry{
-//             uid: obj.element(tags::SOP_INSTANCE_UID)?.to_str()?.to_string(),
-//             meta: instance_meta.into_iter()
-//                 .map(|(k,v)|(k,v.cloned()))
-//                 .collect()
-//         },
-//         series: Entry {
-//             uid:obj.element(tags::SERIES_INSTANCE_UID)?.to_str()?.to_string(),
-//             meta: series_meta.into_iter()
-//                 .map(|(k,v)|(k,v.cloned()))
-//                 .collect()
-//         },
-//         study : Entry{
-//             uid:obj.element(tags::STUDY_INSTANCE_UID)?.to_str()?.to_string(),
-//             meta: study_meta.into_iter()
-//                 .map(|(k,v)|(k,v.cloned()))
-//                 .collect()
-//         },
-//     })
-// }
-
 #[tokio::main]
 async fn main() -> Result<()>
 {
@@ -89,14 +57,13 @@ async fn main() -> Result<()>
     for entry in glob(pattern).expect("Failed to read glob pattern") {
         match entry {
             Ok(path) => {
-                let obj = async_store::read_file(path).await?;
-                let uid = &*obj.element(tags::SOP_INSTANCE_UID)?.to_str()?;
-                let extracted = extract_by_name(&obj,vec!["OperatorsName"])?;
-                match db::register(uid,extracted).await {
-                    Ok(_) => {}
-                    Err(e) => {println!("Failed to register {uid}:{e}")}
-                }
-
+                let file = async_store::read_file(path.clone()).await?;
+                let extracted:BTreeMap<_,_> =
+                    extract_by_name(&file,vec!["OperatorsName"])?.into_iter()
+                        .map(|(k,v)|{(k,v.cloned().into_db_value())})
+                        .collect();
+                let uid = file.element(tags::SOP_INSTANCE_UID)?.to_str()?;
+                db::register_instance(uid.as_ref(),extracted).await?;
             },
             Err(e) => println!("{e:?}")
         }
