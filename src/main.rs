@@ -11,6 +11,7 @@ use std::str::FromStr;
 use clap::Parser;
 use dicom::object::mem::InMemElement;
 use glob::glob;
+use surrealdb::sql;
 use crate::db::IntoDbValue;
 
 
@@ -47,6 +48,18 @@ fn extract<'a>(obj:&'a DefaultDicomObject, requested:HashMap<&str,Tag>) -> Resul
     Ok(ret)
 }
 
+fn prepare_meta_for_db(obj:&DefaultDicomObject, names: Vec<&str>, table:&str, id_tag:Tag) -> Result<BTreeMap<String,sql::Value>>{
+    let id = obj.element(id_tag)?.to_str()?;
+    let meta:BTreeMap<_,_> =
+        extract_by_name(obj,names)?.into_iter()
+            .map(|(k,v)|{(k,v.cloned().into_db_value())})
+            .chain([
+                (String::from("id"),sql::Value::Thing(sql::Thing::from((table,id.as_ref()))))
+            ])
+            .collect();
+    Ok(meta)
+}
+
 #[tokio::main]
 async fn main() -> Result<()>
 {
@@ -58,12 +71,12 @@ async fn main() -> Result<()>
         match entry {
             Ok(path) => {
                 let file = async_store::read_file(path.clone()).await?;
-                let extracted:BTreeMap<_,_> =
-                    extract_by_name(&file,vec!["OperatorsName"])?.into_iter()
-                        .map(|(k,v)|{(k,v.cloned().into_db_value())})
-                        .collect();
-                let uid = file.element(tags::SOP_INSTANCE_UID)?.to_str()?;
-                db::register_instance(uid.as_ref(),extracted).await?;
+
+                let instance_meta = prepare_meta_for_db(&file,vec![],"instances",tags::SOP_INSTANCE_UID)?;
+                let series_meta = prepare_meta_for_db(&file,vec![],"series",tags::SERIES_INSTANCE_UID)?;
+                let study_meta = prepare_meta_for_db(&file,vec!["OperatorsName"],"studies",tags::STUDY_INSTANCE_UID)?;
+
+                db::register_instance(instance_meta,series_meta,study_meta).await?;
             },
             Err(e) => println!("{e:?}")
         }
