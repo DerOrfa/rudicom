@@ -2,6 +2,8 @@ mod async_store;
 mod db;
 
 use std::collections::{BTreeMap, HashMap};
+use std::io;
+use std::io::Write;
 use dicom::object::{DefaultDicomObject, StandardDataDictionary};
 use dicom::core::{DataDictionary, Tag};
 use anyhow::{Context, Result};
@@ -11,8 +13,10 @@ use std::str::FromStr;
 use clap::Parser;
 use dicom::object::mem::InMemElement;
 use glob::glob;
+use serde_json::Value;
 use surrealdb::sql;
 use crate::db::IntoDbValue;
+
 
 
 #[derive(Parser)]
@@ -76,10 +80,16 @@ async fn main() -> Result<()>
                 let series_meta = prepare_meta_for_db(&file,vec![],"series",tags::SERIES_INSTANCE_UID)?;
                 let study_meta = prepare_meta_for_db(&file,vec!["OperatorsName"],"studies",tags::STUDY_INSTANCE_UID)?;
 
-                db::register_instance(instance_meta,series_meta,study_meta).await?;
+                match db::register_query(instance_meta, series_meta, study_meta).await? {
+                    Value::Null => print!("#"),
+                    Value::Object(_) => print!("."),
+                    _ => print!("-")
+                };
+                io::stdout().flush().unwrap();
             },
             Err(e) => println!("{e:?}")
         }
     }
+    println!("");
     Ok(())
 }
