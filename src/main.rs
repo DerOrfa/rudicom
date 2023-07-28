@@ -80,7 +80,7 @@ async fn main() -> Result<()>
                 let series_meta = prepare_meta_for_db(&file,vec![],"series",tags::SERIES_INSTANCE_UID)?;
                 let study_meta = prepare_meta_for_db(&file,vec!["OperatorsName"],"studies",tags::STUDY_INSTANCE_UID)?;
 
-                match db::register_query(instance_meta, series_meta, study_meta).await? {
+                match db::register_manual(instance_meta, series_meta, study_meta).await? {
                     Value::Null => print!("#"),
                     Value::Object(_) => print!("."),
                     _ => print!("-")
