@@ -68,6 +68,7 @@ fn prepare_meta_for_db(obj:&DefaultDicomObject, names: Vec<&str>, table:&str, id
 async fn main() -> Result<()>
 {
     let args = Cli::parse();
+    let mut tasks=tokio::task::JoinSet::new();
     db::init("ws://localhost:8000").await.context(format!("Failed connecting to ws://localhost:8000"))?;
 
     let pattern = args.filename.to_str().expect("Invalid string");
@@ -80,15 +81,19 @@ async fn main() -> Result<()>
                 let series_meta = prepare_meta_for_db(&file,vec![],"series",tags::SERIES_INSTANCE_UID)?;
                 let study_meta = prepare_meta_for_db(&file,vec!["OperatorsName"],"studies",tags::STUDY_INSTANCE_UID)?;
 
-                match db::register_manual(instance_meta, series_meta, study_meta).await? {
-                    Value::Null => print!("#"),
-                    Value::Object(_) => print!("."),
-                    _ => print!("-")
-                };
-                io::stdout().flush().unwrap();
+                tasks.spawn(db::register_manual(instance_meta, series_meta, study_meta));
             },
             Err(e) => println!("{e:?}")
         }
+    }
+
+    while let Some(res) = tasks.join_next().await {
+        match res?? {
+            Value::Null => print!("#"),
+            Value::Object(_) => print!("."),
+            _ => print!("-")
+        }
+        io::stdout().flush().unwrap();
     }
     println!("");
     Ok(())
