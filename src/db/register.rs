@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use surrealdb::{Connection, Surreal, Result, Error};
-use crate::db::{DbVal, Entry};
+use surrealdb::{Connection, Surreal, Result};
+use crate::db::{DbVal, Entry, JsonValue};
 
 pub async fn register<C>(db:&Surreal<C>,
 						 instance_meta:BTreeMap<String,DbVal>,
@@ -20,7 +20,7 @@ pub async fn register<C>(db:&Surreal<C>,
 
 async fn touch_relate<C>(db:&Surreal<C>,container:&Entry,contained:&Entry) -> Result<()> where C: Connection {
 	if contained.created {
-		let result = db.query("if SELECT <-contains FROM $contained then [] else RELATE $container->contains->$contained return none end")
+		let result = db.query("RELATE $container->contains->$contained return none")
 			.bind(("contained",contained.id.clone()))
 			.bind(("container",container.id.clone()))
 			.await?.check()?;
@@ -31,19 +31,15 @@ async fn touch_entry<C>(db:&Surreal<C>,mut data:BTreeMap<String,DbVal>) -> Resul
 	let DbVal::Thing(id) = data.remove("id").expect("Data is missing \"id\"")
 		else {panic!("\"id\" in data is not an id")};
 
-	match db.create(id.clone()).content(data).await
-	{
-		Ok(data) => Ok(Entry { id, data, created: true }),
-		Err(e) => match e {
-			Error::Api(ref apierr) => match apierr {
-				surrealdb::error::Api::Query(_) => Ok(Entry {
-					id: id.clone(),
-					data: db.select(id.clone()).await?,
-					created: false,
-				}),
-				_ => Err(e)
-			},
-			_ => Err(e)
-		}
-	}
+	let mut res= db
+		.query("if select id from $id then [False,select * from $id] else [True,create $id content $data] end")
+		.bind(("id",id.clone()))
+		.bind(("data",data))
+		.await?.check()?;
+	let query_ret:Vec<JsonValue> = res.take(0)?;
+	Ok(Entry{
+		id,
+		data: query_ret.get(1).unwrap().get(0).unwrap().clone(),
+		created: query_ret.get(0).unwrap().as_bool().unwrap(),
+	})
 }

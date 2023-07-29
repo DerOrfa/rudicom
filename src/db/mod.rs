@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::opt::IntoQuery;
 use surrealdb::Surreal;
 use surrealdb::sql::Value as DbVal;
 pub(crate) use serde_json::Value as JsonValue;

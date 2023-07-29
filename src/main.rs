@@ -68,15 +68,19 @@ async fn main() -> Result<()>
     let mut tasks=tokio::task::JoinSet::new();
     db::init("ws://localhost:8000").await.context(format!("Failed connecting to ws://localhost:8000"))?;
 
+    let study_meta_fields = vec!["StudyTime", "StudyDate", "StudyDescription", "OperatorsName", "ManufacturerModelName"];
+    let series_meta_fields = vec!["ProtocolName", "SequenceName", "SeriesDate", "SeriesTime", "SeriesDescription", "SeriesNumber"];
+    let instance_meta_fields = vec!["InstanceCreationDate", "InstanceCreationTime", "InstanceNumber"];
+
     let pattern = args.filename.to_str().expect("Invalid string");
     for entry in glob(pattern).expect("Failed to read glob pattern") {
         match entry {
             Ok(path) => {
                 let file = async_store::read_file(path.clone()).await?;
 
-                let instance_meta = prepare_meta_for_db(&file,vec![],"instances",tags::SOP_INSTANCE_UID)?;
-                let series_meta = prepare_meta_for_db(&file,vec![],"series",tags::SERIES_INSTANCE_UID)?;
-                let study_meta = prepare_meta_for_db(&file,vec!["OperatorsName"],"studies",tags::STUDY_INSTANCE_UID)?;
+                let instance_meta = prepare_meta_for_db(&file,instance_meta_fields.clone(),"instances",tags::SOP_INSTANCE_UID)?;
+                let series_meta = prepare_meta_for_db(&file, series_meta_fields.clone(), "series", tags::SERIES_INSTANCE_UID)?;
+                let study_meta = prepare_meta_for_db(&file, study_meta_fields.clone(), "studies", tags::STUDY_INSTANCE_UID)?;
 
                 tasks.spawn(db::register(instance_meta, series_meta, study_meta));
             },
@@ -84,14 +88,7 @@ async fn main() -> Result<()>
         }
     }
 
-    while let Some(res) = tasks.join_next().await {
-        if res??.is_created() {
-            print!("#");
-        } else {
-            print!(".");
-        }
-        io::stdout().flush().unwrap();
-    }
+    while let Some(_) = tasks.join_next().await { }
     println!("");
     Ok(())
 }
