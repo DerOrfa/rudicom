@@ -13,11 +13,8 @@ use std::str::FromStr;
 use clap::Parser;
 use dicom::object::mem::InMemElement;
 use glob::glob;
-use serde_json::Value;
 use surrealdb::sql;
 use crate::db::IntoDbValue;
-
-
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -81,17 +78,17 @@ async fn main() -> Result<()>
                 let series_meta = prepare_meta_for_db(&file,vec![],"series",tags::SERIES_INSTANCE_UID)?;
                 let study_meta = prepare_meta_for_db(&file,vec!["OperatorsName"],"studies",tags::STUDY_INSTANCE_UID)?;
 
-                tasks.spawn(db::register_manual(instance_meta, series_meta, study_meta));
+                tasks.spawn(db::register(instance_meta, series_meta, study_meta));
             },
             Err(e) => println!("{e:?}")
         }
     }
 
     while let Some(res) = tasks.join_next().await {
-        match res?? {
-            Value::Null => print!("#"),
-            Value::Object(_) => print!("."),
-            _ => print!("-")
+        if res??.is_created() {
+            print!("#");
+        } else {
+            print!(".");
         }
         io::stdout().flush().unwrap();
     }

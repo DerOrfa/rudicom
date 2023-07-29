@@ -7,8 +7,7 @@ use surrealdb::sql::Value as DbVal;
 pub(crate) use serde_json::Value as JsonValue;
 
 mod into_db_value;
-mod register_query;
-mod register_manual;
+mod register;
 
 pub(crate) use into_db_value::IntoDbValue;
 
@@ -26,20 +25,18 @@ impl Into<JsonValue> for Entry{
 	}
 }
 
-pub async fn register_query(
-	instance_meta:BTreeMap<String,DbVal>,
-	series_meta:BTreeMap<String,DbVal>,
-	study_meta: BTreeMap<String, DbVal>
-) -> surrealdb::Result<serde_json::Value>{
-	register_query::register_query(&DB,instance_meta,series_meta,study_meta).await
+impl Entry{
+	pub fn is_created(&self) -> bool{
+		self.created
+	}
 }
 
-pub async fn register_manual(
+pub async fn register(
 	instance_meta:BTreeMap<String,DbVal>,
 	series_meta:BTreeMap<String,DbVal>,
 	study_meta: BTreeMap<String, DbVal>
-) -> surrealdb::Result<serde_json::Value>{
-	register_manual::register_manual(&DB,instance_meta,series_meta,study_meta).await
+) -> surrealdb::Result<Entry>{
+	register::register(&DB, instance_meta, series_meta, study_meta).await
 }
 
 pub async fn init(addr:&str) -> surrealdb::Result<()>{
