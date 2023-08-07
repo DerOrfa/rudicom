@@ -2,8 +2,6 @@ mod async_store;
 mod db;
 
 use std::collections::{BTreeMap, HashMap};
-use std::io;
-use std::io::Write;
 use dicom::object::{DefaultDicomObject, StandardDataDictionary};
 use dicom::core::{DataDictionary, Tag};
 use anyhow::{Context, Result};

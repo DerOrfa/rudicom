@@ -1,45 +1,41 @@
 use std::collections::BTreeMap;
 use surrealdb::{Connection, Surreal, Result};
-use crate::db::{DbVal, Entry, JsonValue};
+use surrealdb::opt::IntoQuery;
+use surrealdb::sql::Statement;
+use surrealdb::sql::Value::Thing;
+use crate::db::{DbVal, JsonValue};
+use once_cell::sync::Lazy;
+
+static INSERT_STUDY:Lazy<Vec<Statement>> =
+	Lazy::new(||"INSERT INTO studies $study_meta return before".into_query().unwrap());
+static INSERT_SERIES:Lazy<Vec<Statement>> =
+	Lazy::new(||"INSERT INTO series $series_meta return before".into_query().unwrap());
+static INSERT_INSTANCE:Lazy<Vec<Statement>> =
+	Lazy::new(||"INSERT INTO instances $instance_meta return before".into_query().unwrap());
 
 pub async fn register<C>(db:&Surreal<C>,
-						 instance_meta:BTreeMap<String,DbVal>,
-						 series_meta:BTreeMap<String,DbVal>,
+						 mut instance_meta:BTreeMap<String,DbVal>,
+						 mut series_meta:BTreeMap<String,DbVal>,
 						 study_meta: BTreeMap<String, DbVal>
-) -> Result<Entry>
+) -> Result<JsonValue>
 	where C: Connection
 {
-	let study = touch_entry(db,study_meta).await?;
-	let series= touch_entry(db,series_meta).await?;
-	let instance=touch_entry(db,instance_meta).await?;
+	let Thing(study_id) = study_meta.get("id").expect("Study data is missing \"id\"").clone()
+		else {panic!("\"id\" in study data is not an id")};
+	let Thing(series_id) = series_meta.get("id").expect("Series data is missing \"id\"").clone()
+		else {panic!("\"id\" in series data is not an id")};
 
-	touch_relate(db,&study,&series).await?;
-	touch_relate(db,&series, &instance).await?;
-	Ok(instance)
-}
-
-async fn touch_relate<C>(db:&Surreal<C>,container:&Entry,contained:&Entry) -> Result<()> where C: Connection {
-	if contained.created {
-		let result = db.query("RELATE $container->contains->$contained return none")
-			.bind(("contained",contained.id.clone()))
-			.bind(("container",container.id.clone()))
-			.await?.check()?;
-	}
-	Ok(())
-}
-async fn touch_entry<C>(db:&Surreal<C>,mut data:BTreeMap<String,DbVal>) -> Result<Entry> where C: Connection{
-	let DbVal::Thing(id) = data.remove("id").expect("Data is missing \"id\"")
-		else {panic!("\"id\" in data is not an id")};
+	instance_meta.insert("series".into(),Thing(series_id));
+	series_meta.insert("study".into(),Thing(study_id));
 
 	let mut res= db
-		.query("if select id from $id then [False,select * from $id] else [True,create $id content $data] end")
-		.bind(("id",id.clone()))
-		.bind(("data",data))
+		.query(INSERT_STUDY.clone())
+		.query(INSERT_SERIES.clone())
+		.query(INSERT_INSTANCE.clone())
+		.bind(("instance_meta",instance_meta))
+		.bind(("series_meta",series_meta))
+		.bind(("study_meta",study_meta))
 		.await?.check()?;
-	let query_ret:Vec<JsonValue> = res.take(0)?;
-	Ok(Entry{
-		id,
-		data: query_ret.get(1).unwrap().get(0).unwrap().clone(),
-		created: query_ret.get(0).unwrap().as_bool().unwrap(),
-	})
+	let instance = res.take::<Vec<JsonValue>>(2)?.remove(0);
+	Ok(instance)
 }
