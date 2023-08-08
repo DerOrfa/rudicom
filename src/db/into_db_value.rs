@@ -82,8 +82,8 @@ impl IntoDbValue for InMemElement{
 	fn into_db_value(self) -> DbVal {
 		match self.into_value() {
 			Primitive(p) => p.into_db_value(),
-			Sequence { items: objects, ..}  =>
-				flatten_iter(objects.into_iter().map(|o|o.clone().into_db_value())),
+			Sequence (s)  =>
+				flatten_iter(s.into_items().iter().map(|o|o.clone().into_db_value())),
 			_ => {todo!()}
 		}
 	}
