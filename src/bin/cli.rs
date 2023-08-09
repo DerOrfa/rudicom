@@ -1,19 +1,29 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser,Subcommand};
 use rudicom::{db,config,file::import_glob};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    // file or globbing to open
-    filename: PathBuf,
+    #[command(subcommand)]
+    command: Commands,
     // config file
+    #[arg(long)]
     config: Option<PathBuf>,
     // url of the database to connect to
-    #[arg(default_value_t = String::from("ws://localhost:8000"))]
+    #[arg(long,default_value_t = String::from("ws://localhost:8000"))]
     database: String,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// import files
+    Import {
+        // file or globbing to open
+        pattern: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -23,7 +33,11 @@ async fn main() -> Result<()>
     config::init(args.config)?;
     db::init(args.database.as_str()).await.context(format!("Failed connecting to {}",args.database))?;
 
-    let pattern = args.filename.to_str().expect("Invalid string");
-    import_glob(pattern).await;
+    match &args.command {
+        Commands::Import{pattern} => {
+            let pattern = pattern.to_str().expect("Invalid string");
+            import_glob(pattern).await;
+        }
+    }
     Ok(())
 }
