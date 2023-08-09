@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 use surrealdb::{Connection, Surreal, Result};
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql::Statement;
-use surrealdb::sql::Value::Thing;
+use surrealdb::sql::{Statement,Value::Thing};
 use crate::db::{DbVal, JsonValue};
 use once_cell::sync::Lazy;
 
