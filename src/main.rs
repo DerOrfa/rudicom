@@ -1,6 +1,7 @@
 mod db;
 mod dcm;
 mod file;
+mod config;
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -19,6 +20,7 @@ struct Cli {
 async fn main() -> Result<()>
 {
     let args = Cli::parse();
+    config::init(None)?;
     db::init("ws://localhost:8000").await.context(format!("Failed connecting to ws://localhost:8000"))?;
 
     let pattern = args.filename.to_str().expect("Invalid string");

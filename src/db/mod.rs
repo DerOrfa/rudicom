@@ -15,7 +15,7 @@ use crate::dcm::{extract};
 
 static DB: Surreal<Any> = Surreal::init();
 
-pub fn prepare_meta_for_db(obj:&DefaultDicomObject, attrs: Vec<(&str, Tag)>, table:&str, id_tag:Tag) -> anyhow::Result<BTreeMap<String,DbVal>>{
+pub fn prepare_meta_for_db(obj:&DefaultDicomObject, attrs: Vec<(String, Tag)>, table:&str, id_tag:Tag) -> anyhow::Result<BTreeMap<String,DbVal>>{
 	let id = obj.element(id_tag)?.to_str()?;
 	let extracted = extract(obj,attrs);
 	let meta:BTreeMap<_,_> = extracted.into_iter()

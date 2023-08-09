@@ -3,33 +3,27 @@ use std::str::FromStr;
 use dicom::core::{DataDictionary, Tag};
 use dicom::object::{DefaultDicomObject, StandardDataDictionary, mem::InMemElement};
 use once_cell::sync::Lazy;
+use crate::config;
 
-pub static INSTACE_TAGS:Lazy<Vec<(&str, Tag)>> = Lazy::new(
-	||get_attr_list(vec!["InstanceCreationDate", "InstanceCreationTime", "InstanceNumber"])
-);
-pub static SERIES_TAGS:Lazy<Vec<(&str, Tag)>> = Lazy::new(
-	||get_attr_list(vec!["ProtocolName", "SequenceName", "SeriesDate", "SeriesTime", "SeriesDescription", "SeriesNumber"])
-);
-pub static STUDY_TAGS:Lazy<Vec<(&str, Tag)>> = Lazy::new(
-	||get_attr_list(vec!["StudyTime", "StudyDate", "StudyDescription", "OperatorsName", "ManufacturerModelName"])
-);
+pub static INSTACE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags"));
+pub static SERIES_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("series_tags"));
+pub static STUDY_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("study_tags"));
 
-fn get_attr_list(names:Vec<&str>) -> Vec<(&str,Tag)>{
-	let mut request = Vec::new();
-	for name in names{
-		let tag = StandardDataDictionary::default()
-			.by_name(name)
-			.map(|t|t.tag.inner())
-			.or_else(||Tag::from_str(name).ok());
-		match tag {
-			None => {eprintln!("No tag found for {name}");}
-			Some(t) => {request.push((name, t));}
-		}
-	}
-	request
+fn get_attr_list(config_key:&str) -> Vec<(String,Tag)>
+{
+	config::get::<Vec<String>>(config_key).unwrap().into_iter()
+		.filter_map(|name|{
+			let tag = StandardDataDictionary::default()
+				.by_name(name.as_str())
+				.map(|t|t.tag.inner())
+				.or_else(||Tag::from_str(name.as_str()).ok());
+			if tag.is_none(){eprintln!("No tag found for {name}");}
+			tag.map(|t|(name, t))
+		})
+		.collect()
 }
 
-pub fn extract<'a,'b>(obj:&'a DefaultDicomObject, requested:Vec<(&'b str,Tag)>) -> BTreeMap<&'b str,Option<&'a InMemElement>>
+pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> BTreeMap<String, Option<&InMemElement>>
 {
 	requested.into_iter()
 		.map(|(name,tag)|(name,obj.element_opt(tag).unwrap()))
