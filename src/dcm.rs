@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
 use std::str::FromStr;
 use dicom::core::{DataDictionary, Tag};
-use dicom::object::{DefaultDicomObject, StandardDataDictionary, mem::InMemElement};
+use dicom::object::{DefaultDicomObject, StandardDataDictionary};
 use once_cell::sync::Lazy;
 use crate::config;
+use crate::db::{DbVal, IntoDbValue};
 
 pub static INSTACE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags"));
 pub static SERIES_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("series_tags"));
@@ -23,9 +23,10 @@ fn get_attr_list(config_key:&str) -> Vec<(String,Tag)>
 		.collect()
 }
 
-pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> BTreeMap<String, Option<&InMemElement>>
+pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> Vec<(String, DbVal)>
 {
 	requested.into_iter()
 		.map(|(name,tag)|(name,obj.element_opt(tag).unwrap()))
+		.map(|(k,v)|(k,v.cloned().into_db_value()))
 		.collect()
 }

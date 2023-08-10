@@ -1,21 +1,15 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use anyhow::anyhow;
-use dicom::dictionary_std::tags;
 use glob::glob;
 use md5::Context;
-use crate::db;
-use crate::dcm::{INSTACE_TAGS,SERIES_TAGS,STUDY_TAGS};
+use crate::{db, register_instance};
 
 mod async_store;
 
 pub async fn register_file(path:PathBuf) -> anyhow::Result<db::JsonValue>{
 	let mut md5=Context::new();
 	let file = async_store::read_file(path.clone(),Some(&mut md5)).await?;
-
-	let mut instance_meta = db::prepare_meta_for_db(&file,INSTACE_TAGS.clone(),"instances",tags::SOP_INSTANCE_UID)?;
-	let series_meta = db::prepare_meta_for_db(&file, SERIES_TAGS.clone(), "series", tags::SERIES_INSTANCE_UID)?;
-	let study_meta = db::prepare_meta_for_db(&file, STUDY_TAGS.clone(), "studies", tags::STUDY_INSTANCE_UID)?;
 
 	let path = path.to_str().ok_or(anyhow!("Failed to encode filename in UTF-8"))?;
 
@@ -24,10 +18,7 @@ pub async fn register_file(path:PathBuf) -> anyhow::Result<db::JsonValue>{
 		("owned".into(),false.into()),
 		("md5".into(),format!("{:x}", md5.compute()).into())
 	]);
-
-	instance_meta.insert(String::from("file"),fileinfo.into());
-
-	Ok(db::register(instance_meta,series_meta,study_meta).await?)
+	register_instance(file,vec![("file".into(),fileinfo.into())]).await
 }
 
 pub async fn import_glob(pattern:&str){
