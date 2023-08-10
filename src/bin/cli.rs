@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use clap::{Parser,Subcommand};
-use rudicom::{db,config,file::import_glob};
+use rudicom::{db, config, file::import_glob,tools};
+use surrealdb::sql::thing;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -19,11 +20,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// import files
     Import {
         // file or globbing to open
         pattern: PathBuf,
     },
+    Remove{
+        // database id of the object to delete
+        id:String
+    }
 }
 
 #[tokio::main]
@@ -37,6 +41,10 @@ async fn main() -> Result<()>
         Commands::Import{pattern} => {
             let pattern = pattern.to_str().expect("Invalid string");
             import_glob(pattern).await;
+        }
+        Commands::Remove {id} => {
+            let id=thing(id).context(format!("Failed to parse database id {id}"))?;
+            tools::remove::remove(id).await?;
         }
     }
     Ok(())

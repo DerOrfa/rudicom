@@ -16,7 +16,7 @@ fn mem_write(obj:&DefaultDicomObject) -> Result<Cursor<Vec<u8>>>{
 	Ok(out)
 }
 
-pub async fn write_file(path:PathBuf, obj:&DefaultDicomObject)->Result<()>{
+pub async fn write_file(path:&PathBuf, obj:&DefaultDicomObject)->Result<()>{
 	let mut file = File::create(path).await?;
 	let data= mem_write(obj)?.into_inner();
 	file.write_all(data.as_slice()).await?;

@@ -9,7 +9,10 @@ static CONFIG:Lazy<RwLock<Config>> = Lazy::new(||RwLock::new(Config::default()))
 static CONFIG_STR:&str = r#"
 instace_tags = ["InstanceCreationDate", "InstanceCreationTime", "InstanceNumber"]
 series_tags = ["ProtocolName", "SequenceName", "SeriesDate", "SeriesTime", "SeriesDescription", "SeriesNumber"]
-study_tags = ["StudyTime", "StudyDate", "StudyDescription", "OperatorsName", "ManufacturerModelName"]
+study_tags = ["PatientID", "StudyTime", "StudyDate", "StudyDescription", "OperatorsName", "ManufacturerModelName"]
+
+filename_pattern = "{PatientID}/{StudyDate}_{StudyTime}/S{SeriesNumber}_{SeriesDescription}/Mr.{SOPInstanceUID}.ima"
+storage_path = "/tmp/test"
 "#;
 
 pub fn init(config_file:Option<PathBuf>) -> anyhow::Result<()>{

@@ -5,7 +5,7 @@ use glob::glob;
 use md5::Context;
 use crate::{db, register_instance};
 
-mod async_store;
+pub mod async_store;
 
 pub async fn register_file(path:PathBuf) -> anyhow::Result<db::JsonValue>{
 	let mut md5=Context::new();
@@ -18,7 +18,7 @@ pub async fn register_file(path:PathBuf) -> anyhow::Result<db::JsonValue>{
 		("owned".into(),false.into()),
 		("md5".into(),format!("{:x}", md5.compute()).into())
 	]);
-	register_instance(file,vec![("file".into(),fileinfo.into())]).await
+	register_instance(&file,vec![("file".into(),fileinfo.into())],None).await
 }
 
 pub async fn import_glob(pattern:&str){

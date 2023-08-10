@@ -1,8 +1,10 @@
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::Surreal;
+use surrealdb::{Surreal,Result};
 pub(crate) use surrealdb::sql::Value as DbVal;
 pub(crate) use serde_json::Value as JsonValue;
+use surrealdb::opt::IntoQuery;
+use surrealdb::sql::Thing;
 
 mod into_db_value;
 mod register;
@@ -12,7 +14,23 @@ pub(crate) use register::register;
 
 static DB: Surreal<Any> = Surreal::init();
 
-pub async fn init(addr:&str) -> surrealdb::Result<()>{
+pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
+{
+	let qry=format!("select array::flatten({target}) as id from $id").into_query()?;
+	let res:Option<Vec<Thing>>=DB
+		.query(qry.clone())
+		.bind(("id",id))
+		.await?.check()?
+		.take("id")?;
+	Ok(res.unwrap_or(Vec::new()))
+}
+
+pub async fn unregister(id:Thing) -> Result<Option<JsonValue>>
+{
+	DB.delete(id).await
+}
+
+pub async fn init(addr:&str) -> Result<()>{
 	DB.connect(addr).await?;
 
 	// Signin as a namespace, database, or root user

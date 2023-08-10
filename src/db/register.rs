@@ -26,6 +26,6 @@ pub async fn register(
 		.bind(("series_meta",series_meta))
 		.bind(("study_meta",study_meta))
 		.await?.check()?;
-	let instance = res.take::<Vec<JsonValue>>(2)?.remove(0);
+	let instance = res.take::<Option<JsonValue>>(2)?.unwrap_or(JsonValue::Null);
 	Ok(instance)
 }

@@ -61,8 +61,8 @@ impl IntoDbValue for PrimitiveValue {
 					datetime.to_chrono_datetime().unwrap().with_timezone(&chrono::Utc)
 				)
 			),
-			Str(s) => s.into(),
-			Strs(s) => flatten_iter(s.into_iter()),
+			Str(s) => s.trim().into(),
+			Strs(s) => flatten_iter(s.into_iter().map(|s|String::from(s.trim()))),
 			F32(values) => flatten_iter(values.into_iter()),
 			F64(values) => flatten_iter(values.into_iter()),
 			U64(values) => flatten_iter(values.into_iter()),
