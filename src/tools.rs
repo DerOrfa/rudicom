@@ -4,6 +4,7 @@ pub mod remove;
 use std::any::type_name;
 use std::path::PathBuf;
 use anyhow::{anyhow, Context};
+use dicom::object::DefaultDicomObject;
 use serde::de::DeserializeOwned;
 use surrealdb::sql::Thing;
 pub use remove::remove;
@@ -11,6 +12,21 @@ pub use store::store;
 use crate::{JsonMap, storage};
 use crate::dcm::complete_filepath;
 
+
+pub async fn get_instance_dicom(id:&str) -> anyhow::Result<DefaultDicomObject>
+{
+	let mut map=lookup_instance_file(id).await.context("looking up fileinfo failed")?;
+	let path:String = map_extract(&mut map,"path")?;
+	let checksum:String=map_extract(&mut map, "md5")?;
+	let path=match map_extract(&mut map,"owned")? {
+		true => complete_filepath(path),
+		false => PathBuf::from(path)
+	};
+	let mut md5=md5::Context::new();
+	let obj=storage::async_store::read_file(path,Some(&mut md5)).await?;
+	if format!("{:x}", md5.compute()) == checksum{Ok(obj)}
+	else {Err(anyhow!(r#"found checksum '{}' doesn't fit the data"#,checksum))}
+}
 pub async fn lookup_instance_file(id:&str) -> anyhow::Result<JsonMap>
 {
 	use serde_json::Value::{Null,Object};

@@ -50,6 +50,7 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>{
 		.route("/instances/",post(handler::store_instance))
 		.route("/instances/:id/json",get(handler::get_instance_json))
 		.route("/instances/:id/file",get(handler::get_instance_file))
+		.route("/instances/:id/png",get(handler::get_instance_png))
 		;
 
 	// run it
