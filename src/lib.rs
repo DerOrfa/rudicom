@@ -8,7 +8,7 @@ use surrealdb::sql::Thing;
 
 pub mod db;
 pub mod dcm;
-pub mod file;
+pub mod storage;
 pub mod config;
 pub mod tools;
 pub mod server;

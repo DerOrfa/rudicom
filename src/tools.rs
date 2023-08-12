@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use surrealdb::sql::Thing;
 pub use remove::remove;
 pub use store::store;
-use crate::JsonMap;
+use crate::{JsonMap, storage};
 use crate::dcm::complete_filepath;
 
 pub async fn lookup_instance_file(id:&str) -> anyhow::Result<JsonMap>

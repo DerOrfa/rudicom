@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Parser,Subcommand};
 use rudicom::server;
-use rudicom::{db, config, file::import_glob,tools};
+use rudicom::{db, config, tools};
 use surrealdb::sql::thing;
 
 #[derive(Parser)]
@@ -50,7 +50,7 @@ async fn main() -> Result<()>
         }
         Commands::Import{pattern} => {
             let pattern = pattern.to_str().expect("Invalid string");
-            import_glob(pattern).await;
+            rudicom::storage::import_glob(pattern).await;
         }
         Commands::Remove {id} => {
             let id=thing(id.as_str()).context(format!("Failed to parse database id {id}"))?;
