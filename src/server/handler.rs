@@ -14,6 +14,12 @@ use super::{JsonError,TextError};
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, store};
 use crate::JsonVal;
 
+pub(crate) async fn get_instance(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
+{
+	query_for_entry(("instances",id.as_str()).into()).await
+		.map(|v|Json(v)).map_err(|e|e.into())
+}
+
 pub async fn store_instance(bytes:Bytes) -> Response {
 	let mut md5=md5::Context::new();
 	let obj= async_store::read(bytes,Some(&mut md5)).unwrap();
@@ -47,8 +53,10 @@ pub(crate) async fn get_instance_file(Path(id):Path<String>) -> Result<Response,
 
 pub(crate) async fn get_instance_json(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
 {
-	query_for_entry(("instances",id.as_str()).into()).await
-		.map(|v|Json(v)).map_err(|e|e.into())
+	let obj=get_instance_dicom(id.as_str()).await?;
+	dicom_json::to_value(obj)
+		.map(|v|Json(v))
+		.map_err(|e|e.into())
 }
 
 pub(crate) async fn get_instance_png(Path(id):Path<String>) -> Result<Response,TextError>
