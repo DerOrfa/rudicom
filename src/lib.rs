@@ -1,7 +1,7 @@
 use dicom::object::DefaultDicomObject;
 pub use surrealdb::sql::Value as DbVal;
-pub use serde_json::Value as JsonValue;
-pub type JsonMap = serde_json::map::Map<String,JsonValue>;
+pub use serde_json::Value as JsonVal;
+pub type JsonMap = serde_json::map::Map<String,JsonVal>;
 use anyhow::Result;
 use dicom::dictionary_std::tags;
 use surrealdb::sql::Thing;
@@ -34,7 +34,7 @@ impl Drop for RegistryGuard
 	}
 }
 
-pub async fn register_instance(obj:&DefaultDicomObject,add_meta:Vec<(String,DbVal)>,guard:Option<&mut RegistryGuard>) -> Result<JsonValue>
+pub async fn register_instance(obj:&DefaultDicomObject,add_meta:Vec<(String,DbVal)>,guard:Option<&mut RegistryGuard>) -> Result<JsonVal>
 {
 	let instance_id = obj.element(tags::SOP_INSTANCE_UID)?.to_str()?;
 	let series_id = obj.element(tags::SERIES_INSTANCE_UID)?.to_str()?;

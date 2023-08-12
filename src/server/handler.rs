@@ -1,7 +1,6 @@
 use std::io::Cursor;
 use axum::body::Bytes;
 use axum::response::{IntoResponse, Response};
-use serde_json::{Value, Value as JsonValue};
 use axum::http::{header, StatusCode};
 use axum::Json;
 use axum::extract::Path;
@@ -12,15 +11,15 @@ use dicom_pixeldata::image::ImageOutputFormat;
 use crate::db::query_for_entry;
 use crate::storage::async_store;
 use super::{JsonError,TextError};
-use crate::tools;
-use crate::tools::{get_instance_dicom, lookup_instance_filepath};
+use crate::tools::{get_instance_dicom, lookup_instance_filepath, store};
+use crate::JsonVal;
 
 pub async fn store_instance(bytes:Bytes) -> Response {
 	let mut md5=md5::Context::new();
 	let obj= async_store::read(bytes,Some(&mut md5)).unwrap();
-	match tools::store(obj,md5.compute()).await.unwrap() {
-		Value::Null => (StatusCode::CREATED).into_response(),
-		Value::Object(ob) => (StatusCode::FOUND,Json(ob)).into_response(),
+	match store(obj,md5.compute()).await.unwrap() {
+		JsonVal::Null => (StatusCode::CREATED).into_response(),
+		JsonVal::Object(ob) => (StatusCode::FOUND,Json(ob)).into_response(),
 		_ => (StatusCode::INTERNAL_SERVER_ERROR).into_response()
 	}
 }
@@ -46,7 +45,7 @@ pub(crate) async fn get_instance_file(Path(id):Path<String>) -> Result<Response,
 	}
 }
 
-pub(crate) async fn get_instance_json(Path(id):Path<String>) -> Result<Json<JsonValue>,JsonError>
+pub(crate) async fn get_instance_json(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
 {
 	query_for_entry(("instances",id.as_str()).into()).await
 		.map(|v|Json(v)).map_err(|e|e.into())

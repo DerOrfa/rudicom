@@ -3,7 +3,7 @@ use surrealdb::Result;
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql::Statement;
 use crate::db::DB;
-use crate::{DbVal,JsonValue};
+use crate::{DbVal,JsonVal};
 use once_cell::sync::Lazy;
 
 static INSERT_STUDY:Lazy<Vec<Statement>> =
@@ -17,7 +17,7 @@ pub async fn register(
 	instance_meta:BTreeMap<String,DbVal>,
 	series_meta:BTreeMap<String,DbVal>,
 	study_meta: BTreeMap<String, DbVal>
-) -> Result<JsonValue>
+) -> Result<JsonVal>
 {
 	let mut res= DB
 		.query(INSERT_STUDY.clone())
@@ -27,6 +27,6 @@ pub async fn register(
 		.bind(("series_meta",series_meta))
 		.bind(("study_meta",study_meta))
 		.await?.check()?;
-	let instance = res.take::<Option<JsonValue>>(2)?.unwrap_or(JsonValue::Null);
+	let instance = res.take::<Option<JsonVal>>(2)?.unwrap_or(JsonVal::Null);
 	Ok(instance)
 }

@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use anyhow::anyhow;
 use glob::glob;
 use md5::Context;
-use crate::{DbVal, JsonValue, register_instance};
+use crate::{DbVal, JsonVal, register_instance};
 
 pub mod async_store;
 
-pub async fn register_file(path:PathBuf) -> anyhow::Result<JsonValue>{
+pub async fn register_file(path:PathBuf) -> anyhow::Result<JsonVal>{
 	let mut md5=Context::new();
 	let file = async_store::read_file(path.clone(),Some(&mut md5)).await?;
 

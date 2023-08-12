@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result};
 use dicom::object::DefaultDicomObject;
 use crate::{DbVal, register_instance, RegistryGuard};
-use crate::JsonValue;
+use crate::JsonVal;
 use crate::dcm::{complete_filepath, gen_filepath};
 use crate::storage::async_store::write_file;
 
-pub async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result<JsonValue>
+pub async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result<JsonVal>
 {
 	let path = gen_filepath(&obj);
 	let fileinfo:BTreeMap<String,DbVal>= BTreeMap::from([
