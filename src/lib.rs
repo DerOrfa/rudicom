@@ -1,5 +1,7 @@
 use dicom::object::DefaultDicomObject;
-use crate::db::{DbVal, JsonValue};
+pub use surrealdb::sql::Value as DbVal;
+pub use serde_json::Value as JsonValue;
+pub type JsonMap = serde_json::map::Map<String,JsonValue>;
 use anyhow::Result;
 use dicom::dictionary_std::tags;
 use surrealdb::sql::Thing;
@@ -9,6 +11,7 @@ pub mod dcm;
 pub mod file;
 pub mod config;
 pub mod tools;
+pub mod server;
 
 use dcm::extract;
 use crate::dcm::{INSTACE_TAGS,SERIES_TAGS,STUDY_TAGS};

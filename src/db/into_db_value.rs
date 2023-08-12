@@ -4,7 +4,7 @@ use dicom::core::chrono;
 use dicom::object::mem::InMemElement;
 use dicom::core::value::Value::{Primitive,Sequence};
 use dicom::object::{InMemDicomObject, StandardDataDictionary};
-use crate::db::DbVal;
+use crate::DbVal;
 
 fn flatten_iter<T,I>(iter:I) -> DbVal
 	where I:Iterator<Item=T>, T:Into<DbVal>, T:Clone

@@ -4,10 +4,11 @@ use dicom::core::{DataDictionary, Tag};
 use dicom::object::{DefaultDicomObject, StandardDataDictionary};
 use once_cell::sync::Lazy;
 use crate::config;
-use crate::db::{DbVal, IntoDbValue};
+use crate::db::IntoDbValue;
 use runtime_format::{FormatArgs, FormatKey, FormatKeyError};
 use core::fmt;
 use std::borrow::Cow;
+use crate::DbVal;
 
 pub static INSTACE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags"));
 pub static SERIES_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("series_tags"));
@@ -43,13 +44,15 @@ pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> Vec<(S
 		.collect()
 }
 
-pub fn gen_filepath(obj:&DefaultDicomObject) -> PathBuf
+pub fn complete_filepath(path:String) -> PathBuf
 {
 	let root:PathBuf = config::get("storage_path").expect(r#""storage_path" missing or invalid in config"#);
+	root.join(path)
+}
+pub fn gen_filepath(obj:&DefaultDicomObject) -> String
+{
 	let pattern:String = config::get("filename_pattern").expect(r#""filename_pattern"  missing or invalid in config"#);
-	root.join(
-		FormatArgs::new(pattern.as_str(),&DicomAdapter(obj)).to_string()
-	)
+	FormatArgs::new(pattern.as_str(),&DicomAdapter(obj)).to_string()
 }
 
 impl<'a> FormatKey for DicomAdapter<'a> {

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use surrealdb::sql::Thing;
 use anyhow::{anyhow, bail, Result};
+use serde_json::Value::Object;
 use tokio::fs::{remove_file,remove_dir};
 use crate::db::{query_for_list, unregister};
 
@@ -19,7 +20,7 @@ pub async fn remove(id:Thing) -> Result<()>{
 
 async fn remove_instance(id:Thing) -> Result<()>
 {
-	if let Some(removed)=unregister(id).await?{
+	if let Object(removed)=unregister(id).await?{
 		let file = removed.get("file")
 			.ok_or(anyhow!("missing file data in deleted instance"))?;
 		let owned = file.get("owned").map_or(false,|v|v.as_bool().unwrap());

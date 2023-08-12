@@ -1,7 +1,9 @@
+use std::net::SocketAddr;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use clap::{Parser,Subcommand};
+use rudicom::server;
 use rudicom::{db, config, file::import_glob,tools};
 use surrealdb::sql::thing;
 
@@ -20,6 +22,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    Server {
+        // ip and port to listen on
+        #[arg(default_value_t = SocketAddr::from(([127, 0, 0, 1], 3000)))]
+        adress: SocketAddr,
+    },
     Import {
         // file or globbing to open
         pattern: PathBuf,
@@ -37,13 +44,16 @@ async fn main() -> Result<()>
     config::init(args.config)?;
     db::init(args.database.as_str()).await.context(format!("Failed connecting to {}",args.database))?;
 
-    match &args.command {
+    match args.command {
+        Commands::Server{adress} => {
+            server::serve(adress).await?;
+        }
         Commands::Import{pattern} => {
             let pattern = pattern.to_str().expect("Invalid string");
             import_glob(pattern).await;
         }
         Commands::Remove {id} => {
-            let id=thing(id).context(format!("Failed to parse database id {id}"))?;
+            let id=thing(id.as_str()).context(format!("Failed to parse database id {id}"))?;
             tools::remove::remove(id).await?;
         }
     }

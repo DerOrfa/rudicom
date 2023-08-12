@@ -1,10 +1,9 @@
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::{Surreal,Result};
-pub(crate) use surrealdb::sql::Value as DbVal;
-pub(crate) use serde_json::Value as JsonValue;
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql::Thing;
+use crate::JsonValue;
 
 mod into_db_value;
 mod register;
@@ -25,9 +24,16 @@ pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
 	Ok(res.unwrap_or(Vec::new()))
 }
 
-pub async fn unregister(id:Thing) -> Result<Option<JsonValue>>
+pub async fn query_for_entry(id:Thing) -> Result<JsonValue>
 {
-	DB.delete(id).await
+	let res:Option<JsonValue> = DB.select(id).await?;
+	Ok(res.unwrap_or(JsonValue::Null))
+}
+
+pub async fn unregister(id:Thing) -> Result<JsonValue>
+{
+	let res:Option<JsonValue> = DB.delete(id).await?;
+	Ok(res.unwrap_or(JsonValue::Null))
 }
 
 pub async fn init(addr:&str) -> Result<()>{

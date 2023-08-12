@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use surrealdb::Result;
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql::Statement;
-use crate::db::{DB, DbVal, JsonValue};
+use crate::db::DB;
+use crate::{DbVal,JsonValue};
 use once_cell::sync::Lazy;
 
 static INSERT_STUDY:Lazy<Vec<Statement>> =
