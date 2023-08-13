@@ -19,6 +19,7 @@ pub async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result<JsonVa
 	let registered = register_instance(&obj,vec![("file".into(),fileinfo.into())],Some(&mut guard)).await?;
 	if registered.is_null() {
 		let path = complete_filepath(path);
+		tokio::fs::create_dir_all(path.parent().unwrap()).await?;
 		write_file(&path,&obj,None).await.context(format!("Failed to write file {}",path.display()))?;
 		guard.reset();//all good, we can drop the guard
 	}

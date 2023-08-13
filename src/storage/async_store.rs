@@ -6,14 +6,13 @@ use md5::Context;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt,AsyncReadExt};
 
-pub fn read<T>(input: T, with_md5:Option<&mut Context>) -> Result<DefaultDicomObject>
-	where T:AsRef<[u8]>
+pub fn read<T>(input: T, with_md5:Option<&mut Context>) -> Result<DefaultDicomObject> where T:AsRef<[u8]>
 {
 	let mut buffer = Cursor::new(input);
 	if let Some( md5) = with_md5{
 		std::io::copy(&mut buffer,md5).unwrap();
 	}
-	buffer.seek(SeekFrom::Start(128)).unwrap(); // preamble
+	buffer.seek(SeekFrom::Start(128))?; // preamble
 	Ok(from_reader(buffer)?)
 }
 

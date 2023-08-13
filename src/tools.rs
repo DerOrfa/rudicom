@@ -13,9 +13,10 @@ use crate::{JsonMap, storage};
 use crate::dcm::complete_filepath;
 
 
-pub async fn get_instance_dicom(id:&str) -> anyhow::Result<DefaultDicomObject>
+pub async fn get_instance_dicom(id:&str) -> anyhow::Result<Option<DefaultDicomObject>>
 {
 	let mut map=lookup_instance_file(id).await.context("looking up fileinfo failed")?;
+	if map.is_empty(){return Ok(None);}
 	let path:String = map_extract(&mut map,"path")?;
 	let checksum:String=map_extract(&mut map, "md5")?;
 	let path=match map_extract(&mut map,"owned")? {
@@ -24,7 +25,7 @@ pub async fn get_instance_dicom(id:&str) -> anyhow::Result<DefaultDicomObject>
 	};
 	let mut md5=md5::Context::new();
 	let obj=storage::async_store::read_file(path,Some(&mut md5)).await?;
-	if format!("{:x}", md5.compute()) == checksum{Ok(obj)}
+	if format!("{:x}", md5.compute()) == checksum{Ok(Some(obj))}
 	else {Err(anyhow!(r#"found checksum '{}' doesn't fit the data"#,checksum))}
 }
 pub async fn lookup_instance_file(id:&str) -> anyhow::Result<JsonMap>
@@ -33,7 +34,7 @@ pub async fn lookup_instance_file(id:&str) -> anyhow::Result<JsonMap>
 	let id = Thing::from(("instances",id));
 	match crate::db::query_for_entry(id.clone()).await.context(format!("failed looking up {}",id))?
 	{
-		Null => {Err(anyhow!(r#""file" missing in entry instance:{}"#,id))}
+		Null => {Ok(JsonMap::default())}
 		Object(mut res) => {
 			match res.remove("file").ok_or(anyhow!(r#""file" missing in entry instance:{}"#,id))?
 			{
@@ -45,15 +46,16 @@ pub async fn lookup_instance_file(id:&str) -> anyhow::Result<JsonMap>
 	}
 }
 
-pub async fn lookup_instance_filepath(id:&str) -> anyhow::Result<PathBuf>
+pub async fn lookup_instance_filepath(id:&str) -> anyhow::Result<Option<PathBuf>>
 {
 	let mut map=lookup_instance_file(id).await.context("looking up fileinfo failed")?;
+	if map.is_empty() {return Ok(None);}
 	let owned:bool = map_extract(&mut map,"owned")?;
 	let path:String = map_extract(&mut map,"path")?;
 	if owned {
-		Ok(complete_filepath(path))
+		Ok(Some(complete_filepath(path)))
 	} else {
-		Ok(PathBuf::from(path))
+		Ok(Some(PathBuf::from(path)))
 	}
 }
 
