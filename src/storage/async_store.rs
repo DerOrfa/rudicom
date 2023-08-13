@@ -26,6 +26,7 @@ pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut Context>) -> Result<C
 		out.seek(SeekFrom::Start(0))?;
 		std::io::copy(&mut out,md5).unwrap();
 	}
+	out.seek(SeekFrom::Start(0))?;
 	Ok(out)
 }
 
