@@ -11,6 +11,7 @@ pub(crate) struct TextError(anyhow::Error);
 impl IntoResponse for TextError {
 	fn into_response(self) -> Response
 	{
+		tracing::error!("Internal error {} reportet (root cause {})",self.0,self.0.root_cause());
 		(
 			StatusCode::INTERNAL_SERVER_ERROR,
 			format!("{:#}", self.0)
@@ -29,6 +30,7 @@ impl IntoResponse for JsonError {
 		let chain:Vec<_>=self.0.chain().into_iter()
 			.map(|e|e.to_string())
 			.collect();
+		tracing::error!("Internal error {} reported (root cause {})",self.0,self.0.root_cause());
 		(StatusCode::INTERNAL_SERVER_ERROR,Json(chain)).into_response()
 	}
 }
