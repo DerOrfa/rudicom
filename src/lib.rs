@@ -1,10 +1,11 @@
 use dicom::object::DefaultDicomObject;
-pub use surrealdb::sql::Value as DbVal;
-pub use serde_json::Value as JsonVal;
-pub type JsonMap = serde_json::map::Map<String,JsonVal>;
-pub use anyhow::Result;
 use dicom::dictionary_std::tags;
 use surrealdb::sql::Thing;
+
+pub use surrealdb::sql::Value as DbVal;
+pub use anyhow::Result;
+pub use serde_json::Value as JsonVal;
+pub type JsonMap = serde_json::map::Map<String,JsonVal>;
 
 pub mod db;
 pub mod dcm;

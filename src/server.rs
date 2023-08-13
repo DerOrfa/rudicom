@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing;
+use crate::{config, db};
 
 mod handler;
 
@@ -58,6 +59,8 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>{
 
 	// run it
 	tracing::info!("listening on {}", at);
+	tracing::info!("database is {}",db::version().await?);
+	tracing::info!("storage path is {}",config::get::<String>("storage_path")?);
 	axum::Server::bind(&at)
 		.serve(app.into_make_service())
 		.await

@@ -83,3 +83,8 @@ pub async fn init(addr:&str) -> Result<()>{
 	Ok(())
 }
 
+pub async fn version() -> Result<String>
+{
+	Ok(format!("{}",DB.version().await?))
+}
+
