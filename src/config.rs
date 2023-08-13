@@ -12,7 +12,7 @@ series_tags = ["ProtocolName", "SequenceName", "SeriesDate", "SeriesTime", "Seri
 study_tags = ["PatientID", "StudyTime", "StudyDate", "StudyDescription", "OperatorsName", "ManufacturerModelName"]
 
 filename_pattern = "{PatientID}/{StudyDate}_{StudyTime}/S{SeriesNumber}_{SeriesDescription}/Mr.{SOPInstanceUID}.ima"
-storage_path = "/tmp/test"
+storage_path = "/tmp/test" #will be use if filename_pattern does not result in an absolute path
 "#;
 
 pub fn init(config_file:Option<PathBuf>) -> anyhow::Result<()>{

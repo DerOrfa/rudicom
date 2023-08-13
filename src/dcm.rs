@@ -8,6 +8,7 @@ use crate::db::IntoDbValue;
 use runtime_format::{FormatArgs, FormatKey, FormatKeyError};
 use core::fmt;
 use std::borrow::Cow;
+use dicom::core::header::HasLength;
 use crate::DbVal;
 
 pub static INSTACE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags"));
@@ -59,9 +60,17 @@ impl<'a> FormatKey for DicomAdapter<'a> {
 	fn fmt(&self, key: &str, f: &mut fmt::Formatter<'_>) -> Result<(), FormatKeyError> {
 		if let Some(key) = find_tag(key){
 			let val= self.0.element_opt(key).unwrap()
-				.map_or(Cow::from("<<none>>"),|e|e.to_str()
-					.unwrap_or(Cow::from("<<invalid>>")));
+				.map_or(Cow::from("<<none>>"),|e|
+					if e.is_empty(){
+						Cow::from("<<empty>>")
+					} else {
+						e.to_str().unwrap_or(Cow::from("<<invalid>>"))
+					}
+				);
 			write!(f,"{}",val).map_err(FormatKeyError::Fmt)
-		} else {Err(FormatKeyError::UnknownKey)}
+		}
+		else {
+			Err(FormatKeyError::UnknownKey)
+		}
 	}
 }
