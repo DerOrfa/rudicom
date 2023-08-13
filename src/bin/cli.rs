@@ -1,10 +1,22 @@
 use std::net::SocketAddr;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
+use clap::ValueHint::{DirPath,Hostname};
 
-use clap::{Parser,Subcommand};
+use clap::{Args, Parser, Subcommand};
 use rudicom::server;
 use rudicom::{db, config};
+
+#[derive(Args,Debug)]
+#[group(required = true, multiple = false)]
+struct Endpoint{
+    /// hostname of the database
+    #[arg(long, value_hint = Hostname)]
+    database: Option<String>,
+    /// filename for the local database
+    #[arg(long, value_hint = DirPath)]
+    file:Option<PathBuf>
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -14,9 +26,8 @@ struct Cli {
     /// config file
     #[arg(long)]
     config: Option<PathBuf>,
-    /// url of the database to connect to
-    #[arg(long,default_value_t = String::from("ws://localhost:8000"))]
-    database: String,
+    #[command(flatten)]
+    endpoint: Endpoint
 }
 
 #[derive(Subcommand)]
@@ -29,7 +40,7 @@ enum Commands {
     Server {
         /// ip and port to listen on
         #[arg(default_value_t = SocketAddr::from(([127, 0, 0, 1], 3000)))]
-        adress: SocketAddr,
+        address: SocketAddr,
     },
     /// import (big chunks of) data from the filesystem
     Import {
@@ -47,11 +58,17 @@ async fn main() -> Result<()>
 {
     let args = Cli::parse();
     config::init(args.config)?;
-    db::init(args.database.as_str()).await.context(format!("Failed connecting to {}",args.database))?;
+    if let Some(database) = args.endpoint.database{
+        db::init_remote(database.as_str()).await.context(format!("Failed connecting to {}", database))?;
+    } else if let Some(file) = args.endpoint.file {
+        db::init_local(file.as_path()).await.context(format!("Failed opening {}", file.to_string_lossy()))?;
+    } else {
+        bail!("No data backend, go away..")
+    }
 
     match args.command {
-        Commands::Server{adress} => {
-            server::serve(adress).await?;
+        Commands::Server{address} => {
+            server::serve(address).await?;
         }
         Commands::Import{pattern} => {
             let pattern = pattern.to_str().expect("Invalid string");

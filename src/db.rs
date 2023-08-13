@@ -1,3 +1,5 @@
+use std::path::Path;
+use anyhow::anyhow;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::{Surreal,Result};
@@ -36,12 +38,20 @@ pub async fn unregister(id:Thing) -> Result<JsonVal>
 	Ok(res.unwrap_or(JsonVal::Null))
 }
 
-pub async fn init(addr:&str) -> Result<()>{
+pub async fn init_local(file:&Path) -> anyhow::Result<()>
+{
+	let file = format!("file://{}",file.to_str().ok_or(anyhow!(r#""{}" is an invalid filename"#,file.to_string_lossy()))?);
+	DB.connect(file).await?;
+	init().await.map_err(|e|e.into())
+}
+pub async fn init_remote(addr:&str) -> Result<()> {
 	DB.connect(addr).await?;
 
 	// Signin as a namespace, database, or root user
 	DB.signin(Root { username: "root", password: "root", }).await?;
-
+	init().await
+}
+async fn init() -> Result<()>{
 	// Select a specific namespace / database
 	DB.use_ns("namespace").use_db("database").await?;
 
