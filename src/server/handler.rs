@@ -2,7 +2,7 @@ use std::io::Cursor;
 use axum::response::{IntoResponse, Response};
 use axum::http::{header, StatusCode};
 use axum::Json;
-use axum::extract::{Path};
+use axum::extract::{Path,Multipart};
 use axum_extra::body::AsyncReadBody;
 use anyhow::{anyhow, Context};
 use axum::body::Bytes;
@@ -29,6 +29,18 @@ pub(crate) async fn store_instance(bytes:Bytes) -> Result<Response,JsonError> {
 		JsonVal::Object(ob) => Ok((StatusCode::FOUND,Json(ob)).into_response()),
 		_ => Err(anyhow!("Unexpected reply from the database").into())
 	}
+}
+
+pub(crate) async fn store_multi_instance(mut multipart: Multipart) -> Result<Json<Vec<JsonVal>>,JsonError> {
+	let mut stored = Vec::new();
+	while let Ok(Some(field)) = multipart.next_field().await {
+
+		let mut md5=md5::Context::new();
+		let bytes=field.bytes().await?;
+		let obj= async_store::read(bytes,Some(&mut md5)).unwrap();
+		stored.push(store(obj,md5.compute()).await?);
+	}
+	Ok(Json(stored))
 }
 
 pub(crate) async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> {

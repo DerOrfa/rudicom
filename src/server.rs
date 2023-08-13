@@ -48,6 +48,7 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>{
 	// build our application with a route
 	let app = Router::new()
 		.route("/instances",post(handler::store_instance))
+		.route("/instances/multi",post(handler::store_multi_instance))
 		.route("/instances/:id",get(handler::get_instance))
 		.route("/instances/:id/json",get(handler::get_instance_json))
 		.route("/instances/:id/file",get(handler::get_instance_file))
