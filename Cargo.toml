@@ -30,4 +30,4 @@ futures-lite = "1.13"
 [profile.release]
 strip = true
 lto = false #fix geo-bug
-
+#codegen-units = 1
