@@ -1,17 +1,16 @@
 use std::io::Cursor;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Response,Json};
 use axum::http::{header, StatusCode};
-use axum::Json;
-use axum::extract::{BodyStream, Path};
+use axum::extract::{Path,rejection::BytesRejection};
 use axum_extra::body::AsyncReadBody;
 use anyhow::{anyhow, Context};
+use axum::body::Bytes;
 use dicom::pixeldata::PixelDecoder;
 use dicom_pixeldata::image::ImageOutputFormat;
 use crate::db::query_for_entry;
 use super::{JsonError, TextError};
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, store};
 use crate::JsonVal;
-use futures_lite::StreamExt;
 use crate::storage::async_store;
 
 pub(crate) async fn get_instance(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
@@ -20,12 +19,8 @@ pub(crate) async fn get_instance(Path(id):Path<String>) -> Result<Json<JsonVal>,
 		.map(|v|Json(v)).map_err(|e|e.into())
 }
 
-pub(crate) async fn store_instance(mut stream:BodyStream) -> Result<Response,JsonError> {
-	let mut bytes=Vec::<u8>::new();
-	while let Some(chunk) = stream.next().await {
-		let mut chunk = Vec::from(chunk?.as_ref());
-		bytes.append(&mut chunk);
-	}
+pub(crate) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
+	let bytes = payload?;
 	if bytes.is_empty(){return Err(anyhow!("Ignoring empty upload").into())}
 	let mut md5= md5::Context::new();
 	let obj= async_store::read(bytes,Some(&mut md5))?;

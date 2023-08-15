@@ -1,5 +1,6 @@
 use axum::{Json, Router, routing::{get, post}};
 use std::net::SocketAddr;
+use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -55,6 +56,9 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>{
 		.route("/instances/:id/json",get(handler::get_instance_json))
 		.route("/instances/:id/file",get(handler::get_instance_file))
 		.route("/instances/:id/png",get(handler::get_instance_png))
+		.layer(DefaultBodyLimit::max(
+			config::get::<usize>("upload_sizelimit_mb").unwrap_or(10)*1024*1024
+		))
 		;
 
 	// run it
