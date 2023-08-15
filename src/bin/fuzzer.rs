@@ -1,42 +1,68 @@
 use std::io;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 use reqwest;
 use clap::Parser;
 use dicom::dictionary_std::tags;
 use dicom::core::PrimitiveValue;
 use dicom::object::{DefaultDicomObject, Tag};
-use reqwest::{Body, Client};
+use once_cell::sync::Lazy;
+use reqwest::{Body, Client, RequestBuilder};
+use tokio::time::interval;
 use rudicom::storage::async_store::read_file;
 use rudicom::Result;
 
-static INSTACE_FACTOR:u32=100;
+#[derive(Default)]
+struct UploadInfo {
+	count:std::sync::atomic::AtomicUsize,
+	size:std::sync::atomic::AtomicU64,
+}
+static UPLOAD_INFO:Lazy<UploadInfo>=
+	Lazy::new(|| UploadInfo::default());
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
 	// url of the server to connect to
 	#[arg(long,default_value_t = String::from("http://localhost:3000"))]
 	server: String,
+	/// how many instances to send per series (10 studies with 10 series each will be sent)
+	#[arg(default_value = "100")]
+	instances:u32
 }
 
-async fn send_instance(obj:DefaultDicomObject,url:&str) -> Result<()>{
+async fn status_update()
+{
+	let mut interval = interval(Duration::from_millis(100));
+	let mut last_cnt= UPLOAD_INFO.count.load(Ordering::Relaxed);
+
+	loop {
+		interval.tick().await; // ticks immediately
+		let new_cnt= UPLOAD_INFO.count.load(Ordering::Relaxed);
+		let uploads_per_sec=(new_cnt-last_cnt)*10;
+		last_cnt=new_cnt;
+		let bytes:usize = uploads_per_sec* UPLOAD_INFO.size.load(Ordering::Relaxed) as usize;
+		print!("\r{} uploads {}MB/s",new_cnt,bytes/(1024*1024));
+		io::stdout().flush().unwrap();
+	}
+}
+
+async fn send_instance(obj:DefaultDicomObject,req:RequestBuilder) -> Result<()>{
 	let buffer=rudicom::storage::async_store::write(&obj,None)?.into_inner();
 
-	let request = Client::new()
-		.post(url)
-		.body(Body::from(buffer));
-
-	request.send().await?.error_for_status()?;
-	print!(".");
-	io::stdout().flush().unwrap();
+	req.body(Body::from(buffer)).send().await?.error_for_status()?;
+	UPLOAD_INFO.count.fetch_add(1, Ordering::Relaxed);
 	Ok(())
 }
 
-fn set_tag(obj:&mut DefaultDicomObject,new_val:String,tag:Tag) -> Result<()>
+fn set_tag<T,const M:usize>(obj:&mut DefaultDicomObject,new_vals:[T;M],tag:Tag) -> Result<()> where T:ToString
 {
 	let mut e=obj.take_element(tag).unwrap();
-	let mut vals:Vec<_>=e.to_str()?.split('.').map(|s|s.to_string()).collect();
-	*vals.last_mut().unwrap()=new_val;
+	let vals:Vec<_>=e.to_str()?.split('.').map(|s|s.to_string()).collect();
+	let mut vals = Vec::from(vals.split_at(vals.len()-M).0);
+	vals.extend(new_vals.into_iter().map(|v|v.to_string()));
 	e.update_value(|v|
 		*v.primitive_mut().unwrap()=PrimitiveValue::from(vals.join("."))
 	);
@@ -44,35 +70,40 @@ fn set_tag(obj:&mut DefaultDicomObject,new_val:String,tag:Tag) -> Result<()>
 	Ok(())
 }
 
-async fn modify_and_send(mut copy:DefaultDicomObject,instance:u32, series:u32, study:u32, url:String) -> Result<()>
+async fn modify_and_send(mut copy:DefaultDicomObject, instance:u32, series:u32, study:u32, req: RequestBuilder) -> Result<()>
 {
-	set_tag(&mut copy, (study*10*INSTACE_FACTOR+series*INSTACE_FACTOR+instance).to_string(), tags::SOP_INSTANCE_UID)?;
-	set_tag(&mut copy, (study*10+series).to_string(), tags::SERIES_INSTANCE_UID)?;
-	set_tag(&mut copy, study.to_string(), tags::STUDY_INSTANCE_UID)?;
+	set_tag(&mut copy, [study,series,instance], tags::SOP_INSTANCE_UID)?;
+	set_tag(&mut copy, [study,series], tags::SERIES_INSTANCE_UID)?;
+	set_tag(&mut copy, [study], tags::STUDY_INSTANCE_UID)?;
 
-	send_instance(copy, url.as_str()).await
+	send_instance(copy, req).await
 }
 
 #[tokio::main]
 async fn main() -> Result<()>
 {
 	let path=PathBuf::from("assets/MR000000.IMA");
+	UPLOAD_INFO.size.store(std::fs::metadata(&path)?.len(), Ordering::Relaxed);
 	let artifact=read_file(path,None).await?;
 	let mut tasks=tokio::task::JoinSet::new();
 
+
 	let args = Cli::parse();
-	let url = args.server.clone() + "/instances";
+	let request = Client::new().post(args.server.clone() + "/instances");
+	tokio::spawn(status_update());
 	for study in 0..10 {
 		for series in 0..10 {
-			for instance in 0..INSTACE_FACTOR
+			for instance in 0..args.instances
 			{
-				tasks.spawn(modify_and_send(artifact.clone(),instance,series,study,url.clone()));
+				tasks.spawn(
+					modify_and_send(artifact.clone(),instance,series,study,request.try_clone().unwrap())
+				);
 				while tasks.len() > 10 {
 					tasks.join_next().await.unwrap()??;
 				}
 			}
 		}
 	}
-	while let Some(t) = tasks.join_next().await {}
+	while let Some(_) = tasks.join_next().await {}
 	Ok(())
 }
