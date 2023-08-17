@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 use anyhow::{Result,anyhow};
 use serde_json::Map;
 use tokio::task::JoinError;
@@ -12,20 +12,20 @@ pub(crate) enum ImportResult {
 	Existed{filename:String,existed:Map<String,JsonVal>},
 	Err{filename:String,error:anyhow::Error}
 }
-async fn import_file(path:PathBuf) -> ImportResult
+async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 {
-	let filename= path.to_string_lossy().to_string();
-	match register_file(path.to_owned()).await{
+	let filename= path.as_ref().to_string_lossy().to_string();
+	match register_file(path.as_ref()).await{
 		Ok(v) => match v {
 			JsonVal::Null => ImportResult::Registered{ filename },
 			JsonVal::Object(existed) => ImportResult::Existed{ filename,existed },
 			_ => ImportResult::Err{
-				error:anyhow!("Unexpected database reply when storing {}",path.to_string_lossy()),
+				error:anyhow!("Unexpected database reply when storing {}",path.as_ref().to_string_lossy()),
 				filename
 			},
 		},
 		Err(e) => {return ImportResult::Err{
-			error:e.context(format!("when storing {}",path.to_string_lossy())),
+			error:e.context(format!("when storing {}",path.as_ref().to_string_lossy())),
 			filename
 		};}
 	}
