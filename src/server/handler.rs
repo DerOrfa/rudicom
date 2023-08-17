@@ -1,5 +1,5 @@
 use std::io::Cursor;
-use axum::response::{IntoResponse, Response,Json};
+use axum::response::{IntoResponse, Response, Json};
 use axum::http::{header, StatusCode};
 use axum::extract::{Path,rejection::BytesRejection};
 use axum_extra::body::AsyncReadBody;
@@ -10,16 +10,17 @@ use dicom_pixeldata::image::ImageOutputFormat;
 use crate::db::query_for_entry;
 use super::{JsonError, TextError};
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, store};
-use crate::JsonVal;
+use crate::{JsonVal, tools};
 use crate::storage::async_store;
+use futures::StreamExt;
 
-pub(crate) async fn get_instance(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
+pub(super) async fn get_instance(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
 {
 	query_for_entry(("instances",id.as_str()).into()).await
 		.map(|v|Json(v)).map_err(|e|e.into())
 }
 
-pub(crate) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
+pub(super) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
 	let bytes = payload?;
 	if bytes.is_empty(){return Err(anyhow!("Ignoring empty upload").into())}
 	let mut md5= md5::Context::new();
@@ -31,7 +32,7 @@ pub(crate) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Resu
 	}
 }
 
-pub(crate) async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> {
+pub(super) async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> {
 	if let Some(path)=lookup_instance_filepath(id.as_str()).await.context("looking up filepath")?
 	{
 		let file= tokio::fs::File::open(&path).await?;
@@ -51,7 +52,7 @@ pub(crate) async fn get_instance_file(Path(id):Path<String>) -> Result<Response,
 	}
 }
 
-pub(crate) async fn get_instance_json(Path(id):Path<String>) -> Result<Response,JsonError>
+pub(super) async fn get_instance_json(Path(id):Path<String>) -> Result<Response,JsonError>
 {
 	if let Some(obj)=get_instance_dicom(id.as_str()).await?
 	{
@@ -65,7 +66,7 @@ pub(crate) async fn get_instance_json(Path(id):Path<String>) -> Result<Response,
 	}
 }
 
-pub(crate) async fn get_instance_png(Path(id):Path<String>) -> Result<Response,TextError>
+pub(super) async fn get_instance_png(Path(id):Path<String>) -> Result<Response,TextError>
 {
 	if let Some(obj)=get_instance_dicom(id.as_str()).await?
 	{
@@ -82,4 +83,14 @@ pub(crate) async fn get_instance_png(Path(id):Path<String>) -> Result<Response,T
 	{
 		Ok((StatusCode::NOT_FOUND, format!("Instance {} not found", id)).into_response())
 	}
+}
+
+pub(super) async fn import_text(pattern:String) -> Result<Response,TextError>
+{
+	let stream=tools::import::import_glob_as_text(pattern)?
+		.map(|r|match r {
+			Ok(s) => s,
+			Err(e) => format!("Import task panicked:{e}")
+		});
+	Ok(axum_streams::StreamBodyAs::text(stream).into_response())
 }
