@@ -89,7 +89,7 @@ pub(super) async fn import_text(pattern:String) -> Result<Response,TextError>
 {
 	let stream=tools::import::import_glob_as_text(pattern)?
 		.map(|r|match r {
-			Ok(s) => s,
+			Ok(s) => s+"\n",
 			Err(e) => format!("Import task panicked:{e}")
 		});
 	Ok(axum_streams::StreamBodyAs::text(stream).into_response())
