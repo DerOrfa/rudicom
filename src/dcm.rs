@@ -11,9 +11,9 @@ use std::borrow::Cow;
 use dicom::core::header::HasLength;
 use crate::DbVal;
 
-pub static INSTACE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags"));
-pub static SERIES_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("series_tags"));
-pub static STUDY_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("study_tags"));
+pub static INSTACE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags",vec!["InstanceNumber"]));
+pub static SERIES_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("series_tags",vec!["SeriesDescription", "SeriesNumber"]));
+pub static STUDY_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
 
 
 struct DicomAdapter<'a>(&'a DefaultDicomObject);
@@ -26,9 +26,13 @@ pub fn find_tag(name:&str) -> Option<Tag>
 		.or_else(||Tag::from_str(name).ok())
 }
 
-fn get_attr_list(config_key:&str) -> Vec<(String,Tag)>
+fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
 {
-	config::get::<Vec<String>>(config_key).unwrap().into_iter()
+	let mut config=config::get::<Vec<String>>(config_key).unwrap();
+	config.extend(must_have.into_iter().map(|s|s.to_string()));
+	config.sort();
+	config.dedup();
+	config.into_iter()
 		.filter_map(|name|{
 			let tag = find_tag(name.as_str());
 			if tag.is_none(){eprintln!("No tag found for {name}");}
