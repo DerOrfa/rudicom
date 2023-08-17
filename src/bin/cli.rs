@@ -2,10 +2,12 @@ use std::net::SocketAddr;
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 use clap::ValueHint::{DirPath,Hostname};
+use futures::StreamExt;
 
 use clap::{Args, Parser, Subcommand};
 use rudicom::server;
 use rudicom::{db, config};
+use rudicom::tools::import::import_glob_as_text;
 
 #[derive(Args,Debug)]
 #[group(required = true, multiple = false)]
@@ -45,7 +47,7 @@ enum Commands {
     /// import (big chunks of) data from the filesystem
     Import {
         /// file or globbing to import
-        pattern: PathBuf,
+        pattern: String,
     },
     // Remove{
     //     // database id of the object to delete
@@ -71,8 +73,13 @@ async fn main() -> Result<()>
             server::serve(address).await?;
         }
         Commands::Import{pattern} => {
-            let pattern = pattern.to_str().expect("Invalid string");
-            rudicom::storage::import_glob(pattern).await;
+            let mut stream=import_glob_as_text(pattern)?;
+            while let Some(result)=stream.next().await{
+                match result {
+                    Ok(result) => println!("{result}"),
+                    Err(e) => eprintln!("{e}")
+                }
+            }
         }
         // Commands::Remove {id} => {
         //     let id=thing(id.as_str()).context(format!("Failed to parse database id {id}"))?;
