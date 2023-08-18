@@ -8,6 +8,8 @@ use tracing;
 use crate::{config, db};
 
 mod handler;
+pub(crate) mod html;
+pub(crate) mod html_item;
 
 pub(crate) struct TextError(anyhow::Error);
 impl IntoResponse for TextError {
@@ -53,6 +55,8 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>{
 	let app = Router::new()
 		.route("/instances",post(handler::store_instance))
 		.route("/tools/import/text",post(handler::import_text))
+		.route("/studies",get(handler::get_studies))
+		.route("/studies/html",get(handler::get_studies_html))
 		.route("/instances/:id",get(handler::get_instance))
 		.route("/instances/:id/json",get(handler::get_instance_json))
 		.route("/instances/:id/file",get(handler::get_instance_file))

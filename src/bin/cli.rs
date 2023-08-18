@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 use std::net::SocketAddr;
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;

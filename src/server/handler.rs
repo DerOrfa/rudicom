@@ -1,5 +1,6 @@
 use std::io::Cursor;
-use axum::response::{IntoResponse, Response, Json};
+use std::mem::swap;
+use axum::response::{IntoResponse, Response, Json, Html};
 use axum::http::{header, StatusCode};
 use axum::extract::{Path,rejection::BytesRejection};
 use axum_extra::body::AsyncReadBody;
@@ -7,12 +8,36 @@ use anyhow::{anyhow, Context};
 use axum::body::Bytes;
 use dicom::pixeldata::PixelDecoder;
 use dicom_pixeldata::image::ImageOutputFormat;
-use crate::db::query_for_entry;
+use crate::db::{json_id_cleanup, query_for_entry};
 use super::{JsonError, TextError};
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, store};
 use crate::{JsonVal, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
+use html::root::Body;
+use crate::server::html::{make_table, wrap_body};
+
+pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
+{
+	let mut studies = crate::db::list("studies").await?;
+	for study in &mut studies{
+		let series=study.get_mut("series").unwrap();
+		let mut new_series= json_id_cleanup(series)?;
+		swap(series,&mut new_series);
+	}
+	Ok(Json(JsonVal::from(studies)))
+}
+
+pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
+{
+	let table= make_table(crate::db::list("studies").await?,None).await
+		.map_err(|e|e.context("Failed generating the table"))?;
+
+	let mut builder = Body::builder();
+	builder.heading_1(|h|h.text("Studies"));
+	builder.push(table);
+	Ok(Html(wrap_body(builder.build(), "Studies").to_string()))
+}
 
 pub(super) async fn get_instance(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
 {
