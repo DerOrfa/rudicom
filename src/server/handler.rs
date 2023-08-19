@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::mem::swap;
 use axum::response::{IntoResponse, Response, Json, Html};
 use axum::http::{header, StatusCode};
-use axum::extract::{Path,rejection::BytesRejection};
+use axum::extract::{Path, Query, rejection::BytesRejection};
 use axum_extra::body::AsyncReadBody;
 use anyhow::{anyhow, Context};
 use axum::body::Bytes;
@@ -15,6 +16,7 @@ use crate::{JsonVal, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
 use html::root::Body;
+use serde_json::json;
 use crate::server::html::{make_table, wrap_body};
 
 pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
@@ -110,12 +112,34 @@ pub(super) async fn get_instance_png(Path(id):Path<String>) -> Result<Response,T
 	}
 }
 
-pub(super) async fn import_text(pattern:String) -> Result<Response,TextError>
+pub(super) async fn import_text(Query(mut params): Query<HashMap<String, String>>, pattern:String) -> Result<Response,TextError>
 {
-	let stream=tools::import::import_glob_as_text(pattern)?
+	let registered= params.remove("registered").map_or(Ok(false),|s|s.parse::<bool>())?;
+	let existing= params.remove("existing").map_or(Ok(true),|s|s.parse::<bool>())?;
+	if !params.is_empty(){
+		return Err(anyhow!(r#"unrecognized query parameters ("registered" and "existing" are allowed)"#).into());
+	}
+	let stream=tools::import::import_glob_as_text(pattern,registered,existing)?
 		.map(|r|match r {
 			Ok(s) => s+"\n",
 			Err(e) => format!("Import task panicked:{e}")
 		});
 	Ok(axum_streams::StreamBodyAs::text(stream).into_response())
+}
+
+pub(super) async fn import_json(Query(mut params): Query<HashMap<String, String>>,pattern:String) -> Result<Response,JsonError>
+{
+	let registered= params.remove("registered").map_or(Ok(false),|s|s.parse::<bool>())?;
+	let existing= params.remove("existing").map_or(Ok(true),|s|s.parse::<bool>())?;
+	if !params.is_empty(){
+		return Err(anyhow!(r#"unrecognized query parameters ("registered" and "existing" are allowed)"#).into());
+	}
+
+	let stream=tools::import::import_glob(pattern,registered,existing)?
+		.map(|r|match r {
+			Ok(s) => serde_json::to_value(s)
+					.unwrap_or_else(|e|json!({"error":"serialisation failed","cause":format!("{e}")})),
+			Err(e) => json!({"task aborted":format!("{e}")})
+		});
+	Ok(axum_streams::StreamBodyAs::json_array(stream).into_response())
 }

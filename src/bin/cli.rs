@@ -48,6 +48,12 @@ enum Commands {
     },
     /// import (big chunks of) data from the filesystem
     Import {
+        /// report on already existing files
+        #[arg(short,long,default_value_t=false)]
+        existing:bool,
+        /// report on imported files
+        #[arg(short,long,default_value_t=false)]
+        imported:bool,
         /// file or globbing to import
         pattern: String,
     },
@@ -74,8 +80,10 @@ async fn main() -> Result<()>
         Commands::Server{address} => {
             server::serve(address).await?;
         }
-        Commands::Import{pattern} => {
-            let mut stream=import_glob_as_text(pattern)?;
+        Commands::Import{ existing, imported, pattern } => {
+            let stream=import_glob_as_text(pattern,imported,existing)?;
+            //filter doesn't do unpin, so we have to nail it down here
+            let mut stream=Box::pin(stream);
             while let Some(result)=stream.next().await{
                 match result {
                     Ok(result) => println!("{result}"),
