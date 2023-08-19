@@ -1,11 +1,15 @@
+#![recursion_limit = "512"]
+
 use std::net::SocketAddr;
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 use clap::ValueHint::{DirPath,Hostname};
+use futures::StreamExt;
 
 use clap::{Args, Parser, Subcommand};
 use rudicom::server;
 use rudicom::{db, config};
+use rudicom::tools::import::import_glob_as_text;
 
 #[derive(Args,Debug)]
 #[group(required = true, multiple = false)]
@@ -44,8 +48,14 @@ enum Commands {
     },
     /// import (big chunks of) data from the filesystem
     Import {
+        /// report on already existing files
+        #[arg(short,long,default_value_t=false)]
+        existing:bool,
+        /// report on imported files
+        #[arg(short,long,default_value_t=false)]
+        imported:bool,
         /// file or globbing to import
-        pattern: PathBuf,
+        pattern: String,
     },
     // Remove{
     //     // database id of the object to delete
@@ -70,9 +80,16 @@ async fn main() -> Result<()>
         Commands::Server{address} => {
             server::serve(address).await?;
         }
-        Commands::Import{pattern} => {
-            let pattern = pattern.to_str().expect("Invalid string");
-            rudicom::storage::import_glob(pattern).await;
+        Commands::Import{ existing, imported, pattern } => {
+            let stream=import_glob_as_text(pattern,imported,existing)?;
+            //filter doesn't do unpin, so we have to nail it down here
+            let mut stream=Box::pin(stream);
+            while let Some(result)=stream.next().await{
+                match result {
+                    Ok(result) => println!("{result}"),
+                    Err(e) => eprintln!("{e}")
+                }
+            }
         }
         // Commands::Remove {id} => {
         //     let id=thing(id.as_str()).context(format!("Failed to parse database id {id}"))?;

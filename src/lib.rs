@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 use dicom::object::DefaultDicomObject;
 use dicom::dictionary_std::tags;
 use surrealdb::sql::Thing;

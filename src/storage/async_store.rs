@@ -1,5 +1,5 @@
 use std::io::{Cursor, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::Path;
 use dicom::object::{DefaultDicomObject, from_reader};
 use anyhow::Result;
 use md5::Context;
@@ -30,7 +30,8 @@ pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut Context>) -> Result<C
 	Ok(out)
 }
 
-pub async fn write_file(path:&PathBuf, obj:&DefaultDicomObject,with_md5:Option<&mut Context>)->Result<()>{
+pub async fn write_file<T>(path:T, obj:&DefaultDicomObject,with_md5:Option<&mut Context>)->Result<()> where T:AsRef<Path>
+{
 	let mut file = File::create(path).await?;
 	let data= write(obj,with_md5)?.into_inner();
 	file.write_all(data.as_slice()).await?;
@@ -38,7 +39,8 @@ pub async fn write_file(path:&PathBuf, obj:&DefaultDicomObject,with_md5:Option<&
 	Ok(())
 }
 
-pub async fn read_file(path:PathBuf,with_md5:Option<&mut Context>) -> Result<DefaultDicomObject>{
+pub async fn read_file<T>(path:T,with_md5:Option<&mut Context>) -> Result<DefaultDicomObject> where T:AsRef<Path>
+{
 	let mut buffer = Vec::<u8>::new();
 	File::open(path).await?.read_to_end(&mut buffer).await?;
 	read(buffer,with_md5)

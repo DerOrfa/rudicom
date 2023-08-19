@@ -9,7 +9,7 @@ edition = "2021"
 dicom = {version = "0.6", features = ["pixeldata"] }
 dicom-pixeldata = { version = "0.2", features = ["image"] }
 dicom-json = "0.1.0"
-anyhow = "1.0"
+anyhow = {version = "1.0", features = ["backtrace"]}
 clap = { version = "4.3", features = ["derive","color","usage"] }
 serde_json = "1.0"
 surrealdb = {version = "1.0.0-beta.9", features = ["kv-rocksdb","protocol-ws"]}
@@ -17,7 +17,7 @@ serde = "1.0"
 tokio = { version = "1.29", features = ["macros", "rt-multi-thread", "fs"] }
 glob = "0.3"
 once_cell = "1"
-config = {version = "0.13", features = ["toml"]}
+config = {version = "0.13", default-features = false, features = ["toml"]}
 md5 = "0.7.0"
 runtime-format = "0.1.3"
 axum = {version = "0.6", features = ["tracing"]}
@@ -25,7 +25,10 @@ axum-extra = {version = "0.7", features = ["async-read-body"]}
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = "0.11"
-futures-lite = "1.13"
+futures = {version = "0.3", default-features = false}
+axum-streams = {version = "0.9", default-features = false, features = ["text","json"]}
+html = "0.6"
+itertools = "0.11"
 
 [profile.release]
 strip = true

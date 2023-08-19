@@ -1,8 +1,12 @@
+
 use std::path::Path;
 use anyhow::anyhow;
+use crate::server::html_item::HtmlItem;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::{Surreal,Result};
+use surrealdb::Error::Api;
+use surrealdb::error::Api::Query;
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql::Thing;
 use crate::JsonVal;
@@ -26,10 +30,40 @@ pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
 	Ok(res.unwrap_or(Vec::new()))
 }
 
+pub async fn list<T>(table:T) -> Result<Vec<JsonVal>> where T:AsRef<str> {
+	DB.select(table.as_ref()).await
+}
+
 pub async fn query_for_entry(id:Thing) -> Result<JsonVal>
 {
 	let res:Option<JsonVal> = DB.select(id).await?;
 	Ok(res.unwrap_or(JsonVal::Null))
+}
+
+pub async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>
+{
+	let res:Option<Thing> = DB
+		.query(format!("select {} from $id",col.as_ref()))
+		.bind(("id",id.to_owned())).await?.check()?
+		.take(col.as_ref())?;
+	res.ok_or(Api(Query(format!("{} not in {id}",col.as_ref()))))
+}
+
+pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
+{
+	match id.tb.as_str() {
+		"instances" => {
+			let series = query_for_thing(id, "series").await?;
+			let study = query_for_thing(&series, "study").await?;
+			Ok(vec![id.to_owned(),series,study])
+		},
+		"series" => {
+			let study = query_for_thing(id, "study").await?;
+			Ok(vec![id.to_owned(), study])
+		},
+		"studies" => Ok(vec![id.to_owned()]),
+		_ => {Err(Api(Query("invalid db table name when looking for parents".to_string())))}
+	}
 }
 
 pub async fn unregister(id:Thing) -> Result<JsonVal>
@@ -91,6 +125,16 @@ async fn init() -> Result<()>{
 	)
 	"#).await?;
 	Ok(())
+}
+
+pub fn json_id_cleanup(list:&JsonVal) -> anyhow::Result<JsonVal>
+{
+	let list = list.as_array().ok_or(anyhow!("Json value {list} should be an array"))?;
+	let res:anyhow::Result<Vec<_>>=list.into_iter().map(|v|{
+		let id=HtmlItem::try_from(v.to_owned())?;
+		Ok(JsonVal::from(id.to_string()))
+	}).collect();
+	res.map(|list|JsonVal::from(list)).map_err(|e|e.into())
 }
 
 pub async fn version() -> Result<String>
