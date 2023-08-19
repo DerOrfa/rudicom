@@ -16,8 +16,10 @@ use crate::{JsonVal, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
 use html::root::Body;
+use itertools::Itertools;
 use serde_json::json;
 use crate::server::html::{make_table, wrap_body};
+use crate::config;
 
 pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 {
@@ -32,7 +34,11 @@ pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 
 pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 {
-	let table= make_table(crate::db::list("studies").await?,None).await
+	let keys=["StudyDate", "StudyTime"].into_iter().map(|s|s.to_string())
+		.chain(config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
+		.unique()//make sure there are no duplicates
+		.collect();
+	let table= make_table(crate::db::list("studies").await?,"Study".to_string(), keys).await
 		.map_err(|e|e.context("Failed generating the table"))?;
 
 	let mut builder = Body::builder();

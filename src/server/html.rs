@@ -96,7 +96,7 @@ async fn make_nav(entry:Thing) -> Navigation
 		.build()
 }
 
-pub(crate) async fn make_table(list:Vec<JsonVal>, keys:Option<Vec<String>>) -> anyhow::Result<Table>
+pub(crate) async fn make_table(list:Vec<JsonVal>,id_name:String, mut keys:Vec<String>) -> anyhow::Result<Table>
 {
 	// make sure we have a proper list
 	if list.is_empty(){bail!("Empty list")}
@@ -106,13 +106,15 @@ pub(crate) async fn make_table(list:Vec<JsonVal>, keys:Option<Vec<String>>) -> a
 	let list = list?;
 
 	//build header from the keys (defaults taken from first json-object)
-	let keys = keys.unwrap_or(list.first().unwrap().keys().map(|s|s.to_owned()).collect());
 	let mut table_builder =Table::builder();
-	table_builder.table_row(|r|
+	table_builder.table_row(|r|{
+		r.table_header(|c|c.text(id_name));
 		keys.iter().fold(r,|r,key|
 			r.table_header(|c|c.text(key.to_owned()))
-		)
+		)}
 	);
+	//sneak in "id" so we will interate through it (and quiry it) when building the rest of the table
+	keys.insert(0,"id".to_string());
 	//build rest of the table
 	for item in list //rows
 	{

@@ -8,9 +8,9 @@ use crate::Result;
 
 static CONFIG:Lazy<RwLock<Config>> = Lazy::new(||RwLock::new(Config::default()));
 static CONFIG_STR:&str = r#"
-instace_tags = ["InstanceCreationDate", "InstanceCreationTime"] # InstanceNumber will always be there as its needed internally
-series_tags = ["ProtocolName", "SequenceName", "SeriesDate", "SeriesTime"] #SeriesDescription and SeriesNumber will always be there they are needed internally
 study_tags = ["StudyDescription", "OperatorsName", "ManufacturerModelName"] #PatientID, StudyTime and StudyDate will always be there they are needed internally
+series_tags = ["SequenceName", "SeriesDate", "SeriesTime", "ProtocolName"] #SeriesDescription and SeriesNumber will always be there they are needed internally
+instace_tags = ["InstanceCreationDate", "InstanceCreationTime"] # InstanceNumber will always be there as its needed internally
 
 upload_sizelimit_mb = 10
 
