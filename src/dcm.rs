@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use dicom::core::header::HasLength;
 use crate::DbVal;
 
-pub static INSTACE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags",vec!["InstanceNumber"]));
+pub static INSTANCE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags", vec!["InstanceNumber"]));
 pub static SERIES_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("series_tags",vec!["SeriesDescription", "SeriesNumber"]));
 pub static STUDY_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
 

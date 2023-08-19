@@ -57,7 +57,7 @@ async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 			},
 		},
 		Err(e) => {return ImportResult::Err{
-			error:e.context(format!("when storing {}",path.as_ref().to_string_lossy())),
+			error:e.context(format!("registering {} failed",path.as_ref().to_string_lossy())),
 			filename
 		};}
 	}
@@ -109,7 +109,7 @@ pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:
 		.map_ok(|item|match item {
 			ImportResult::Registered { filename } => format!("{filename} stored"),
 			ImportResult::Existed { filename, .. } => format!("{filename} already existed"),
-			ImportResult::Err { filename, error } => format!("Failed to register {filename}: {error}")
+			ImportResult::Err { filename, error } => format!("Importing {filename} failed: {error}")
 		})
 	)
 }
