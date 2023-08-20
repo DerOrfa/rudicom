@@ -47,9 +47,9 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 	Ok(Html(wrap_body(builder.build(), "Studies").to_string()))
 }
 
-pub(super) async fn get_instance(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
+pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<Json<JsonVal>,JsonError>
 {
-	query_for_entry(("instances",id.as_str()).into()).await
+	query_for_entry((table.as_str(),id.as_str()).into()).await
 		.map(|v|Json(v)).map_err(|e|e.into())
 }
 

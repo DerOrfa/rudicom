@@ -142,3 +142,13 @@ pub async fn version() -> Result<String>
 	Ok(format!("{}",DB.version().await?))
 }
 
+pub fn json_to_thing(v:&JsonVal) -> anyhow::Result<Thing>{
+	let tb = v.get("tb").ok_or(anyhow!("expected tb in {v}"))?
+		.as_str().ok_or(anyhow!("tb in {v} should be a string"))?;
+	let id = v
+		.get("id").and_then(|id|id.get("String"))
+		.ok_or(anyhow!("expected id:String in {v}"))?
+		.as_str().ok_or(anyhow!("id:String in {v} should be a string"))?;
+	Ok(Thing::from((tb,id)))
+}
+

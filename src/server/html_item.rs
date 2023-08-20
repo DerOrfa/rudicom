@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use anyhow::anyhow;
 use surrealdb::sql::Thing;
-use crate::JsonVal;
+use crate::{db, JsonVal};
 
 pub(crate) enum HtmlItem {
 	Bool(bool),
@@ -16,7 +16,7 @@ impl TryFrom<JsonVal> for HtmlItem
 	type Error = anyhow::Error;
 	fn try_from(value: JsonVal) -> Result<Self, Self::Error> {
 		if value.is_object() {
-			json_to_thing(&value)
+			db::json_to_thing(&value)
 				.map(|id|HtmlItem::Id(id))
 				.map_err(|_|anyhow!("invalid value (non-id object)"))
 		} else {
@@ -48,16 +48,6 @@ impl ToString for HtmlItem
 			}
 		}
 	}
-}
-
-fn json_to_thing(v:&JsonVal) -> anyhow::Result<Thing>{
-	let tb = v.get("tb").ok_or(anyhow!("expected tb in {v}"))?
-		.as_str().ok_or(anyhow!("tb in {v} should be a string"))?;
-	let id = v
-		.get("id").and_then(|id|id.get("String"))
-		.ok_or(anyhow!("expected id:String in {v}"))?
-		.as_str().ok_or(anyhow!("id:String in {v} should be a string"))?;
-	Ok(Thing::from((tb,id)))
 }
 
 pub(crate) fn make_item_map(map:JsonVal) -> anyhow::Result<HashMap<String,HtmlItem>>
