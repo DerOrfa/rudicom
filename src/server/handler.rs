@@ -47,9 +47,9 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 	Ok(Html(wrap_body(builder.build(), "Studies").to_string()))
 }
 
-pub(super) async fn get_instance(Path(id):Path<String>) -> Result<Json<JsonVal>,JsonError>
+pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<Json<JsonVal>,JsonError>
 {
-	query_for_entry(("instances",id.as_str()).into()).await
+	query_for_entry((table.as_str(),id.as_str()).into()).await
 		.map(|v|Json(v)).map_err(|e|e.into())
 }
 
@@ -57,7 +57,8 @@ pub(super) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Resu
 	let bytes = payload?;
 	if bytes.is_empty(){return Err(anyhow!("Ignoring empty upload").into())}
 	let mut md5= md5::Context::new();
-	let obj= async_store::read(bytes,Some(&mut md5))?;
+	let skip = if bytes.len() >= 132 && &bytes[128..132] == b"DICM" {Some(128)} else { None };
+	let obj= async_store::read(bytes, skip,Some(&mut md5))?;
 	match store(obj,md5.compute()).await? {
 		JsonVal::Null => Ok((StatusCode::CREATED).into_response()),
 		JsonVal::Object(ob) => Ok((StatusCode::FOUND,Json(ob)).into_response()),

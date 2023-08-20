@@ -1,8 +1,7 @@
 use std::path::Path;
 use anyhow::{Result,anyhow};
-use serde_json::Map;
 use tokio::task::JoinError;
-use crate::JsonVal;
+use crate::{JsonMap, JsonVal};
 use crate::storage::register_file;
 use futures::{Stream, TryStreamExt, StreamExt};
 use glob::glob;
@@ -11,7 +10,8 @@ use serde::ser::SerializeStruct;
 
 pub(crate) enum ImportResult {
 	Registered{filename:String},
-	Existed{filename:String,existed:Map<String,JsonVal>},
+	Existed{filename:String,existed:JsonMap},
+	ExistedConflict {filename:String,my_md5:String,existed:JsonMap},
 	Err{filename:String,error:anyhow::Error}
 }
 
@@ -22,6 +22,13 @@ impl Serialize for ImportResult
 			ImportResult::Registered { filename } => {
 				let mut s=s.serialize_struct("registered",1)?;
 				s.serialize_field("filename",filename)?;
+				s.end()
+			}
+			ImportResult::ExistedConflict {existed, filename, my_md5  } => {
+				let mut s=s.serialize_struct("existed_with_conflicting_checksum",3)?;
+				s.serialize_field("filename",filename)?;
+				s.serialize_field("incoming_md5", my_md5)?;
+				s.serialize_field("existing entry", existed)?;
 				s.end()
 			}
 			ImportResult::Existed { filename,existed } => {
@@ -50,14 +57,21 @@ async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 	match register_file(path.as_ref()).await{
 		Ok(v) => match v {
 			JsonVal::Null => ImportResult::Registered{ filename },
-			JsonVal::Object(existed) => ImportResult::Existed{ filename,existed },
+			JsonVal::Object(mut existed) => {
+				if let Some(conflicting_md5) = existed.remove("conflicting_md5"){
+					ImportResult::ExistedConflict {
+						filename,existed,
+						my_md5: conflicting_md5.as_str().unwrap().to_string()
+					}
+				} else {ImportResult::Existed { filename, existed }}
+			},
 			_ => ImportResult::Err{
 				error:anyhow!("Unexpected database reply when storing {}",path.as_ref().to_string_lossy()),
 				filename
 			},
 		},
 		Err(e) => {return ImportResult::Err{
-			error:e.context(format!("when storing {}",path.as_ref().to_string_lossy())),
+			error:e.context(format!("registering {} failed",path.as_ref().to_string_lossy())),
 			filename
 		};}
 	}
@@ -94,6 +108,7 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 			let ret= if let Ok(stored) = item.to_owned() {
 				match stored {
 					ImportResult::Registered { .. } => report_registered,
+					ImportResult::ExistedConflict { .. } => true,
 					ImportResult::Existed { .. } => report_existing,
 					ImportResult::Err { .. } => true
 				}
@@ -108,8 +123,21 @@ pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:
 	Ok(import_glob(pattern,report_registered,report_existing)?
 		.map_ok(|item|match item {
 			ImportResult::Registered { filename } => format!("{filename} stored"),
-			ImportResult::Existed { filename, .. } => format!("{filename} already existed"),
-			ImportResult::Err { filename, error } => format!("Failed to register {filename}: {error}")
+			ImportResult::ExistedConflict { filename, existed, .. } => {
+				let existing_file=existed.get("file" )
+					.and_then(|file|file.get("path"))
+					.unwrap_or(&JsonVal::String("<<none>>".into()))
+					.to_string();
+				format!("{filename} already existed as {existing_file} but checksum differs")
+			},
+			ImportResult::Existed { filename, existed } => {
+				let existing_file=existed.get("file" )
+					.and_then(|file|file.get("path"))
+					.unwrap_or(&JsonVal::String("<<none>>".into()))
+					.to_string();
+				format!("{filename} already existed as {existing_file}")
+			},
+			ImportResult::Err { filename, error } => format!("Importing {filename} failed: {error}")
 		})
 	)
 }

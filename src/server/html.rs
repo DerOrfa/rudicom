@@ -113,7 +113,7 @@ pub(crate) async fn make_table(list:Vec<JsonVal>,id_name:String, mut keys:Vec<St
 			r.table_header(|c|c.text(key.to_owned()))
 		)}
 	);
-	//sneak in "id" so we will interate through it (and quiry it) when building the rest of the table
+	//sneak in "id" so we will iterate through it (and query it) when building the rest of the table
 	keys.insert(0,"id".to_string());
 	//build rest of the table
 	for item in list //rows
@@ -122,13 +122,13 @@ pub(crate) async fn make_table(list:Vec<JsonVal>,id_name:String, mut keys:Vec<St
 		for key in &keys //columns (cells)
 		{
 			let mut cellbuilder=TableCell::builder();
-			let item = item.get(key.as_str()).unwrap();
-			match item {
-				HtmlItem::Id(id) => { cellbuilder.push(make_entry_link(id).await);},
-				HtmlItem::Array(a) => {
-					cellbuilder.text(format!("{} series",a.len()));
-				},
-				_ => {cellbuilder.text(item.to_string());}
+			if let Some(item) = item.get(key.as_str())
+			{
+				match item {
+					HtmlItem::Id(id) => { cellbuilder.push(make_entry_link(id).await);},
+					HtmlItem::Array(a) => {cellbuilder.text(format!("{} series",a.len()));},
+					_ => {cellbuilder.text(item.to_string());}
+				}
 			}
 			row_builder.push(cellbuilder.build());
 		}

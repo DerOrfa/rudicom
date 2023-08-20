@@ -17,7 +17,7 @@ pub mod tools;
 pub mod server;
 
 use dcm::extract;
-use crate::dcm::{INSTACE_TAGS,SERIES_TAGS,STUDY_TAGS};
+use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 
 #[derive(Default)]
 pub struct RegistryGuard(Option<Thing>);
@@ -49,7 +49,7 @@ pub async fn register_instance(obj:&DefaultDicomObject,add_meta:Vec<(String,DbVa
 	let series_id:DbVal = Thing::from(("series",series_id.as_ref())).into();
 	let study_id:DbVal = Thing::from(("studies",study_id.as_ref())).into();
 
-	let instance_meta = extract(&obj,INSTACE_TAGS.clone()).into_iter()
+	let instance_meta = extract(&obj, INSTANCE_TAGS.clone()).into_iter()
 		.chain([("id".into(),instance_id),("series".into(),series_id.clone())])
 		.chain(add_meta);
 	let series_meta = extract(&obj, SERIES_TAGS.clone()).into_iter()
