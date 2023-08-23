@@ -5,10 +5,32 @@ use html::inline_text::Anchor;
 use html::tables::{TableCell,TableRow};
 use html::tables::Table;
 use surrealdb::sql::Thing;
-use crate::db::{find_down_tree, query_for_entry};
-use crate::JsonVal;
+use crate::db::{Entry,find_down_tree, json_to_thing};
+use crate::{JsonMap, JsonVal};
 use crate::server::html_item;
 use crate::server::html_item::HtmlItem;
+
+struct HtmlEntry(Entry);
+
+impl HtmlEntry
+{
+	pub fn get_link(&self) ->Anchor
+	{
+		let typename = match self.0 {
+			Entry::Instance(_) => "instances",
+			Entry::Series(_) => "series",
+			Entry::Study(_) => "studies"
+		};
+		Anchor::builder()
+			.href(format!("/{typename}/{}/html",self.0.get_id()))
+			.text(self.0.get_name())
+			.build()
+	}
+	pub async fn query(id:Thing) -> anyhow::Result<HtmlEntry>
+	{
+		Ok(HtmlEntry{ 0: Entry::query(id).await? })
+	}
+}
 
 pub fn wrap_body<T>(body:Body, title:T) -> Html where T:Into<std::borrow::Cow<'static, str>>
 {
@@ -34,66 +56,22 @@ pub fn wrap_body<T>(body:Body, title:T) -> Html where T:Into<std::borrow::Cow<'s
 		.build()
 }
 
-async fn make_entry_link(entry:&Thing) ->Anchor
-{
-	let mut builder= html::inline_text::Anchor::builder();
-	match query_for_entry(entry.to_owned()).await
-	{
-		Ok(data)=> {
-			match entry.tb.as_str() {
-				"instances" => {
-					let number=data.get("InstanceNumber").and_then(|v|v.as_str()).unwrap_or("--");
-
-					builder
-						.href(format!("/instances/{}/html",entry.id.to_raw()))
-						.text(format!("Instance {number}"));
-				},
-				"series" => {
-					let number=data.get("SeriesNumber").and_then(|v|v.as_str()).unwrap_or("--");
-					let desc= data.get("SeriesDescription").and_then(|v|v.as_str()).unwrap_or("--");
-
-					builder
-						.href(format!("/series/{}/html",entry.id.to_raw()))
-						.text(format!("S{number}_{desc}"));
-				},
-				"studies" => {
-					let id=data.get("PatientID").and_then(|v|v.as_str()).unwrap_or("--");
-					let date=data.get("StudyDate").and_then(|v|v.as_str()).unwrap_or("--");
-					let time=data.get("StudyTime").and_then(|v|v.as_str()).unwrap_or("--");
-
-					builder
-						.href(format!("/studies/{}/html",entry.id.to_raw()))
-						.text(format!("{id}/{date}_{time}"));
-				}
-				_ => {tracing::error!("invalid db table name when generating a link");}
-			}
-		},
-		Err(e)=>{
-			tracing::error!("querying {entry} failed when constructing a link ({e})");
-		}
-	}
-	builder.build()
-}
-
-async fn make_nav(entry:Thing) -> Navigation
+async fn make_nav(entry:Thing) -> anyhow::Result<Navigation>
 {
 	let mut anchors = Vec::<Anchor>::new();
-	match find_down_tree(&entry).await{
-		Ok(path) => {
-			for id in &path{
-				anchors.push(make_entry_link(id).await);
-			}
-		}
-		Err(e) => {tracing::error!("Failed finding parents for {entry}:{e}")}
-	};
+	let path= find_down_tree(&entry).await
+		.context(format!("Failed finding parents for {entry}"))?;
+	for id in path {
+		anchors.push(HtmlEntry::query(id).await?.get_link());
+	}
 
-	Navigation::builder().class("crumbs")
+	Ok(Navigation::builder().class("crumbs")
 		.ordered_list(|l|
 			anchors.into_iter().rev().fold(l,|l,anchor|
 				l.list_item(|i| i.push(anchor).class("crumb"))
 			)
 		)
-		.build()
+		.build())
 }
 
 pub(crate) async fn make_table(list:Vec<JsonVal>,id_name:String, mut keys:Vec<String>) -> anyhow::Result<Table>
@@ -116,23 +94,33 @@ pub(crate) async fn make_table(list:Vec<JsonVal>,id_name:String, mut keys:Vec<St
 	//sneak in "id" so we will iterate through it (and query it) when building the rest of the table
 	keys.insert(0,"id".to_string());
 	//build rest of the table
-	for item in list //rows
+	for mut item in list.into_iter() //rows
 	{
 		let mut row_builder= TableRow::builder();
 		for key in &keys //columns (cells)
 		{
 			let mut cellbuilder=TableCell::builder();
-			if let Some(item) = item.get(key.as_str())
+			if let Some(item) = item.remove(key.as_str())
 			{
 				match item {
-					HtmlItem::Id(id) => { cellbuilder.push(make_entry_link(id).await);},
-					HtmlItem::Array(a) => {cellbuilder.text(format!("{} series",a.len()));},
-					_ => {cellbuilder.text(item.to_string());}
-				}
+					HtmlItem::Id(id) =>
+						cellbuilder.push(HtmlEntry::query(id).await?.get_link()),
+					HtmlItem::Array(a) => cellbuilder.text(format!("{} series",a.len())),
+					_ => cellbuilder.text(item.to_string())
+				};
 			}
 			row_builder.push(cellbuilder.build());
 		}
 		table_builder.push(row_builder.build());
 	}
 	Ok(table_builder.build())
+}
+
+pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
+{
+	let id = json_to_thing(entry.remove("id").expect("entry should have an id"))?;
+	let mut builder = Body::builder();
+	let name = Entry::query(id).await?.get_name();
+	builder.heading_1(|h|h.text(name));
+	Ok(wrap_body(builder.build(), "Studies"))
 }
