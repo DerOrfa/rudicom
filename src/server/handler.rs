@@ -18,7 +18,7 @@ use futures::StreamExt;
 use html::root::Body;
 use itertools::Itertools;
 use serde_json::json;
-use crate::server::html::{make_table, wrap_body};
+use crate::server::html::{make_entry_page, make_table, wrap_body};
 use crate::config;
 
 pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
@@ -45,6 +45,14 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 	builder.heading_1(|h|h.text("Studies"));
 	builder.push(table);
 	Ok(Html(wrap_body(builder.build(), "Studies").to_string()))
+}
+pub(crate) async fn get_study_html(Path(id):Path<String>) -> Result<Response,TextError>
+{
+	if let JsonVal::Object(entry) =query_for_entry(("studies", id.as_str()).into()).await?
+	{
+		let page = make_entry_page(entry).await?;
+		Ok(Html(page.to_string()).into_response())
+	} else {todo!()}
 }
 
 pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<Json<JsonVal>,JsonError>

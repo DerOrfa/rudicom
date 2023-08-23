@@ -16,11 +16,11 @@ impl TryFrom<JsonVal> for HtmlItem
 	type Error = anyhow::Error;
 	fn try_from(value: JsonVal) -> Result<Self, Self::Error> {
 		if value.is_object() {
-			db::json_to_thing(&value)
+			db::json_to_thing(value)
 				.map(|id|HtmlItem::Id(id))
 				.map_err(|_|anyhow!("invalid value (non-id object)"))
 		} else {
-			match value.to_owned() {
+			match value {
 				JsonVal::Bool(b) => Ok(HtmlItem::Bool(b)),
 				JsonVal::Number(n) => Ok(HtmlItem::Number(n)),
 				JsonVal::String(s) => Ok(HtmlItem::String(s)),

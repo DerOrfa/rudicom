@@ -66,4 +66,3 @@ pub fn map_extract<T>(map:&mut JsonMap, key:&str) -> anyhow::Result<T> where T:D
 	serde_json::value::from_value(value)
 		.context(format!(r#"Failed to interpret {} as {}"#,key,type_name::<T>()))
 }
-

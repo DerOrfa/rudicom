@@ -13,9 +13,11 @@ use crate::JsonVal;
 
 mod into_db_value;
 mod register;
+mod entry;
 
 pub(crate) use into_db_value::IntoDbValue;
 pub(crate) use register::register;
+pub(crate) use entry::Entry;
 
 static DB: Surreal<Any> = Surreal::init();
 
@@ -142,13 +144,21 @@ pub async fn version() -> Result<String>
 	Ok(format!("{}",DB.version().await?))
 }
 
-pub fn json_to_thing(v:&JsonVal) -> anyhow::Result<Thing>{
-	let tb = v.get("tb").ok_or(anyhow!("expected tb in {v}"))?
-		.as_str().ok_or(anyhow!("tb in {v} should be a string"))?;
-	let id = v
-		.get("id").and_then(|id|id.get("String"))
-		.ok_or(anyhow!("expected id:String in {v}"))?
-		.as_str().ok_or(anyhow!("id:String in {v} should be a string"))?;
-	Ok(Thing::from((tb,id)))
+pub fn json_to_thing(v:JsonVal) -> anyhow::Result<Thing>{
+	let (tb, v) = extract_json("tb",v)?;
+	let (id,_) = extract_json("String", extract_json("id",v)?.0)?;
+
+	if let JsonVal::String(tb) = tb {
+		if let JsonVal::String(id) = id{
+			Ok(Thing::from((tb,id)))
+		} else { Err(anyhow!("{id} should be a string")) }
+	} else {Err(anyhow!("{tb} should be a string"))}
 }
 
+fn extract_json(key:&str,mut json_ob:JsonVal) -> anyhow::Result<(JsonVal,JsonVal)>
+{
+	match json_ob.as_object_mut(){
+		None => Err(anyhow!("{json_ob} must be an object")),
+		Some(o) => o.remove("key").ok_or(anyhow!("expected {key} in {json_ob}"))
+	}.and_then(|extracted|Ok((json_ob,extracted)))
+}
