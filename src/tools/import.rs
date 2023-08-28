@@ -70,10 +70,10 @@ async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 				filename
 			},
 		},
-		Err(e) => {return ImportResult::Err{
-			error:e.context(format!("registering {} failed",path.as_ref().to_string_lossy())),
-			filename
-		};}
+		Err(e) => {
+			let error = e.context(format!("registering {} failed",path.as_ref().to_string_lossy()));
+			return ImportResult::Err{error,filename};
+		}
 	}
 }
 
@@ -137,7 +137,9 @@ pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:
 					.to_string();
 				format!("{filename} already existed as {existing_file}")
 			},
-			ImportResult::Err { filename, error } => format!("Importing {filename} failed: {error}")
+			ImportResult::Err { filename, error } =>
+				format!("===========================================================\n{:?}",
+						error.context(format!("Importing {filename} failed")))
 		})
 	)
 }

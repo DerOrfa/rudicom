@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use anyhow::anyhow;
+use anyhow::{Context,anyhow};
 use surrealdb::sql::Thing;
 use crate::{db, JsonVal};
 
@@ -18,7 +18,7 @@ impl TryFrom<JsonVal> for HtmlItem
 		if value.is_object() {
 			db::json_to_thing(value)
 				.map(|id|HtmlItem::Id(id))
-				.map_err(|_|anyhow!("invalid value (non-id object)"))
+				.context("failed parsing json as id object")
 		} else {
 			match value {
 				JsonVal::Bool(b) => Ok(HtmlItem::Bool(b)),
@@ -50,11 +50,14 @@ impl ToString for HtmlItem
 	}
 }
 
-pub(crate) fn make_item_map(map:JsonVal) -> anyhow::Result<HashMap<String,HtmlItem>>
+pub(crate) fn make_item_map(val:JsonVal) -> anyhow::Result<HashMap<String,HtmlItem>>
 {
-	let map = map.as_object().ok_or(anyhow!("json value must be an object"))?;
-	map.into_iter().map(|(k,v)|{
-		let item=HtmlItem::try_from(v.to_owned())?;
-		Ok((k.to_owned(),item))
-	}).collect()
+	if let JsonVal::Object(map) = val {
+		map.into_iter().map(|(k,v)|{
+			let item=HtmlItem::try_from(v)?;
+			Ok((k,item))
+		}).collect()
+	} else {
+		Err(anyhow!("json value {val} must be an object"))
+	}
 }

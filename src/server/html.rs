@@ -79,7 +79,7 @@ pub(crate) async fn make_table(list:Vec<JsonVal>,id_name:String, mut keys:Vec<St
 	// make sure we have a proper list
 	if list.is_empty(){bail!("Empty list")}
 	let list:Result<Vec<_>,_> = list.into_iter()
-		.map(|v|html_item::make_item_map(v).context(anyhow!("Should be a list of objects")))
+		.map(|v|html_item::make_item_map(v).context(anyhow!("Failed parsing list of db-entries")))
 		.collect();
 	let list = list?;
 
