@@ -160,6 +160,6 @@ fn extract_json(key:&str,mut json_ob:JsonVal) -> anyhow::Result<(JsonVal,JsonVal
 {
 	match json_ob.as_object_mut(){
 		None => Err(anyhow!("{json_ob} must be an object")),
-		Some(o) => o.remove("key").ok_or(anyhow!("expected {key} in {json_ob}"))
-	}.and_then(|extracted|Ok((json_ob,extracted)))
+		Some(o) => o.remove(key).ok_or(anyhow!("expected {key} in {json_ob}"))
+	}.and_then(|extracted|Ok((extracted,json_ob)))
 }

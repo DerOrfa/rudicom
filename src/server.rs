@@ -43,7 +43,8 @@ impl<E> From<E> for JsonError where E: Into<anyhow::Error>,
 	fn from(err: E) -> Self {Self(err.into())}
 }
 
-pub async fn serve(at:SocketAddr) -> anyhow::Result<()>{
+pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
+{
 	tracing_subscriber::registry()
 		.with(
 			tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "rudicom=debug".into()),

@@ -38,7 +38,8 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 		.chain(config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
 		.unique()//make sure there are no duplicates
 		.collect();
-	let table= make_table(crate::db::list("studies").await?,"Study".to_string(), keys).await
+	let list = crate::db::list("studies").await?;
+	let table= make_table(list,"Study".to_string(), keys).await
 		.map_err(|e|e.context("Failed generating the table"))?;
 
 	let mut builder = Body::builder();
