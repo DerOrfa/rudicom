@@ -1,17 +1,13 @@
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use surrealdb::Result;
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql::Statement;
-use crate::db::DB;
 use crate::{DbVal,JsonVal};
-use once_cell::sync::Lazy;
 
-static INSERT_STUDY:Lazy<Vec<Statement>> =
-	Lazy::new(||"INSERT INTO studies $study_meta return before".into_query().unwrap());
-static INSERT_SERIES:Lazy<Vec<Statement>> =
-	Lazy::new(||"INSERT INTO series $series_meta return before".into_query().unwrap());
-static INSERT_INSTANCE:Lazy<Vec<Statement>> =
-	Lazy::new(||"INSERT INTO instances $instance_meta return before".into_query().unwrap());
+static INSERT_STUDY:OnceLock<Vec<Statement>> = OnceLock::new();
+static INSERT_SERIES:OnceLock<Vec<Statement>> = OnceLock::new();
+static INSERT_INSTANCE:OnceLock<Vec<Statement>> = OnceLock::new();
 
 pub async fn register(
 	instance_meta:BTreeMap<String,DbVal>,
@@ -19,10 +15,13 @@ pub async fn register(
 	study_meta: BTreeMap<String, DbVal>
 ) -> Result<JsonVal>
 {
-	let mut res= DB
-		.query(INSERT_STUDY.clone())
-		.query(INSERT_SERIES.clone())
-		.query(INSERT_INSTANCE.clone())
+	let ins_study= INSERT_STUDY.get_or_init(||"INSERT INTO studies $study_meta return before".into_query().unwrap());
+	let ins_series = INSERT_SERIES.get_or_init(||"INSERT INTO series $series_meta return before".into_query().unwrap());
+	let ins_inst = INSERT_INSTANCE.get_or_init(||"INSERT INTO instances $instance_meta return before".into_query().unwrap());
+	let mut res= super::db()
+		.query(ins_study.clone())
+		.query(ins_series.clone())
+		.query(ins_inst.clone())
 		.bind(("instance_meta",instance_meta))
 		.bind(("series_meta",series_meta))
 		.bind(("study_meta",study_meta))

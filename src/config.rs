@@ -1,12 +1,12 @@
 use std::path::PathBuf;
-use once_cell::sync::Lazy;
 use config::{Config, File, FileFormat::Toml};
-use std::sync::RwLock;
+use std::sync::OnceLock;
 use anyhow::bail;
 use serde::Deserialize;
 use crate::Result;
 
-static CONFIG:Lazy<RwLock<Config>> = Lazy::new(||RwLock::new(Config::default()));
+static CONFIG:OnceLock<Config> = OnceLock::new();
+
 static CONFIG_STR:&str = r#"
 study_tags = ["StudyDescription", "OperatorsName", "ManufacturerModelName"] #PatientID, StudyTime and StudyDate will always be there they are needed internally
 series_tags = ["SequenceName", "SeriesDate", "SeriesTime", "ProtocolName"] #SeriesDescription and SeriesNumber will always be there they are needed internally
@@ -26,7 +26,7 @@ pub fn init(config_file:Option<PathBuf>) -> Result<()>{
 			else {bail!("Failed to encode filename as UTF-8")};
 		builder=builder.add_source(File::new(filename,Toml));
 	}
-	CONFIG.write().unwrap().clone_from(&builder.build()?);
+	CONFIG.set(builder.build()?).expect("Failed to set global config");
 	Ok(())
 }
 
@@ -37,5 +37,7 @@ pub fn write(path:PathBuf) -> Result<()>
 
 pub(crate) fn get<'de, T: Deserialize<'de>>(key: &str) -> Result<T>
 {
-	CONFIG.read().unwrap().get(key).map_err(|e|e.into())
+	CONFIG.get()
+		.expect("accessing uninitialized global config")
+		.get(key).map_err(|e|e.into())
 }

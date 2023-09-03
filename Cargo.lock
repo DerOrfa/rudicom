@@ -3212,7 +3212,6 @@ dependencies = [
  "html",
  "itertools 0.11.0",
  "md5",
- "once_cell",
  "reqwest",
  "runtime-format",
  "serde",

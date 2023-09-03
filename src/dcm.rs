@@ -2,19 +2,14 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use dicom::core::{DataDictionary, Tag};
 use dicom::object::{DefaultDicomObject, StandardDataDictionary};
-use once_cell::sync::Lazy;
 use crate::config;
 use crate::db::IntoDbValue;
 use runtime_format::{FormatArgs, FormatKey, FormatKeyError};
 use core::fmt;
 use std::borrow::Cow;
+use std::sync::OnceLock;
 use dicom::core::header::HasLength;
 use crate::DbVal;
-
-pub static INSTANCE_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("instace_tags", vec!["InstanceNumber"]));
-pub static SERIES_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("series_tags",vec!["SeriesDescription", "SeriesNumber"]));
-pub static STUDY_TAGS:Lazy<Vec<(String, Tag)>> = Lazy::new(||get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
-
 
 struct DicomAdapter<'a>(&'a DefaultDicomObject);
 
@@ -26,7 +21,7 @@ pub fn find_tag(name:&str) -> Option<Tag>
 		.or_else(||Tag::from_str(name).ok())
 }
 
-fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
+pub fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
 {
 	let mut config=config::get::<Vec<String>>(config_key).unwrap();
 	config.extend(must_have.into_iter().map(|s|s.to_string()));

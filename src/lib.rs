@@ -1,6 +1,7 @@
 #![recursion_limit = "512"]
 
-use dicom::object::DefaultDicomObject;
+use std::sync::OnceLock;
+use dicom::object::{DefaultDicomObject, Tag};
 use dicom::dictionary_std::tags;
 use surrealdb::sql::Thing;
 
@@ -16,8 +17,12 @@ pub mod config;
 pub mod tools;
 pub mod server;
 
-use dcm::extract;
-use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
+use dcm::{extract,get_attr_list};
+
+pub static INSTANCE_TAGS:OnceLock<Vec<(String, Tag)>> = OnceLock::new();
+pub static SERIES_TAGS:OnceLock<Vec<(String, Tag)>> = OnceLock::new();
+pub static STUDY_TAGS:OnceLock<Vec<(String, Tag)>> = OnceLock::new();
+
 
 #[derive(Default)]
 pub struct RegistryGuard(Option<Thing>);
@@ -49,12 +54,17 @@ pub async fn register_instance(obj:&DefaultDicomObject,add_meta:Vec<(String,DbVa
 	let series_id:DbVal = Thing::from(("series",series_id.as_ref())).into();
 	let study_id:DbVal = Thing::from(("studies",study_id.as_ref())).into();
 
-	let instance_meta = extract(&obj, INSTANCE_TAGS.clone()).into_iter()
+	let instance_tags= INSTANCE_TAGS.get_or_init(||get_attr_list("instace_tags", vec!["InstanceNumber"]));
+	let series_tags = SERIES_TAGS.get_or_init(||get_attr_list("series_tags",vec!["SeriesDescription", "SeriesNumber"]));
+	let study_tags = STUDY_TAGS.get_or_init(||get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
+
+
+	let instance_meta = extract(&obj, instance_tags.clone()).into_iter()
 		.chain([("id".into(),instance_id),("series".into(),series_id.clone())])
 		.chain(add_meta);
-	let series_meta = extract(&obj, SERIES_TAGS.clone()).into_iter()
+	let series_meta = extract(&obj, series_tags.clone()).into_iter()
 		.chain([("id".into(),series_id),("study".into(),study_id.clone())]);
-	let study_meta = extract(&obj, STUDY_TAGS.clone()).into_iter()
+	let study_meta = extract(&obj, study_tags.clone()).into_iter()
 		.chain([("id".into(),study_id)]);
 
 	let res=db::register(instance_meta.collect(),series_meta.collect(),study_meta.collect()).await?;
