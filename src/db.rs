@@ -1,6 +1,7 @@
 
 use std::path::Path;
 use anyhow::anyhow;
+use once_cell::sync::Lazy;
 use crate::server::html_item::HtmlItem;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
@@ -19,7 +20,7 @@ pub(crate) use into_db_value::IntoDbValue;
 pub(crate) use register::register;
 pub(crate) use entry::Entry;
 
-static DB: Surreal<Any> = Surreal::init();
+static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
 
 pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
 {
