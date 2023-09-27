@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::mem::swap;
-use axum::response::{IntoResponse, Response, Json, Html};
+use axum::response::{IntoResponse, Response, Json};
 use axum::http::{header, StatusCode};
 use axum::extract::{Path, Query, rejection::BytesRejection};
 use axum_extra::body::AsyncReadBody;
@@ -9,17 +9,25 @@ use anyhow::{anyhow, Context};
 use axum::body::Bytes;
 use dicom::pixeldata::PixelDecoder;
 use dicom_pixeldata::image::ImageOutputFormat;
-use crate::db::{json_id_cleanup, query_for_entry};
+use crate::db::{find_down_tree, json_id_cleanup, query_for_entry};
 use super::{JsonError, TextError};
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, store};
 use crate::{JsonVal, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
-use html::root::Body;
 use itertools::Itertools;
 use serde_json::json;
-use crate::server::html::{make_entry_page, make_table, wrap_body};
+use surrealdb::sql::Thing;
 use crate::config;
+
+#[cfg(feature = "html")]
+use html::root::Body;
+#[cfg(feature = "html")]
+use crate::server::html::{make_entry_page, make_table, wrap_body};
+#[cfg(feature = "html")]
+use axum::response::Html;
+#[cfg(feature = "html")]
+use crate::db::{Entry, json_to_thing};
 
 pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 {
@@ -32,6 +40,7 @@ pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 	Ok(Json(JsonVal::from(studies)))
 }
 
+#[cfg(feature = "html")]
 pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 {
 	let keys=["StudyDate", "StudyTime"].into_iter().map(|s|s.to_string())
@@ -47,6 +56,7 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 	builder.push(table);
 	Ok(Html(wrap_body(builder.build(), "Studies").to_string()))
 }
+#[cfg(feature = "html")]
 pub(crate) async fn get_study_html(Path(id):Path<String>) -> Result<Response,TextError>
 {
 	if let JsonVal::Object(entry) =query_for_entry(("studies", id.as_str()).into()).await?
@@ -62,6 +72,15 @@ pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<
 		.map(|v|Json(v)).map_err(|e|e.into())
 }
 
+pub(super) async fn get_entry_parents(Path((table,id)):Path<(String,String)>) -> Result<Json<JsonVal>,JsonError>
+{
+	let mut ret:Vec<JsonVal>=Vec::new();
+	for id in find_down_tree(&Thing::from((table,id))).await?{
+		ret.push(query_for_entry(id.to_owned()).await?);
+	}
+	Ok(Json(JsonVal::Array(ret)))
+}
+
 pub(super) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
 	let bytes = payload?;
 	if bytes.is_empty(){return Err(anyhow!("Ignoring empty upload").into())}
@@ -69,8 +88,22 @@ pub(super) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Resu
 	let skip = if bytes.len() >= 132 && &bytes[128..132] == b"DICM" {Some(128)} else { None };
 	let obj= async_store::read(bytes, skip,Some(&mut md5))?;
 	match store(obj,md5.compute()).await? {
-		JsonVal::Null => Ok((StatusCode::CREATED).into_response()),
-		JsonVal::Object(ob) => Ok((StatusCode::FOUND,Json(ob)).into_response()),
+		JsonVal::Null => Ok((
+			StatusCode::CREATED,
+			Json(json!({"Status":"Success"}))
+		).into_response()),
+		JsonVal::Object(ob) => {
+			let id = ob.get("id").unwrap().as_object().unwrap();
+			let path = format!("/instances/{}",id.get("id").unwrap().get("String").unwrap().as_str().unwrap());
+			Ok((
+				StatusCode::FOUND,
+				Json(json!({
+					"Status":"AlreadyStored",
+					"Path":path,
+					"AlreadyStored":ob
+				}))
+			).into_response())
+		},
 		_ => Err(anyhow!("Unexpected reply from the database").into())
 	}
 }

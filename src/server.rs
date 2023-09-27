@@ -8,7 +8,9 @@ use tracing;
 use crate::{config, db};
 
 mod handler;
+#[cfg(feature = "html")]
 pub(crate) mod html;
+#[cfg(feature = "html")]
 pub(crate) mod html_item;
 
 pub(crate) struct TextError(anyhow::Error);
@@ -53,14 +55,13 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 		.init();
 
 	// build our application with a route
-	let app = Router::new()
+	let mut app = Router::new()
 		.route("/instances",post(handler::store_instance))
 		.route("/tools/import/json",post(handler::import_json))
 		.route("/tools/import/text",post(handler::import_text))
 		.route("/studies",get(handler::get_studies))
-		.route("/studies/html",get(handler::get_studies_html))
-		.route("/studies/:id/html",get(handler::get_study_html))
 		.route("/:table/:id",get(handler::get_entry))
+		.route("/:table/:id/parents",get(handler::get_entry_parents))
 		.route("/instances/:id/json",get(handler::get_instance_json))
 		.route("/instances/:id/file",get(handler::get_instance_file))
 		.route("/instances/:id/png",get(handler::get_instance_png))
@@ -68,6 +69,12 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 			config::get::<usize>("upload_sizelimit_mb").unwrap_or(10)*1024*1024
 		))
 		;
+	#[cfg(feature = "html")]
+	{
+		app = app
+			.route("/studies/html",get(handler::get_studies_html))
+			.route("/studies/:id/html",get(handler::get_study_html))
+	}
 
 	// run it
 	tracing::info!("listening on {}", at);

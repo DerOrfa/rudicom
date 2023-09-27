@@ -7,7 +7,6 @@ use crate::db::IntoDbValue;
 use runtime_format::{FormatArgs, FormatKey, FormatKeyError};
 use core::fmt;
 use std::borrow::Cow;
-use std::sync::OnceLock;
 use dicom::core::header::HasLength;
 use crate::DbVal;
 

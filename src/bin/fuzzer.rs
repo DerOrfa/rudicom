@@ -2,13 +2,13 @@ use std::io;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::sync::OnceLock;
 use std::time::Duration;
 use reqwest;
 use clap::Parser;
 use dicom::dictionary_std::tags;
 use dicom::core::PrimitiveValue;
 use dicom::object::{DefaultDicomObject, Tag};
-use once_cell::sync::Lazy;
 use reqwest::{Body, Client, RequestBuilder};
 use tokio::time::interval;
 use rudicom::storage::async_store::read_file;
@@ -19,8 +19,7 @@ struct UploadInfo {
 	count:std::sync::atomic::AtomicUsize,
 	size:std::sync::atomic::AtomicU64,
 }
-static UPLOAD_INFO:Lazy<UploadInfo>=
-	Lazy::new(|| UploadInfo::default());
+static UPLOAD_INFO:OnceLock<UploadInfo>= OnceLock::new();
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -36,14 +35,14 @@ struct Cli {
 async fn status_update()
 {
 	let mut interval = interval(Duration::from_millis(100));
-	let mut last_cnt= UPLOAD_INFO.count.load(Ordering::Relaxed);
+	let mut last_cnt= UPLOAD_INFO.get().unwrap().count.load(Ordering::Relaxed);
 
 	loop {
 		interval.tick().await; // ticks immediately
-		let new_cnt= UPLOAD_INFO.count.load(Ordering::Relaxed);
+		let new_cnt= UPLOAD_INFO.get().unwrap().count.load(Ordering::Relaxed);
 		let uploads_per_sec=(new_cnt-last_cnt)*10;
 		last_cnt=new_cnt;
-		let bytes:usize = uploads_per_sec* UPLOAD_INFO.size.load(Ordering::Relaxed) as usize;
+		let bytes:usize = uploads_per_sec* UPLOAD_INFO.get().unwrap().size.load(Ordering::Relaxed) as usize;
 		print!("\r{} uploads {}MB/s",new_cnt,bytes/(1024*1024));
 		io::stdout().flush().unwrap();
 	}
@@ -53,7 +52,7 @@ async fn send_instance(obj:DefaultDicomObject,req:RequestBuilder) -> Result<()>{
 	let buffer=rudicom::storage::async_store::write(&obj,None)?.into_inner();
 
 	req.body(Body::from(buffer)).send().await?.error_for_status()?;
-	UPLOAD_INFO.count.fetch_add(1, Ordering::Relaxed);
+	UPLOAD_INFO.get().unwrap().count.fetch_add(1, Ordering::Relaxed);
 	Ok(())
 }
 
@@ -83,7 +82,7 @@ async fn modify_and_send(mut copy:DefaultDicomObject, instance:u32, series:u32, 
 async fn main() -> Result<()>
 {
 	let path=PathBuf::from("assets/MR000000.IMA");
-	UPLOAD_INFO.size.store(std::fs::metadata(&path)?.len(), Ordering::Relaxed);
+	UPLOAD_INFO.get_or_init(||UploadInfo::default()).size.store(std::fs::metadata(&path)?.len(), Ordering::Relaxed);
 	let artifact=read_file(path,None).await?;
 	let mut tasks=tokio::task::JoinSet::new();
 

@@ -2,7 +2,6 @@
 use std::path::Path;
 use std::sync::OnceLock;
 use anyhow::anyhow;
-use crate::server::html_item::HtmlItem;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::{Surreal,Result};
@@ -12,12 +11,16 @@ use surrealdb::opt::IntoQuery;
 use surrealdb::sql::Thing;
 use crate::JsonVal;
 
+#[cfg(feature = "html")]
+use crate::server::html_item::HtmlItem;
+
 mod into_db_value;
 mod register;
 mod entry;
 
 pub(crate) use into_db_value::IntoDbValue;
 pub(crate) use register::register;
+#[cfg(feature = "html")]
 pub(crate) use entry::Entry;
 
 static DB: OnceLock<Surreal<Any>> = OnceLock::new();
@@ -100,13 +103,13 @@ async fn init() -> Result<()>{
 	db().query(r#"
 	define event add_instance on table instances when $event = "CREATE"	then
 	(
-		update type::thing($after.series) set instances += $after.id return none
+		update $after.series set instances += $after.id return none
 	)
 	"#).await?;
 	db().query(r#"
 	define event add_series on table series when $event = "CREATE" then
 	(
-		update type::thing($after.study) set series += $after.id return none
+		update $after.study set series += $after.id return none
 	)
 	"#).await?;
 
@@ -115,9 +118,9 @@ async fn init() -> Result<()>{
 	(
 		if array::len($before.series.instances)>1
 		then
-			update type::thing($before.series) set instances -= $before.id return none
+			update $before.series set instances -= $before.id return none
 		else
-			delete type::thing($before.series)
+			delete $before.series
 		end
 	)
 	"#).await?;
@@ -126,9 +129,9 @@ async fn init() -> Result<()>{
 	(
 		if array::len($before.study.series)>1
 		then
-			update type::thing($before.study) set series -= $before.id return none
+			update $before.study set series -= $before.id return none
 		else
-			delete type::thing($before.study)
+			delete $before.study
 		end
 	)
 	"#).await?;
