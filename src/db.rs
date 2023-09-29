@@ -138,14 +138,20 @@ async fn init() -> Result<()>{
 	Ok(())
 }
 
-pub fn json_id_cleanup(list:&JsonVal) -> anyhow::Result<JsonVal>
+pub fn json_id_cleanup(val:&JsonVal) -> anyhow::Result<JsonVal>
 {
-	let list = list.as_array().ok_or(anyhow!("Json value {list} should be an array"))?;
-	let res:anyhow::Result<Vec<_>>=list.into_iter().map(|v|{
-		let id=HtmlItem::try_from(v.to_owned())?;
-		Ok(JsonVal::from(id.to_string()))
-	}).collect();
-	res.map(|list|JsonVal::from(list)).map_err(|e|e.into())
+	if let JsonVal::Array(list) = val
+	{
+		let res:anyhow::Result<Vec<_>>=list.into_iter()
+			.map(|v|json_id_cleanup(v))
+			.collect();
+		res.map(|list|JsonVal::from(list)).map_err(|e|e.into())
+	} else if val.is_object() {
+		let id= json_to_thing(val.to_owned())?;
+		Ok(JsonVal::from(format!("{}:{}",id.tb,id.id)))
+	} else {
+		Err(anyhow!("Json value {val} should be an array or an object"))
+	}
 }
 
 pub async fn version() -> Result<String>

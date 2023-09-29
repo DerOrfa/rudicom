@@ -36,6 +36,9 @@ pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 		let series=study.get_mut("series").unwrap();
 		let mut new_series= json_id_cleanup(series)?;
 		swap(series,&mut new_series);
+		let id = study.get_mut("id").unwrap();
+		let mut new_id = json_id_cleanup(id)?;
+		swap(id,&mut new_id);
 	}
 	Ok(Json(JsonVal::from(studies)))
 }
