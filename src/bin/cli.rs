@@ -18,6 +18,7 @@ struct Endpoint{
     #[arg(long, value_hint = Hostname)]
     database: Option<String>,
     /// filename for the local database
+    #[cfg(feature = "embedded")]
     #[arg(long, value_hint = DirPath)]
     file:Option<PathBuf>
 }
@@ -70,9 +71,14 @@ async fn main() -> Result<()>
     config::init(args.config)?;
     if let Some(database) = args.endpoint.database{
         db::init_remote(database.as_str()).await.context(format!("Failed connecting to {}", database))?;
-    } else if let Some(file) = args.endpoint.file {
-        db::init_local(file.as_path()).await.context(format!("Failed opening {}", file.to_string_lossy()))?;
     } else {
+        #[cfg(feature = "embedded")]
+        if let Some(file) = args.endpoint.file {
+            db::init_local(file.as_path()).await.context(format!("Failed opening {}", file.to_string_lossy()))?;
+        } else {
+            bail!("No data backend, go away..")
+        }
+        #[cfg(not(feature = "embedded"))]
         bail!("No data backend, go away..")
     }
 
