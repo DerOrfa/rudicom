@@ -21,11 +21,9 @@ use surrealdb::sql::Thing;
 #[cfg(feature = "html")]
 use html::root::Body;
 #[cfg(feature = "html")]
-use crate::server::html::{make_entry_page, make_table, wrap_body};
+use crate::server::html::{make_entry_page, make_table_from_objects, wrap_body};
 #[cfg(feature = "html")]
 use axum::response::Html;
-#[cfg(feature = "html")]
-use crate::db::{Entry, json_to_thing};
 #[cfg(feature = "html")]
 use itertools::Itertools;
 #[cfg(feature = "html")]
@@ -33,7 +31,7 @@ use crate::config;
 
 pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 {
-	let mut studies = crate::db::list("studies").await?;
+	let mut studies = crate::db::list_table("studies").await?;
 	for study in &mut studies{
 		let series=study.get_mut("series").unwrap();
 		let mut new_series= json_id_cleanup(series)?;
@@ -52,8 +50,8 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 		.chain(config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
 		.unique()//make sure there are no duplicates
 		.collect();
-	let list = crate::db::list("studies").await?;
-	let table= make_table(list,"Study".to_string(), keys).await
+	let list = crate::db::list_table("studies").await?;
+	let table= make_table_from_objects(list, "Study".to_string(), keys).await
 		.map_err(|e|e.context("Failed generating the table"))?;
 
 	let mut builder = Body::builder();
@@ -65,6 +63,16 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 pub(crate) async fn get_study_html(Path(id):Path<String>) -> Result<Response,TextError>
 {
 	if let JsonVal::Object(entry) =query_for_entry(("studies", id.as_str()).into()).await?
+	{
+		let page = make_entry_page(entry).await?;
+		Ok(Html(page.to_string()).into_response())
+	} else {todo!()}
+}
+
+#[cfg(feature = "html")]
+pub(crate) async fn get_series_html(Path(id):Path<String>) -> Result<Response,TextError>
+{
+	if let JsonVal::Object(entry) = query_for_entry(("series", id.as_str()).into()).await?
 	{
 		let page = make_entry_page(entry).await?;
 		Ok(Html(page.to_string()).into_response())

@@ -11,9 +11,6 @@ use surrealdb::opt::IntoQuery;
 use surrealdb::sql::Thing;
 use crate::JsonVal;
 
-#[cfg(feature = "html")]
-use crate::server::html_item::HtmlItem;
-
 mod into_db_value;
 mod register;
 mod entry;
@@ -41,8 +38,16 @@ pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
 	Ok(res.unwrap_or(Vec::new()))
 }
 
-pub async fn list<T>(table:T) -> Result<Vec<JsonVal>> where T:AsRef<str> {
+pub async fn list_table<T>(table:T) -> Result<Vec<JsonVal>> where T:AsRef<str> {
 	db().select(table.as_ref()).await
+}
+
+pub async fn list_children<T>(id:Thing, col:T) -> Result<Vec<JsonVal>> where T:AsRef<str> {
+	let res:Vec<JsonVal> = db()
+		.query(format!("select * from $id.{}",col.as_ref()))
+		.bind(("id",id)).await?.check()?
+		.take(0)?;
+	Ok(res)
 }
 
 pub async fn query_for_entry(id:Thing) -> Result<JsonVal>

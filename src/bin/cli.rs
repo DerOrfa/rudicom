@@ -3,13 +3,16 @@
 use std::net::SocketAddr;
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
-use clap::ValueHint::{DirPath,Hostname};
 use futures::StreamExt;
+use clap::ValueHint::Hostname;
 
 use clap::{Args, Parser, Subcommand};
 use rudicom::server;
 use rudicom::{db, config};
 use rudicom::tools::import::import_glob_as_text;
+
+#[cfg(feature = "embedded")]
+use clap::ValueHint::DirPath;
 
 #[derive(Args,Debug)]
 #[group(required = true, multiple = false)]

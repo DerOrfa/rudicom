@@ -56,6 +56,15 @@ impl Entry
 			}
 		}
 	}
+
+	pub fn remove(&mut self,key:&str)
+	{
+		match self {
+			Instance(data) => data,
+			Series(data) => data,
+			Study(data) => data
+		}.remove(key);
+	}
 }
 
 impl TryFrom<JsonMap> for Entry

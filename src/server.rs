@@ -17,7 +17,7 @@ pub(crate) struct TextError(anyhow::Error);
 impl IntoResponse for TextError {
 	fn into_response(self) -> Response
 	{
-		tracing::error!("Internal error {} reportet (root cause {})",self.0,self.0.root_cause());
+		tracing::error!("Internal error {} reported (root cause {})",self.0,self.0.root_cause());
 		(
 			StatusCode::INTERNAL_SERVER_ERROR,
 			format!("{:#}", self.0)
@@ -76,6 +76,7 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 		app = app
 			.route("/studies/html",get(handler::get_studies_html))
 			.route("/studies/:id/html",get(handler::get_study_html))
+			.route("/series/:id/html",get(handler::get_series_html))
 	}
 
 	// run it

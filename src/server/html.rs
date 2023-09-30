@@ -1,20 +1,21 @@
+use std::collections::LinkedList;
 use anyhow::{anyhow, bail, Context};
 use html::content::Navigation;
 use html::root::{Body,Html};
 use html::inline_text::Anchor;
 use html::tables::{TableCell,TableRow};
 use html::tables::Table;
+use serde_json::Value;
 use surrealdb::sql::Thing;
 use crate::db::{Entry,find_down_tree, json_to_thing};
-use crate::{JsonMap, JsonVal};
-use crate::server::html_item;
+use crate::{db, JsonMap, JsonVal};
 use crate::server::html_item::HtmlItem;
 
-struct HtmlEntry(Entry);
+pub(crate) struct HtmlEntry(Entry);
 
 impl HtmlEntry
 {
-	pub fn get_link(&self) ->Anchor
+	pub fn get_link(&self) -> Anchor
 	{
 		let typename = match self.0 {
 			Entry::Instance(_) => "instances",
@@ -26,9 +27,50 @@ impl HtmlEntry
 			.text(self.0.get_name())
 			.build()
 	}
+	pub fn into_items(self, keys: &Vec<String>) -> anyhow::Result<LinkedList<(String,HtmlItem)>>
+	{
+		let link = self.get_link();
+		let mut out:LinkedList<(String,HtmlItem)> = LinkedList::new();
+		let mut inmap = match self.0 {
+			Entry::Instance(map) => map,
+			Entry::Series(map) => map,
+			Entry::Study(map) => map,
+		};
+		for k in keys
+		{
+			let item = match inmap.remove(k.as_str()).unwrap_or(JsonVal::String("-------".to_string())) {
+				JsonVal::Bool(b) => HtmlItem::Bool(b),
+				JsonVal::Number(n) => HtmlItem::Number(n),
+				JsonVal::String(s) => HtmlItem::String(s),
+				JsonVal::Array(a) => HtmlItem::String(format!("{} children", a.len())),
+				JsonVal::Object(o) => {
+					let jsonval=JsonVal::Object(o);
+					if let Some(id) = json_to_thing(jsonval.clone()).ok() {
+						HtmlItem::Id((id, link.clone()))
+					} else {
+						HtmlItem::String(jsonval.to_string())
+					}
+				}
+				_ => bail!("invalid value in {k}"),
+			};
+			out.push_back((k.clone(), item));
+		}
+		Ok(out)
+	}
+
 	pub async fn query(id:Thing) -> anyhow::Result<HtmlEntry>
 	{
 		Ok(HtmlEntry{ 0: Entry::query(id).await? })
+	}
+}
+
+impl TryFrom<JsonMap> for HtmlEntry
+{
+	type Error = anyhow::Error;
+
+	fn try_from(json_entry: JsonMap) -> std::result::Result<Self, Self::Error>
+	{
+		Ok(HtmlEntry{ 0: Entry::try_from(json_entry)? })
 	}
 }
 
@@ -56,7 +98,7 @@ pub fn wrap_body<T>(body:Body, title:T) -> Html where T:Into<std::borrow::Cow<'s
 		.build()
 }
 
-async fn make_nav(entry:Thing) -> anyhow::Result<Navigation>
+async fn make_nav(entry:&Thing) -> anyhow::Result<Navigation>
 {
 	let mut anchors = Vec::<Anchor>::new();
 	let path= find_down_tree(&entry).await
@@ -65,23 +107,36 @@ async fn make_nav(entry:Thing) -> anyhow::Result<Navigation>
 		anchors.push(HtmlEntry::query(id).await?.get_link());
 	}
 
+
 	Ok(Navigation::builder().class("crumbs")
-		.ordered_list(|l|
-			anchors.into_iter().rev().fold(l,|l,anchor|
+		.ordered_list(|l| {
+			l.list_item(|i|i.anchor(|a|
+				a.href("/studies/html").text("Studies")
+			).class("crumb"));
+			anchors.into_iter().rev().fold(l, |l, anchor|
 				l.list_item(|i| i.push(anchor).class("crumb"))
 			)
+		}
 		)
 		.build())
 }
 
-pub(crate) async fn make_table(list:Vec<JsonVal>,id_name:String, mut keys:Vec<String>) -> anyhow::Result<Table>
+fn make_table_from_map(map:JsonMap) -> Table{
+	let mut table_builder = Table::builder();
+	for (k,v) in map
+	{
+		table_builder.table_row(|r|{r
+			.table_cell(|c|c.text(k))
+			.table_cell(|c|c.text(v.to_string()))
+		});
+	};
+	table_builder.build()
+}
+
+pub(crate) async fn make_table_from_objects(objs:Vec<JsonVal>, id_name:String, mut keys:Vec<String>) -> anyhow::Result<Table>
 {
 	// make sure we have a proper list
-	if list.is_empty(){bail!("Empty list")}
-	let list:Result<Vec<_>,_> = list.into_iter()
-		.map(|v|html_item::make_item_map(v).context(anyhow!("Failed parsing list of db-entries")))
-		.collect();
-	let list = list?;
+	if objs.is_empty(){bail!("Empty list")}
 
 	//build header from the keys (defaults taken from first json-object)
 	let mut table_builder =Table::builder();
@@ -93,22 +148,29 @@ pub(crate) async fn make_table(list:Vec<JsonVal>,id_name:String, mut keys:Vec<St
 	);
 	//sneak in "id" so we will iterate through it (and query it) when building the rest of the table
 	keys.insert(0,"id".to_string());
+	let list:Result<Vec<_>,_> = objs.into_iter()
+		.map(|v| {
+			match v {
+				Value::Object(o) => {
+					HtmlEntry::try_from(o)
+						.context(anyhow!("Failed parsing list of db-entries"))
+				}
+				_ => {Err(anyhow!("json value {v} must be an object"))}
+			}
+		})
+		.collect();
+	let list = list?;
 	//build rest of the table
-	for mut item in list.into_iter() //rows
+	for entry in list.into_iter() //rows
 	{
 		let mut row_builder= TableRow::builder();
-		for key in &keys //columns (cells)
+		for (_,item) in entry.into_items(&keys)? //columns (cells)
 		{
 			let mut cellbuilder=TableCell::builder();
-			if let Some(item) = item.remove(key.as_str())
-			{
-				match item {
-					HtmlItem::Id(id) =>
-						cellbuilder.push(HtmlEntry::query(id).await?.get_link()),
-					HtmlItem::Array(a) => cellbuilder.text(format!("{} series",a.len())),
-					_ => cellbuilder.text(item.to_string())
-				};
-			}
+			match item {
+				HtmlItem::Id((_,link)) => cellbuilder.push(link),
+				_ => cellbuilder.text(item.to_string())
+			};
 			row_builder.push(cellbuilder.build());
 		}
 		table_builder.push(row_builder.build());
@@ -120,7 +182,42 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 {
 	let id = json_to_thing(entry.remove("id").expect("entry should have an id"))?;
 	let mut builder = Body::builder();
-	let name = Entry::query(id).await?.get_name();
-	builder.heading_1(|h|h.text(name));
-	Ok(wrap_body(builder.build(), "Studies"))
+	builder.push(make_nav(&id).await?);
+	let mut entry = Entry::query(id.clone()).await?;
+	let name = entry.get_name();
+	entry.remove("id");
+	builder.heading_1(|h|h.text(name.to_owned()));
+	match entry {
+		Entry::Instance(mut instance) => {}
+		Entry::Series(mut series) => {
+			series.remove("instances");
+			builder.push(make_table_from_map(series));
+			let mut instances=db::list_children(id,"instances").await?;
+			instances.sort_by_key(|s|s
+				.get("InstanceNumber").expect("missing InstanceNumber").as_str().unwrap()
+				.parse::<u64>().expect("InstanceNumber is not a number")
+			);
+
+			let keys=crate::config::get::<Vec<String>>("instace_tags")?;
+			let instance_text = format!("{} Series",instances.len());
+			let instance_table = make_table_from_objects(instances, "Name".into(), keys).await?;
+			builder.heading_2(|h|h.text(instance_text)).push(instance_table);
+		}
+		Entry::Study(mut study) => {
+			study.remove("series");
+			builder.push(make_table_from_map(study));
+			let mut series=db::list_children(id,"series").await?;
+			series.sort_by_key(|s|s
+					.get("SeriesNumber").expect("missing SeriesNumber").as_str().unwrap()
+					.parse::<u64>().expect("SeriesNumber is not a number")
+			);
+
+			let keys= crate::config::get::<Vec<String>>("series_tags")?;
+			let series_text = format!("{} Series",series.len());
+			let series_table = make_table_from_objects(series, "Name".into(), keys).await?;
+			builder.heading_2(|h|h.text(series_text)).push(series_table);
+		}
+	}
+
+	Ok(wrap_body(builder.build(), name))
 }
