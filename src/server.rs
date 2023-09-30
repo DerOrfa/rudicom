@@ -60,7 +60,9 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 		.route("/tools/import/json",post(handler::import_json))
 		.route("/tools/import/text",post(handler::import_text))
 		.route("/studies",get(handler::get_studies))
-		.route("/:table/:id",get(handler::get_entry))
+		.route("/:table/:id",
+			   get(handler::get_entry).delete(handler::del_entry)
+		)
 		.route("/:table/:id/parents",get(handler::get_entry_parents))
 		.route("/instances/:id/json",get(handler::get_instance_json))
 		.route("/instances/:id/file",get(handler::get_instance_file))

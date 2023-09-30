@@ -15,7 +15,7 @@ pub async fn remove(id:Thing) -> Result<()>{
 	for instance in instances{
 		remove_instance(instance).await?
 	}
-	todo!()
+	Ok(())
 }
 
 async fn remove_instance(id:Thing) -> Result<()>

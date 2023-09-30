@@ -11,14 +11,12 @@ use dicom::pixeldata::PixelDecoder;
 use dicom_pixeldata::image::ImageOutputFormat;
 use crate::db::{find_down_tree, json_id_cleanup, query_for_entry};
 use super::{JsonError, TextError};
-use crate::tools::{get_instance_dicom, lookup_instance_filepath, store};
+use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove, store};
 use crate::{JsonVal, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
-use itertools::Itertools;
 use serde_json::json;
 use surrealdb::sql::Thing;
-use crate::config;
 
 #[cfg(feature = "html")]
 use html::root::Body;
@@ -28,6 +26,10 @@ use crate::server::html::{make_entry_page, make_table, wrap_body};
 use axum::response::Html;
 #[cfg(feature = "html")]
 use crate::db::{Entry, json_to_thing};
+#[cfg(feature = "html")]
+use itertools::Itertools;
+#[cfg(feature = "html")]
+use crate::config;
 
 pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 {
@@ -73,6 +75,10 @@ pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<
 {
 	query_for_entry((table.as_str(),id.as_str()).into()).await
 		.map(|v|Json(v)).map_err(|e|e.into())
+}
+pub(super) async fn del_entry(Path((table,id)):Path<(String,String)>) -> Result<(),JsonError>
+{
+	remove((table.as_str(),id.as_str()).into()).await.map_err(|e|e.into())
 }
 
 pub(super) async fn get_entry_parents(Path((table,id)):Path<(String,String)>) -> Result<Json<JsonVal>,JsonError>

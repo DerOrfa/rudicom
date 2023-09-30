@@ -19,7 +19,7 @@ dicom-json = "0.1"
 anyhow = {version = "1.0", features = ["backtrace"]}
 clap = { version = "4.4", features = ["derive","color","usage"] }
 serde_json = "1.0"
-surrealdb = {version = "1.0", features = ["kv-rocksdb","protocol-ws"]}
+surrealdb = {version = "1.0", features = ["protocol-ws"]}
 serde = "1.0"
 tokio = { version = "1.32", features = ["macros", "rt-multi-thread", "fs"] }
 glob = "0.3"
