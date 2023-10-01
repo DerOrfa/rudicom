@@ -4,6 +4,7 @@ use html::content::Navigation;
 use html::root::{Body,Html};
 use html::inline_text::Anchor;
 use html::tables::{TableCell,TableRow};
+use html::tables::builders::TableCellBuilder;
 use html::tables::Table;
 use serde_json::Value;
 use surrealdb::sql::Thing;
@@ -133,18 +134,26 @@ fn make_table_from_map(map:JsonMap) -> Table{
 	table_builder.build()
 }
 
-pub(crate) async fn make_table_from_objects(objs:Vec<JsonVal>, id_name:String, mut keys:Vec<String>) -> anyhow::Result<Table>
+pub(crate) async fn make_table_from_objects(
+	objs:Vec<JsonVal>,
+	id_name:String,
+	mut keys:Vec<String>,
+	additional: Vec<(&str,fn(&HtmlEntry,&mut TableCellBuilder))>
+) -> anyhow::Result<Table>
 {
 	// make sure we have a proper list
 	if objs.is_empty(){bail!("Empty list")}
+	let addkeys:Vec<_> = additional.iter().map(|(k,_)|k.to_string()).collect();
 
 	//build header from the keys (defaults taken from first json-object)
 	let mut table_builder =Table::builder();
 	table_builder.table_row(|r|{
 		r.table_header(|c|c.text(id_name));
-		keys.iter().fold(r,|r,key|
-			r.table_header(|c|c.text(key.to_owned()))
-		)}
+		keys.iter()
+			.chain(addkeys.iter())
+			.fold(r,|r,key|
+				r.table_header(|c|c.text(key.to_owned()))
+			)}
 	);
 	//sneak in "id" so we will iterate through it (and query it) when building the rest of the table
 	keys.insert(0,"id".to_string());
@@ -163,6 +172,12 @@ pub(crate) async fn make_table_from_objects(objs:Vec<JsonVal>, id_name:String, m
 	//build rest of the table
 	for entry in list.into_iter() //rows
 	{
+		let addcells:Vec<_> = additional.iter().map(|(key,func)|{
+			let mut cell = TableCell::builder();
+			func(&entry,&mut cell);
+			cell.build()
+		}).collect();
+
 		let mut row_builder= TableRow::builder();
 		for (_,item) in entry.into_items(&keys)? //columns (cells)
 		{
@@ -173,6 +188,7 @@ pub(crate) async fn make_table_from_objects(objs:Vec<JsonVal>, id_name:String, m
 			};
 			row_builder.push(cellbuilder.build());
 		}
+		row_builder.extend(addcells);
 		table_builder.push(row_builder.build());
 	}
 	Ok(table_builder.build())
@@ -207,8 +223,13 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 			);
 
 			let keys=crate::config::get::<Vec<String>>("instance_tags")?;
-			let instance_text = format!("{} Series",instances.len());
-			let instance_table = make_table_from_objects(instances, "Name".into(), keys).await?;
+			let makethumb = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
+				cell.image(|i|i.src(
+					format!("/instances/{}/png?width=64&height=64",obj.0.get_id())
+				));
+			};
+			let instance_text = format!("{} Instances",instances.len());
+			let instance_table = make_table_from_objects(instances, "Name".into(), keys, vec![("thumbnail",makethumb)]).await?;
 			builder.heading_2(|h|h.text(instance_text)).push(instance_table);
 		}
 		Entry::Study(mut study) => {
@@ -222,7 +243,7 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 
 			let keys= crate::config::get::<Vec<String>>("series_tags")?;
 			let series_text = format!("{} Series",series.len());
-			let series_table = make_table_from_objects(series, "Name".into(), keys).await?;
+			let series_table = make_table_from_objects(series, "Name".into(), keys, [].into()).await?;
 			builder.heading_2(|h|h.text(series_text)).push(series_table);
 		}
 	}

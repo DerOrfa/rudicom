@@ -25,6 +25,7 @@ use crate::server::html::{make_entry_page, make_table_from_objects, wrap_body};
 use axum::response::Html;
 #[cfg(feature = "html")]
 use itertools::Itertools;
+use serde::Deserialize;
 use serde_json::json;
 #[cfg(feature = "html")]
 use crate::config;
@@ -51,7 +52,7 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 		.unique()//make sure there are no duplicates
 		.collect();
 	let list = crate::db::list_table("studies").await?;
-	let table= make_table_from_objects(list, "Study".to_string(), keys).await
+	let table= make_table_from_objects(list, "Study".to_string(), keys, [].into()).await
 		.map_err(|e|e.context("Failed generating the table"))?;
 
 	let mut builder = Body::builder();
@@ -160,13 +161,22 @@ pub(super) async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Respo
 	}
 }
 
-pub(super) async fn get_instance_png(Path(id):Path<String>) -> Result<Response,TextError>
+#[derive(Deserialize)]
+pub(crate) struct ImageSize {
+	width: u32,
+	height: u32,
+}
+
+pub(super) async fn get_instance_png(Path(id):Path<String>, size: Option<Query<ImageSize>>) -> Result<Response,TextError>
 {
 	if let Some(obj)=get_instance_dicom(id.as_str()).await?
 	{
 		let mut buffer = Cursor::new(Vec::<u8>::new());
-		obj.decode_pixel_data()?.to_dynamic_image(0)?
-			.write_to(&mut buffer, ImageOutputFormat::Png)?;
+		let mut image = obj.decode_pixel_data()?.to_dynamic_image(0)?;
+		if let Some(size) = size{
+			image=image.thumbnail(size.width,size.height);
+		}
+		image.write_to(&mut buffer, ImageOutputFormat::Png)?;
 
 		Ok((
 			[(header::CONTENT_TYPE, "image/png")],
