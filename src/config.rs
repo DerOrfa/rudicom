@@ -10,7 +10,7 @@ static CONFIG:OnceLock<Config> = OnceLock::new();
 static CONFIG_STR:&str = r#"
 study_tags = ["StudyDescription", "OperatorsName", "ManufacturerModelName"] #PatientID, StudyTime and StudyDate will always be there they are needed internally
 series_tags = ["SequenceName", "SeriesDate", "SeriesTime", "ProtocolName"] #SeriesDescription and SeriesNumber will always be there they are needed internally
-instace_tags = ["InstanceCreationDate", "InstanceCreationTime"] # InstanceNumber will always be there as its needed internally
+instance_tags = ["InstanceCreationDate", "InstanceCreationTime"] # InstanceNumber will always be there as its needed internally
 
 upload_sizelimit_mb = 10
 

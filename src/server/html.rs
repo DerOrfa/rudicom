@@ -191,6 +191,7 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 		Entry::Instance(mut instance) => {}
 		Entry::Series(mut series) => {
 			series.remove("instances");
+			series.remove("study");
 			builder.push(make_table_from_map(series));
 			let mut instances=db::list_children(id,"instances").await?;
 			instances.sort_by_key(|s|s
@@ -198,7 +199,7 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 				.parse::<u64>().expect("InstanceNumber is not a number")
 			);
 
-			let keys=crate::config::get::<Vec<String>>("instace_tags")?;
+			let keys=crate::config::get::<Vec<String>>("instance_tags")?;
 			let instance_text = format!("{} Series",instances.len());
 			let instance_table = make_table_from_objects(instances, "Name".into(), keys).await?;
 			builder.heading_2(|h|h.text(instance_text)).push(instance_table);

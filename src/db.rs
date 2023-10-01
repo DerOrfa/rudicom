@@ -147,7 +147,7 @@ pub fn json_id_cleanup(val:&JsonVal) -> anyhow::Result<JsonVal>
 {
 	if let JsonVal::Array(list) = val
 	{
-		let res:anyhow::Result<Vec<_>>=list.into_iter()
+		let res:anyhow::Result<Vec<_>> = list.into_iter()
 			.map(|v|json_id_cleanup(v))
 			.collect();
 		res.map(|list|JsonVal::from(list)).map_err(|e|e.into())
