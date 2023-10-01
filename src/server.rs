@@ -59,12 +59,12 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 		.route("/instances",post(handler::store_instance))
 		.route("/tools/import/json",post(handler::import_json))
 		.route("/tools/import/text",post(handler::import_text))
-		.route("/studies",get(handler::get_studies))
-		.route("/:table/:id",
+		.route("/studies/json",get(handler::get_studies))
+		.route("/:table/:id/json",
 			   get(handler::get_entry).delete(handler::del_entry)
 		)
 		.route("/:table/:id/parents",get(handler::get_entry_parents))
-		.route("/instances/:id/json",get(handler::get_instance_json))
+		.route("/instances/:id/json-ext",get(handler::get_instance_json_ext))
 		.route("/instances/:id/file",get(handler::get_instance_file))
 		.route("/instances/:id/png",get(handler::get_instance_png))
 		.layer(DefaultBodyLimit::max(
@@ -75,8 +75,7 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 	{
 		app = app
 			.route("/studies/html",get(handler::get_studies_html))
-			.route("/studies/:id/html",get(handler::get_study_html))
-			.route("/series/:id/html",get(handler::get_series_html))
+			.route("/:table/:id/html",get(handler::get_entry_html))
 	}
 
 	// run it

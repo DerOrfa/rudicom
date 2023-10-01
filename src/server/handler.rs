@@ -15,7 +15,6 @@ use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove, store};
 use crate::{JsonVal, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
-use serde_json::json;
 use surrealdb::sql::Thing;
 
 #[cfg(feature = "html")]
@@ -26,6 +25,7 @@ use crate::server::html::{make_entry_page, make_table_from_objects, wrap_body};
 use axum::response::Html;
 #[cfg(feature = "html")]
 use itertools::Itertools;
+use serde_json::json;
 #[cfg(feature = "html")]
 use crate::config;
 
@@ -60,23 +60,17 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 	Ok(Html(wrap_body(builder.build(), "Studies").to_string()))
 }
 #[cfg(feature = "html")]
-pub(crate) async fn get_study_html(Path(id):Path<String>) -> Result<Response,TextError>
+pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Result<Response,TextError>
 {
-	if let JsonVal::Object(entry) =query_for_entry(("studies", id.as_str()).into()).await?
+	match query_for_entry((table.as_str(),id.as_str()).into()).await?
 	{
-		let page = make_entry_page(entry).await?;
-		Ok(Html(page.to_string()).into_response())
-	} else {todo!()}
-}
-
-#[cfg(feature = "html")]
-pub(crate) async fn get_series_html(Path(id):Path<String>) -> Result<Response,TextError>
-{
-	if let JsonVal::Object(entry) = query_for_entry(("series", id.as_str()).into()).await?
-	{
-		let page = make_entry_page(entry).await?;
-		Ok(Html(page.to_string()).into_response())
-	} else {todo!()}
+		JsonVal::Null => Ok((StatusCode::NOT_FOUND,Json(json!({"Status":"not found"}))).into_response()),
+		JsonVal::Object(entry) => {
+			let page = make_entry_page(entry).await?;
+			Ok(Html(page.to_string()).into_response())
+		}
+		_ => Err(anyhow!("Invalid database response").into())
+	}
 }
 
 pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<Response,JsonError>
@@ -152,7 +146,7 @@ pub(super) async fn get_instance_file(Path(id):Path<String>) -> Result<Response,
 	}
 }
 
-pub(super) async fn get_instance_json(Path(id):Path<String>) -> Result<Response,JsonError>
+pub(super) async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Response,JsonError>
 {
 	if let Some(obj)=get_instance_dicom(id.as_str()).await?
 	{

@@ -188,7 +188,14 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 	entry.remove("id");
 	builder.heading_1(|h|h.text(name.to_owned()));
 	match entry {
-		Entry::Instance(mut instance) => {}
+		Entry::Instance(mut instance) => {
+			let _file = instance.remove("file");
+			instance.remove("series");
+			builder.push(make_table_from_map(instance));
+			builder.paragraph(|p|
+				p.image(|i|i.src(format!("/instances/{}/png",id.id.to_raw())))
+			);
+		}
 		Entry::Series(mut series) => {
 			series.remove("instances");
 			series.remove("study");
