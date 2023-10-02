@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context};
 use axum::body::Bytes;
 use dicom::pixeldata::PixelDecoder;
 use dicom_pixeldata::image::ImageOutputFormat;
-use crate::db::{find_down_tree, json_id_cleanup, json_to_thing, query_for_entry};
+use crate::db::{Entry, find_down_tree, json_id_cleanup, json_to_thing, query_for_entry};
 use super::{JsonError, TextError};
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove, store};
 use crate::{db, JsonVal, tools};
@@ -101,6 +101,20 @@ pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<
 		).into_response())
 	} else {
 		Ok(Json(res).into_response())
+	}
+}
+pub(super) async fn query(Path((table,id,query)):Path<(String,String,String)>) -> Result<Response,JsonError>
+{
+	if let JsonVal::Object(res) = query_for_entry((table.as_str(),id.as_str()).into()).await?
+	{
+		let query=query.replace("/",".");
+		let children=Entry::try_from(res)?.list_children(query).await?;
+		Ok(Json(JsonVal::Array(children)).into_response())
+	} else {
+		Ok((
+			StatusCode::NOT_FOUND,
+			Json(json!({"Status":"not found"}))
+		).into_response())
 	}
 }
 pub(super) async fn del_entry(Path((table,id)):Path<(String,String)>) -> Result<(),JsonError>

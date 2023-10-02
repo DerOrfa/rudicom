@@ -63,6 +63,7 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 		.route("/:table/:id/json",
 			   get(handler::get_entry).delete(handler::del_entry)
 		)
+		.route("/:table/:id/json/*query",get(handler::query))
 		.route("/:table/:id/parents",get(handler::get_entry_parents))
 		.route("/instances/:id/json-ext",get(handler::get_instance_json_ext))
 		.route("/instances/:id/file",get(handler::get_instance_file))
