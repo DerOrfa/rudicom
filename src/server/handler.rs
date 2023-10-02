@@ -9,7 +9,6 @@ use anyhow::{anyhow, Context};
 use axum::body::Bytes;
 use dicom::pixeldata::PixelDecoder;
 use dicom_pixeldata::image::ImageOutputFormat;
-use crate::db::{Entry, find_down_tree, json_id_cleanup, json_to_thing, query_for_entry};
 use super::{JsonError, TextError};
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove, store};
 use crate::{db, JsonVal, tools};
@@ -22,33 +21,29 @@ use html::{root::Body,tables::builders::TableCellBuilder};
 #[cfg(feature = "html")]
 use crate::server::html::{HtmlEntry,make_entry_page, make_table_from_objects, wrap_body};
 #[cfg(feature = "html")]
-use axum::response::Html;
-#[cfg(feature = "html")]
 use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
-#[cfg(feature = "html")]
-use crate::config;
 
 pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 {
 	let mut studies = crate::db::list_table("studies").await?;
 	for study in &mut studies{
 		let series=study.get_mut("series").unwrap();
-		let mut new_series= json_id_cleanup(series)?;
+		let mut new_series= db::json_id_cleanup(series)?;
 		swap(series,&mut new_series);
 		let id = study.get_mut("id").unwrap();
-		let mut new_id = json_id_cleanup(id)?;
+		let mut new_id = db::json_id_cleanup(id)?;
 		swap(id,&mut new_id);
 	}
 	Ok(Json(JsonVal::from(studies)))
 }
 
 #[cfg(feature = "html")]
-pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
+pub(crate) async fn get_studies_html() -> Result<axum::response::Html<String>,TextError>
 {
 	let keys=["StudyDate", "StudyTime"].into_iter().map(|s|s.to_string())
-		.chain(config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
+		.chain(crate::config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
 		.unique()//make sure there are no duplicates
 		.collect();
 
@@ -58,7 +53,7 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 	for study in &mut studies
 	{
 		let id=study.get("id").expect(r#""id" expected"#);
-		let instances=db::list_children(json_to_thing(id.to_owned())?,"series.instances").await?.into_iter()
+		let instances=db::list_children(db::json_to_thing(id.to_owned())?,"series.instances").await?.into_iter()
 			.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})
 			.flatten().count();
 		study.as_object_mut().expect("must be an object").insert("Instances".into(),instances.into());
@@ -75,17 +70,17 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 	let mut builder = Body::builder();
 	builder.heading_1(|h|h.text("Studies"));
 	builder.push(table);
-	Ok(Html(wrap_body(builder.build(), "Studies").to_string()))
+	Ok(axum::response::Html(wrap_body(builder.build(), "Studies").to_string()))
 }
 #[cfg(feature = "html")]
 pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Result<Response,TextError>
 {
-	match query_for_entry((table.as_str(),id.as_str()).into()).await?
+	match db::query_for_entry((table.as_str(),id.as_str()).into()).await?
 	{
 		JsonVal::Null => Ok((StatusCode::NOT_FOUND,Json(json!({"Status":"not found"}))).into_response()),
 		JsonVal::Object(entry) => {
 			let page = make_entry_page(entry).await?;
-			Ok(Html(page.to_string()).into_response())
+			Ok(axum::response::Html(page.to_string()).into_response())
 		}
 		_ => Err(anyhow!("Invalid database response").into())
 	}
@@ -93,7 +88,7 @@ pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Re
 
 pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<Response,JsonError>
 {
-	let res=query_for_entry((table.as_str(),id.as_str()).into()).await?;
+	let res=db::query_for_entry((table.as_str(),id.as_str()).into()).await?;
 	if res.is_null(){
 		Ok((
 			StatusCode::NOT_FOUND,
@@ -105,10 +100,10 @@ pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<
 }
 pub(super) async fn query(Path((table,id,query)):Path<(String,String,String)>) -> Result<Response,JsonError>
 {
-	if let JsonVal::Object(res) = query_for_entry((table.as_str(),id.as_str()).into()).await?
+	if let JsonVal::Object(res) = db::query_for_entry((table.as_str(),id.as_str()).into()).await?
 	{
 		let query=query.replace("/",".");
-		let children=Entry::try_from(res)?.list_children(query).await?;
+		let children=db::Entry::try_from(res)?.list_children(query).await?;
 		Ok(Json(JsonVal::Array(children)).into_response())
 	} else {
 		Ok((
@@ -125,8 +120,8 @@ pub(super) async fn del_entry(Path((table,id)):Path<(String,String)>) -> Result<
 pub(super) async fn get_entry_parents(Path((table,id)):Path<(String,String)>) -> Result<Json<JsonVal>,JsonError>
 {
 	let mut ret:Vec<JsonVal>=Vec::new();
-	for id in find_down_tree(&Thing::from((table,id))).await?{
-		ret.push(query_for_entry(id.to_owned()).await?);
+	for id in db::find_down_tree(&Thing::from((table,id))).await?{
+		ret.push(db::query_for_entry(id.to_owned()).await?);
 	}
 	Ok(Json(JsonVal::Array(ret)))
 }

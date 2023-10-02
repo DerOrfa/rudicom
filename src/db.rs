@@ -17,7 +17,6 @@ mod entry;
 
 pub(crate) use into_db_value::IntoDbValue;
 pub(crate) use register::register;
-#[cfg(feature = "html")]
 pub(crate) use entry::Entry;
 
 static DB: OnceLock<Surreal<Any>> = OnceLock::new();
