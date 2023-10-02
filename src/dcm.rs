@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::str::FromStr;
 use dicom::core::{DataDictionary, Tag};
 use dicom::object::{DefaultDicomObject, StandardDataDictionary};
@@ -43,11 +42,6 @@ pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> Vec<(S
 		.collect()
 }
 
-pub fn complete_filepath(path:String) -> PathBuf
-{
-	let root:PathBuf = config::get("storage_path").expect(r#""storage_path" missing or invalid in config"#);
-	root.join(path)
-}
 pub fn gen_filepath(obj:&DefaultDicomObject) -> String
 {
 	let pattern:String = config::get("filename_pattern").expect(r#""filename_pattern"  missing or invalid in config"#);

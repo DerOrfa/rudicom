@@ -1,6 +1,6 @@
 use surrealdb::sql::Thing;
 use crate::db::{json_to_thing, query_for_entry};
-use crate::{JsonMap, JsonVal};
+use crate::{db, JsonMap, JsonVal};
 use anyhow::{anyhow, Result};
 use self::Entry::{Instance, Series, Study};
 
@@ -21,6 +21,11 @@ impl Entry
 		else {Err(anyhow!("Invalid query result for constructing an entry"))}
 	}
 
+	pub async fn list_children<T>(&self, col:T) -> Result<Vec<JsonVal>> where T:AsRef<str>
+	{
+		let id = self.data().get("id").ok_or(anyhow!(r#""id" missing in entry"#))?;
+		Ok(db::list_children(json_to_thing(id.to_owned())?,col).await?)
+	}
 	fn data(&self) -> &JsonMap
 	{
 		match self {
@@ -28,6 +33,10 @@ impl Entry
 		}
 	}
 
+	pub fn get(&self, key:&str) -> Option<&JsonVal>
+	{
+		self.data().get(key)
+	}
 	pub fn get_id(&self) -> &str
 	{
 		self.data()

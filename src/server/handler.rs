@@ -9,18 +9,18 @@ use anyhow::{anyhow, Context};
 use axum::body::Bytes;
 use dicom::pixeldata::PixelDecoder;
 use dicom_pixeldata::image::ImageOutputFormat;
-use crate::db::{find_down_tree, json_id_cleanup, query_for_entry};
+use crate::db::{find_down_tree, json_id_cleanup, json_to_thing, query_for_entry};
 use super::{JsonError, TextError};
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove, store};
-use crate::{JsonVal, tools};
+use crate::{db, JsonVal, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
 use surrealdb::sql::Thing;
 
 #[cfg(feature = "html")]
-use html::root::Body;
+use html::{root::Body,tables::builders::TableCellBuilder};
 #[cfg(feature = "html")]
-use crate::server::html::{make_entry_page, make_table_from_objects, wrap_body};
+use crate::server::html::{HtmlEntry,make_entry_page, make_table_from_objects, wrap_body};
 #[cfg(feature = "html")]
 use axum::response::Html;
 #[cfg(feature = "html")]
@@ -51,8 +51,25 @@ pub(crate) async fn get_studies_html() -> Result<Html<String>,TextError>
 		.chain(config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
 		.unique()//make sure there are no duplicates
 		.collect();
-	let list = crate::db::list_table("studies").await?;
-	let table= make_table_from_objects(list, "Study".to_string(), keys, [].into()).await
+
+	let mut studies = crate::db::list_table("studies").await?;
+
+	// count instances before as db::list_children cant be used in a closure
+	for study in &mut studies
+	{
+		let id=study.get("id").expect(r#""id" expected"#);
+		let instances=db::list_children(json_to_thing(id.to_owned())?,"series.instances").await?.into_iter()
+			.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})
+			.flatten().count();
+		study.as_object_mut().expect("must be an object").insert("Instances".into(),instances.into());
+	}
+	let countinstances = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
+		let inst_cnt=obj.get("Instances").expect(r#""Instances" expected"#);
+		cell.text(inst_cnt.to_string());
+	};
+
+
+	let table= make_table_from_objects(studies, "Study".to_string(), keys, vec![("Instances",countinstances)]).await
 		.map_err(|e|e.context("Failed generating the table"))?;
 
 	let mut builder = Body::builder();

@@ -11,6 +11,7 @@ use surrealdb::sql::Thing;
 use crate::db::{Entry,find_down_tree, json_to_thing};
 use crate::{db, JsonMap, JsonVal};
 use crate::server::html_item::HtmlItem;
+use crate::tools::{json_to_path, reduce_path};
 
 pub(crate) struct HtmlEntry(Entry);
 
@@ -28,6 +29,11 @@ impl HtmlEntry
 			.text(self.0.get_name())
 			.build()
 	}
+	pub fn get(&self, key:&str) -> Option<&JsonVal>
+	{
+		self.0.get(key)
+	}
+
 	pub fn into_items(self, keys: &Vec<String>) -> anyhow::Result<LinkedList<(String,HtmlItem)>>
 	{
 		let link = self.get_link();
@@ -172,7 +178,7 @@ pub(crate) async fn make_table_from_objects(
 	//build rest of the table
 	for entry in list.into_iter() //rows
 	{
-		let addcells:Vec<_> = additional.iter().map(|(key,func)|{
+		let addcells:Vec<_> = additional.iter().map(|(_,func)|{
 			let mut cell = TableCell::builder();
 			func(&entry,&mut cell);
 			cell.build()
@@ -205,18 +211,39 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 	builder.heading_1(|h|h.text(name.to_owned()));
 	match entry {
 		Entry::Instance(mut instance) => {
-			let _file = instance.remove("file");
+			if let JsonVal::Object(file) = instance.remove("file")
+				.ok_or(anyhow!(r#""file" is missing for {}"#,id.id.to_raw()))?
+			{
+				let filepath=json_to_path(&file)?;
+				builder
+					.heading_2(|t|t.text("filename"))
+					.paragraph(|p|p.text(filepath.to_string_lossy().to_string()));
+			} else { bail!(r#""file" sould be an object"#) }
+
 			instance.remove("series");
-			builder.push(make_table_from_map(instance));
-			builder.paragraph(|p|
-				p.image(|i|i.src(format!("/instances/{}/png",id.id.to_raw())))
-			);
+			builder.heading_2(|h|h.text("Attributes"))
+				.push(make_table_from_map(instance));
+			builder.heading_2(|h|h.text("Image"))
+				.paragraph(|p|
+					p.image(|i|i.src(format!("/instances/{}/png",id.id.to_raw())))
+				);
 		}
 		Entry::Series(mut series) => {
 			series.remove("instances");
 			series.remove("study");
-			builder.push(make_table_from_map(series));
+			builder.heading_2(|h|h.text("Attributes")).push(make_table_from_map(series));
 			let mut instances=db::list_children(id,"instances").await?;
+			let files:anyhow::Result<Vec<_>>=instances.iter()
+				.filter_map(|v|v.get("file").and_then(|f|f.as_object()))
+				.map(|o|json_to_path(o))
+				.collect();
+			if let Ok(path) = files.map(reduce_path)
+			{
+				builder
+					.heading_2(|t|t.text("Path"))
+					.paragraph(|p|p.text(path.to_string_lossy().to_string()));
+			}
+
 			instances.sort_by_key(|s|s
 				.get("InstanceNumber").expect("missing InstanceNumber").as_str().unwrap()
 				.parse::<u64>().expect("InstanceNumber is not a number")
@@ -234,16 +261,43 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 		}
 		Entry::Study(mut study) => {
 			study.remove("series");
-			builder.push(make_table_from_map(study));
-			let mut series=db::list_children(id,"series").await?;
+			builder.heading_2(|h|h.text("Attributes")).push(make_table_from_map(study));
+
+			let mut series=db::list_children(id.to_owned(),"series").await?;
+			// get flat list of file-attributes
+			// let files:Vec<_>=db::list_children(id,"series.instances.file").await?.into_iter()
+			// 	.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})
+			// 	.flatten().collect();
+			// makes PathBuf of them
+			// let files:anyhow::Result<Vec<_>>=files.iter()
+			// 	.filter_map(|f|f.as_object())
+			// 	.map(|o|json_to_path(o))
+			// 	.collect();
+			// reduce them ant print them @todo this is very expensive, maybe find a better way
+			// if let Ok(path) = files.map(reduce_path)
+			// {
+			// 	builder
+			// 		.heading_2(|t|t.text("Path"))
+			// 		.paragraph(|p|p.text(path.to_string_lossy().to_string()));
+			// }
+
 			series.sort_by_key(|s|s
 					.get("SeriesNumber").expect("missing SeriesNumber").as_str().unwrap()
 					.parse::<u64>().expect("SeriesNumber is not a number")
 			);
+			let countinstances = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
+				if let Some(len)= obj.0
+					.get("instances")
+					.and_then(|i|i.as_array())
+					.map(|l|l.len())
+				{
+					cell.text(format!("{} instances",len));
+				}
+			};
 
 			let keys= crate::config::get::<Vec<String>>("series_tags")?;
 			let series_text = format!("{} Series",series.len());
-			let series_table = make_table_from_objects(series, "Name".into(), keys, [].into()).await?;
+			let series_table = make_table_from_objects(series, "Name".into(), keys, vec![("Instances",countinstances)]).await?;
 			builder.heading_2(|h|h.text(series_text)).push(series_table);
 		}
 	}

@@ -3,7 +3,7 @@ pub mod remove;
 pub mod import;
 
 use std::any::type_name;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context};
 use dicom::object::DefaultDicomObject;
 use serde::de::DeserializeOwned;
@@ -11,8 +11,36 @@ use surrealdb::sql::Thing;
 pub use remove::remove;
 pub use store::store;
 use crate::{JsonMap, storage};
-use crate::dcm::complete_filepath;
 
+pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
+{
+	let first=paths.first().expect("path list must not be empty");
+	let mut last_pos=0;
+	for base in first.ancestors()
+	{
+		if let Some(pos)=paths.iter().skip(last_pos).position(|p|!p.starts_with(base)){
+			last_pos=pos;
+		} else { return base.to_path_buf(); }
+	}
+	PathBuf::new()
+}
+
+pub fn complete_filepath<P>(path:P) -> PathBuf where P:AsRef<Path>
+{
+	let root:PathBuf = crate::config::get("storage_path").expect(r#""storage_path" missing or invalid in config"#);
+	root.join(path)
+}
+pub fn json_to_path(obj:&JsonMap) -> anyhow::Result<PathBuf>
+{
+	let owned:bool = obj
+		.get("owned").ok_or(anyhow!(r#""owned" missing in file entry"#))?
+		.as_bool().ok_or(anyhow!(r#""owned" should be bool"#))?;
+	let path = obj
+		.get("path").ok_or(anyhow!(r#""path" missing in file entry"#))?
+		.as_str().ok_or(anyhow!(r#""path" should be bool"#))?;
+	if owned{Ok(complete_filepath(path))}
+	else {Ok(path.into())}
+}
 
 pub async fn get_instance_dicom(id:&str) -> anyhow::Result<Option<DefaultDicomObject>>
 {

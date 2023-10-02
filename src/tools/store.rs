@@ -3,8 +3,9 @@ use anyhow::{Context, Result};
 use dicom::object::DefaultDicomObject;
 use crate::{DbVal, register_instance, RegistryGuard};
 use crate::JsonVal;
-use crate::dcm::{complete_filepath, gen_filepath};
+use crate::dcm::gen_filepath;
 use crate::storage::async_store::write_file;
+use crate::tools::complete_filepath;
 
 pub async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result<JsonVal>
 {
