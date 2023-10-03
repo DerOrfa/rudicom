@@ -1,4 +1,4 @@
-use axum::{Json, Router, routing::{get, post}};
+use axum::{Json, Router, routing::{get, post, delete}};
 use std::net::SocketAddr;
 use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
@@ -57,12 +57,11 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 	// build our application with a route
 	let mut app = Router::new()
 		.route("/instances",post(handler::store_instance))
+		.route("/:table/:id",delete(handler::del_entry))
 		.route("/tools/import/json",post(handler::import_json))
 		.route("/tools/import/text",post(handler::import_text))
 		.route("/studies/json",get(handler::get_studies))
-		.route("/:table/:id/json",
-			   get(handler::get_entry).delete(handler::del_entry)
-		)
+		.route("/:table/:id/json",get(handler::get_entry))
 		.route("/:table/:id/json/*query",get(handler::query))
 		.route("/:table/:id/parents",get(handler::get_entry_parents))
 		.route("/instances/:id/json-ext",get(handler::get_instance_json_ext))

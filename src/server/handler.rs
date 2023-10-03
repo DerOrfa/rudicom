@@ -24,6 +24,8 @@ use crate::server::html::{HtmlEntry,make_entry_page, make_table_from_objects, wr
 use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
+use tokio::task::JoinSet;
+use crate::db::Entry;
 
 pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 {
@@ -39,8 +41,13 @@ pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
 	Ok(Json(JsonVal::from(studies)))
 }
 
+#[derive(Deserialize)]
+pub(crate) struct StudyFilter {
+	filter: String,
+}
+
 #[cfg(feature = "html")]
-pub(crate) async fn get_studies_html() -> Result<axum::response::Html<String>,TextError>
+pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Result<axum::response::Html<String>,TextError>
 {
 	let keys=["StudyDate", "StudyTime"].into_iter().map(|s|s.to_string())
 		.chain(crate::config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
@@ -48,24 +55,49 @@ pub(crate) async fn get_studies_html() -> Result<axum::response::Html<String>,Te
 		.collect();
 
 	let mut studies = crate::db::list_table("studies").await?;
-
-	// count instances before as db::list_children cant be used in a closure
-	for study in &mut studies
+	if let Some(filter) = filter
 	{
-		let id=study.get("id").expect(r#""id" expected"#);
-		let instances=db::list_children(db::json_to_thing(id.to_owned())?,"series.instances").await?.into_iter()
-			.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})
-			.flatten().count();
-		study.as_object_mut().expect("must be an object").insert("Instances".into(),instances.into());
+		// @todo do this without copies
+		studies=studies.into_iter()
+			.filter(|s|
+				if let JsonVal::Object(o)= s {
+					Entry::try_from(o.to_owned()).ok()
+						.and_then(|e|e.get_name().find(filter.filter.as_str())).is_some()
+				} else {
+					false
+				}
+			)
+			.collect();
 	}
+
+	// count instances before as db::list_children cant be used in a closure / also parallelization
+	let mut counts=JoinSet::new();
+	for (id,i) in studies.iter().zip(0..)
+		.filter_map(|(study,index)|study.get("id").map(|id|(id,index)))
+		.filter_map(|(id,index)|db::json_to_thing(id.to_owned()).map(|id|(id,index)).ok())
+	{
+		counts.spawn(async move {
+			let instances=db::list_children(id,"series.instances").await.unwrap().into_iter()
+				.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})
+				.flatten().count();
+			(i,instances)
+		});
+	}
+	// collect results from above
+	while let Some(res) = counts.join_next().await{
+		let (index,count) = res?;
+		studies[index].as_object_mut().expect("must be an object").insert("Instances".into(),count.into());
+	}
+	//		study;
 	let countinstances = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
 		let inst_cnt=obj.get("Instances").expect(r#""Instances" expected"#);
 		cell.text(inst_cnt.to_string());
 	};
 
-
-	let table= make_table_from_objects(studies, "Study".to_string(), keys, vec![("Instances",countinstances)]).await
-		.map_err(|e|e.context("Failed generating the table"))?;
+	let table= make_table_from_objects(
+		studies, "Study".to_string(), keys,
+		vec![("Instances",countinstances)]
+	).await.map_err(|e|e.context("Failed generating the table"))?;
 
 	let mut builder = Body::builder();
 	builder.heading_1(|h|h.text("Studies"));
