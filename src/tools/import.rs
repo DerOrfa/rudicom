@@ -1,17 +1,17 @@
 use std::path::Path;
 use anyhow::{Result,anyhow};
 use tokio::task::JoinError;
-use crate::{JsonMap, JsonVal};
 use crate::storage::register_file;
 use futures::{Stream, TryStreamExt, StreamExt};
 use glob::glob;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
+use crate::db::Entry;
 
 pub(crate) enum ImportResult {
 	Registered{filename:String},
-	Existed{filename:String,existed:JsonMap},
-	ExistedConflict {filename:String,my_md5:String,existed:JsonMap},
+	Existed{filename:String,existed:Entry},
+	ExistedConflict {filename:String,my_md5:String,existed:Entry},
 	Err{filename:String,error:anyhow::Error}
 }
 
@@ -54,25 +54,24 @@ impl Serialize for ImportResult
 async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 {
 	let filename= path.as_ref().to_string_lossy().to_string();
-	match register_file(path.as_ref()).await{
+	match register_file(path.as_ref()).await
+	{
 		Ok(v) => match v {
-			JsonVal::Null => ImportResult::Registered{ filename },
-			JsonVal::Object(mut existed) => {
+			None => ImportResult::Registered{ filename },
+			Some(mut existed) => {
 				if let Some(conflicting_md5) = existed.remove("conflicting_md5"){
 					ImportResult::ExistedConflict {
 						filename,existed,
-						my_md5: conflicting_md5.as_str().unwrap().to_string()
+						my_md5: conflicting_md5.as_raw_string().to_string()
 					}
 				} else {ImportResult::Existed { filename, existed }}
 			},
-			_ => ImportResult::Err{
-				error:anyhow!("Unexpected database reply when storing {}",path.as_ref().to_string_lossy()),
-				filename
-			},
 		},
 		Err(e) => {
-			let error = e.context(format!("registering {} failed",path.as_ref().to_string_lossy()));
-			return ImportResult::Err{error,filename};
+			ImportResult::Err{
+				error:e.context(format!("registering {} failed",path.as_ref().to_string_lossy())),
+				filename
+			}
 		}
 	}
 }
@@ -124,17 +123,11 @@ pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:
 		.map_ok(|item|match item {
 			ImportResult::Registered { filename } => format!("{filename} stored"),
 			ImportResult::ExistedConflict { filename, existed, .. } => {
-				let existing_file=existed.get("file" )
-					.and_then(|file|file.get("path"))
-					.unwrap_or(&JsonVal::String("<<none>>".into()))
-					.to_string();
+				let existing_file=existed.get_file().unwrap().path;
 				format!("{filename} already existed as {existing_file} but checksum differs")
 			},
 			ImportResult::Existed { filename, existed } => {
-				let existing_file=existed.get("file" )
-					.and_then(|file|file.get("path"))
-					.unwrap_or(&JsonVal::String("<<none>>".into()))
-					.to_string();
+				let existing_file=existed.get_file().unwrap().path;
 				format!("{filename} already existed as {existing_file}")
 			},
 			ImportResult::Err { filename, error } =>

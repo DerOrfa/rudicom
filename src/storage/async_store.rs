@@ -6,13 +6,13 @@ use md5::Context;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt,AsyncReadExt};
 
-pub fn read<T>(input: T, skip:Option<u64>, with_md5:Option<&mut Context>) -> Result<DefaultDicomObject> where T:AsRef<[u8]>
+pub fn read<T>(input: T, with_md5:Option<&mut Context>) -> Result<DefaultDicomObject> where T:AsRef<[u8]>
 {
 	let mut buffer = Cursor::new(input);
 	if let Some( md5) = with_md5 {
 		std::io::copy(&mut buffer,md5).unwrap();
+		buffer.seek(SeekFrom::Start(0))?;
 	}
-	if let Some(skip) = skip {buffer.seek(SeekFrom::Start(skip))?;}
 	Ok(from_reader(buffer)?)
 }
 
@@ -44,7 +44,6 @@ pub async fn read_file<T>(path:T,with_md5:Option<&mut Context>) -> Result<Defaul
 	let mut buffer = Vec::<u8>::new();
 	File::open(path.as_ref()).await?.read_to_end(&mut buffer).await?;
 	if buffer.len()==0 {bail!("There is no data in {}",path.as_ref().to_string_lossy())}
-	let skip = if buffer.len() >= 132 && &buffer[128..132] == b"DICM" {Some(128)} else { None };
-	read(buffer, skip, with_md5)
+	read(buffer, with_md5)
 }
 

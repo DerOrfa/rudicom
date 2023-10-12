@@ -1,14 +1,13 @@
 use std::path::{Path, PathBuf};
 use surrealdb::sql::Thing;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use tokio::fs::{remove_file,remove_dir};
-use crate::db::{query_for_list, unregister};
-use crate::JsonVal;
+use crate::db;
 
 pub async fn remove(id:Thing) -> Result<()>{
 	let instances= match id.tb.as_str() {
-		"studies" => query_for_list(id,"series.instances").await?,
-		"series" => query_for_list(id,"instances").await?,
+		"studies" => db::query_for_list(id,"series.instances").await?,
+		"series" => db::query_for_list(id,"instances").await?,
 		"instances" => vec![id],
 		_ => bail!("Invalid table name {} (available [\"studies\",\"series\",\"instances\"])",id.tb)
 	};
@@ -18,23 +17,21 @@ pub async fn remove(id:Thing) -> Result<()>{
 	Ok(())
 }
 
-async fn remove_instance(id:Thing) -> Result<JsonVal>
+async fn remove_instance(id:Thing) -> Result<Option<db::Entry>>
 {
-	match unregister(id).await? {
-		JsonVal::Null => Ok(JsonVal::Null),
-		JsonVal::Object(removed) => {
-			let file = removed.get("file")
-				.ok_or(anyhow!("missing file data in deleted instance"))?;
-			let owned = file.get("owned").map_or(false,|v|v.as_bool().unwrap());
-			if owned {
-				let storage_path = crate::config::get::<PathBuf>("storage_path").expect(r#""storage_path" missing or invalid in config"#);
-				let path = storage_path.join(file.get("path").unwrap().as_str().unwrap());
-				remove_file(&path).await?;
-				remove_path(path.parent().unwrap().to_path_buf(),storage_path.as_path()).await?;
-			}
-			Ok(JsonVal::Object(removed))
-		},
-		_ => Err(anyhow!("Invalid database response"))
+	let res= db::unregister(id).await?;
+	if res.is_none(){
+		Ok(None)
+	} else {
+		let removed = db::Entry::try_from(res)?;
+		let file = removed.get_file()?;
+		if file.owned {
+			let storage_path = crate::config::get::<PathBuf>("storage_path").expect(r#""storage_path" missing or invalid in config"#);
+			let path = storage_path.join(file.path.as_str());
+			remove_file(&path).await?;
+			remove_path(path.parent().unwrap().to_path_buf(),storage_path.as_path()).await?;
+		}
+		Ok(Some(removed))
 	}
 }
 

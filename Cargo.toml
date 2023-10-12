@@ -13,7 +13,7 @@ embedded = ["surrealdb/kv-rocksdb"]
 html = ["dep:html"]
 
 [dependencies]
-dicom = {version = "0.6.1", features = ["pixeldata"] }
+dicom = {version = ">0.6.1", features = ["pixeldata"] }
 dicom-pixeldata = { version = "0.2", features = ["image"] }
 dicom-json = "0.1"
 anyhow = {version = "1.0", features = ["backtrace"]}
@@ -21,18 +21,18 @@ clap = { version = "4.4", features = ["derive","color","usage"] }
 serde_json = "1.0"
 surrealdb = {version = "1.0", features = ["protocol-ws"]}
 serde = "1.0"
-tokio = { version = "1.32", features = ["macros", "rt-multi-thread", "fs"] }
+tokio = { version = "1.33", features = ["macros", "rt-multi-thread", "fs"] }
 glob = "0.3"
 config = {version = "0.13", default-features = false, features = ["toml"]}
 md5 = "0.7"
-runtime-format = "0.1.3"
+runtime-format = "0.1"
 axum = {version = "0.6", features = ["tracing","query"]}
-axum-extra = {version = "0.7", features = ["async-read-body"]}
+axum-extra = {version = "0.8", features = ["async-read-body"]}
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = "0.11"
 futures = {version = "0.3", default-features = false}
-axum-streams = {version = "0.9", default-features = false, features = ["text","json"]}
+axum-streams = {version = "0.10.0", default-features = false, features = ["text","json"]}
 html = { version = "0.6", optional = true}
 itertools = "0.11"
 

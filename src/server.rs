@@ -10,8 +10,8 @@ use crate::{config, db};
 mod handler;
 #[cfg(feature = "html")]
 pub(crate) mod html;
-#[cfg(feature = "html")]
-pub(crate) mod html_item;
+// #[cfg(feature = "html")]
+// pub(crate) mod html_item;
 
 pub(crate) struct TextError(anyhow::Error);
 impl IntoResponse for TextError {
