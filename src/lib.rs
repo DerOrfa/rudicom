@@ -54,7 +54,7 @@ pub async fn register_instance(obj:&DefaultDicomObject,add_meta:Vec<(String,DbVa
 	let series_id:DbVal = Thing::from(("series",series_id.as_ref())).into();
 	let study_id:DbVal = Thing::from(("studies",study_id.as_ref())).into();
 
-	let instance_tags= INSTANCE_TAGS.get_or_init(||get_attr_list("instace_tags", vec!["InstanceNumber"]));
+	let instance_tags= INSTANCE_TAGS.get_or_init(||get_attr_list("instance_tags", vec!["InstanceNumber"]));
 	let series_tags = SERIES_TAGS.get_or_init(||get_attr_list("series_tags",vec!["SeriesDescription", "SeriesNumber"]));
 	let study_tags = STUDY_TAGS.get_or_init(||get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
 

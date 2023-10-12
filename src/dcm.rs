@@ -21,7 +21,8 @@ pub fn find_tag(name:&str) -> Option<Tag>
 
 pub fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
 {
-	let mut config=config::get::<Vec<String>>(config_key).unwrap();
+	let mut config = config::get::<Vec<String>>(config_key)
+		.expect(format!(r#"failed getting {config_key} from the config"#).as_str());
 	config.extend(must_have.into_iter().map(|s|s.to_string()));
 	config.sort();
 	config.dedup();

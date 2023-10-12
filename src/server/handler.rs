@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::mem::swap;
 use axum::response::{IntoResponse, Response, Json};
 use axum::http::{header, StatusCode};
 use axum::extract::{Path, Query, rejection::BytesRejection};
@@ -14,33 +13,27 @@ use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove, store};
 use crate::{db, JsonVal, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
-use surrealdb::sql::Thing;
 
 #[cfg(feature = "html")]
 use html::{root::Body,tables::builders::TableCellBuilder};
 #[cfg(feature = "html")]
 use crate::server::html::{HtmlEntry,make_entry_page, make_table_from_objects, wrap_body};
 #[cfg(feature = "html")]
+use tokio::task::JoinSet;
+#[cfg(feature = "html")]
 use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
-use tokio::task::JoinSet;
+use surrealdb::sql;
 use crate::db::Entry;
 
-pub(crate) async fn get_studies() -> Result<Json<JsonVal>,JsonError>
+pub(crate) async fn get_studies() -> Result<Json<Vec<Entry>>,JsonError>
 {
-	let mut studies = crate::db::list_table("studies").await?;
-	for study in &mut studies{
-		let series=study.get_mut("series").unwrap();
-		let mut new_series= db::json_id_cleanup(series)?;
-		swap(series,&mut new_series);
-		let id = study.get_mut("id").unwrap();
-		let mut new_id = db::json_id_cleanup(id)?;
-		swap(id,&mut new_id);
-	}
-	Ok(Json(JsonVal::from(studies)))
+	let studies = db::list_table("studies").await?;
+	Ok(Json(studies))
 }
 
+#[cfg(feature = "html")]
 #[derive(Deserialize)]
 pub(crate) struct StudyFilter {
 	filter: String,
@@ -54,43 +47,35 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
 		.unique()//make sure there are no duplicates
 		.collect();
 
-	let mut studies = crate::db::list_table("studies").await?;
+	let mut studies = db::list_table("studies").await?;
 	if let Some(filter) = filter
 	{
-		// @todo do this without copies
-		studies=studies.into_iter()
-			.filter(|s|
-				if let JsonVal::Object(o)= s {
-					Entry::try_from(o.to_owned()).ok()
-						.and_then(|e|e.get_name().find(filter.filter.as_str())).is_some()
-				} else {
-					false
-				}
-			)
-			.collect();
+		studies.retain(|e|e.get_name().find(filter.filter.as_str()).is_some());
 	}
 
 	// count instances before as db::list_children cant be used in a closure / also parallelization
 	let mut counts=JoinSet::new();
-	for (id,i) in studies.iter().zip(0..)
-		.filter_map(|(study,index)|study.get("id").map(|id|(id,index)))
-		.filter_map(|(id,index)|db::json_to_thing(id.to_owned()).map(|id|(id,index)).ok())
+	for id in studies.iter().map(|e|e.id().clone())
 	{
 		counts.spawn(async move {
-			let instances=db::list_children(id,"series.instances").await.unwrap().into_iter()
-				.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})
-				.flatten().count();
-			(i,instances)
+			if let Ok(instances)=db::list_values(&id, "series.instances").await
+			{
+				let instances= instances.into_iter()
+					.filter_map(|v|if let sql::Value::Array(array) = v{Some(array)} else {None})
+					.flatten().count();
+				(id,instances)
+			} else { (id, 0) }
 		});
 	}
 	// collect results from above
-	while let Some(res) = counts.join_next().await{
-		let (index,count) = res?;
-		studies[index].as_object_mut().expect("must be an object").insert("Instances".into(),count.into());
+	let mut instance_count : HashMap<_,_> = HashMap::new();
+	while let Some(res) = counts.join_next().await
+	{
+		let (k,v) = res?;
+		instance_count.insert(k,v);
 	}
-	//		study;
-	let countinstances = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
-		let inst_cnt=obj.get("Instances").expect(r#""Instances" expected"#);
+	let countinstances = |obj:&HtmlEntry,cell:&mut TableCellBuilder| {
+		let inst_cnt=instance_count[obj.id()];
 		cell.text(inst_cnt.to_string());
 	};
 
@@ -107,36 +92,36 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
 #[cfg(feature = "html")]
 pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Result<Response,TextError>
 {
-	match db::query_for_entry((table.as_str(),id.as_str()).into()).await?
+	if let Some(entry) = db::lookup((table.as_str(), id.as_str()).into()).await?
 	{
-		JsonVal::Null => Ok((StatusCode::NOT_FOUND,Json(json!({"Status":"not found"}))).into_response()),
-		JsonVal::Object(entry) => {
-			let page = make_entry_page(entry).await?;
-			Ok(axum::response::Html(page.to_string()).into_response())
-		}
-		_ => Err(anyhow!("Invalid database response").into())
+		let page = make_entry_page(entry).await?;
+		Ok(axum::response::Html(page.to_string()).into_response())
+	}
+	else
+	{
+		Ok((StatusCode::NOT_FOUND,Json(json!({"Status":"not found"}))).into_response())
 	}
 }
 
 pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<Response,JsonError>
 {
-	let res=db::query_for_entry((table.as_str(),id.as_str()).into()).await?;
-	if res.is_null(){
+	if let Some(res)=db::lookup((table.as_str(), id.as_str()).into()).await?
+	{
+		Ok(Json(res).into_response())
+	} else {
 		Ok((
 			StatusCode::NOT_FOUND,
 			Json(json!({"Status":"not found"}))
 		).into_response())
-	} else {
-		Ok(Json(res).into_response())
 	}
 }
 pub(super) async fn query(Path((table,id,query)):Path<(String,String,String)>) -> Result<Response,JsonError>
 {
-	if let JsonVal::Object(res) = db::query_for_entry((table.as_str(),id.as_str()).into()).await?
+	if let Some(res) = db::lookup((table.as_str(), id.as_str()).into()).await?
 	{
 		let query=query.replace("/",".");
-		let children=db::Entry::try_from(res)?.list_children(query).await?;
-		Ok(Json(JsonVal::Array(children)).into_response())
+		let children=res.list_children(query).await?;
+		Ok(Json(children).into_response())
 	} else {
 		Ok((
 			StatusCode::NOT_FOUND,
@@ -149,13 +134,16 @@ pub(super) async fn del_entry(Path((table,id)):Path<(String,String)>) -> Result<
 	remove((table.as_str(),id.as_str()).into()).await.map_err(|e|e.into())
 }
 
-pub(super) async fn get_entry_parents(Path((table,id)):Path<(String,String)>) -> Result<Json<JsonVal>,JsonError>
+pub(super) async fn get_entry_parents(Path((table,id)):Path<(String,String)>) -> Result<Json<Vec<Entry>>,JsonError>
 {
-	let mut ret:Vec<JsonVal>=Vec::new();
-	for id in db::find_down_tree(&Thing::from((table,id))).await?{
-		ret.push(db::query_for_entry(id.to_owned()).await?);
+	let mut ret:Vec<Entry>=Vec::new();
+	for id in db::find_down_tree(&sql::Thing::from((table,id))).await?
+	{
+		let e=db::lookup(id.clone()).await?
+			.expect(format!("lookup for parent {id} not found").as_str());
+		ret.push(e);
 	}
-	Ok(Json(JsonVal::Array(ret)))
+	Ok(Json(ret))
 }
 
 pub(super) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {

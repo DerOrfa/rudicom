@@ -1,94 +1,101 @@
-use surrealdb::sql::Thing;
-use crate::db::{json_to_thing, query_for_entry};
-use crate::{db, JsonMap, JsonVal};
+use surrealdb::sql;
+use crate::db;
 use anyhow::{anyhow, Result};
+use futures::StreamExt;
+use serde::{Serialize, Serializer};
+use serde::ser::SerializeMap;
+use surrealdb::sql::Thing;
 use self::Entry::{Instance, Series, Study};
 
 pub(crate) enum Entry
 {
-	Instance(JsonMap),
-	Series(JsonMap),
-	Study(JsonMap)
+	Instance((sql::Thing,sql::Object)),
+	Series((sql::Thing,sql::Object)),
+	Study((sql::Thing,sql::Object))
 }
 
 impl Entry
 {
-	pub async fn query(id:Thing) -> Result<Entry>
+	pub fn get(&self, key:&str) -> Option<&sql::Value>
 	{
-		if let JsonVal::Object(me) = query_for_entry(id).await?{
-			Entry::try_from(me)
-		}
-		else {Err(anyhow!("Invalid query result for constructing an entry"))}
+		self.data().1.get(key)
 	}
-
-	pub async fn list_children<T>(&self, col:T) -> Result<Vec<JsonVal>> where T:AsRef<str>
+	pub fn get_string(&self, key:&str) -> Option<String>
 	{
-		let id = self.data().get("id").ok_or(anyhow!(r#""id" missing in entry"#))?;
-		Ok(db::list_children(json_to_thing(id.to_owned())?,col).await?)
+		self.get(key).map(|v|v.to_raw_string())
 	}
-	fn data(&self) -> &JsonMap
+	fn data(&self) -> &(Thing,sql::Object)
 	{
 		match self {
-			Instance(v)| Series(v) | Study(v) => v
+			Instance(data)| Series(data) | Study(data) => data
 		}
 	}
-
-	pub fn get(&self, key:&str) -> Option<&JsonVal>
-	{
-		self.data().get(key)
-	}
-	pub fn get_id(&self) -> &str
-	{
-		self.data()
-			.get("id").expect("Entry must have an id")
-			.get("id").and_then(|id|id.get("String"))
-			.and_then(|s|s.as_str()).expect("invalid id")
-	}
+	pub fn id(&self) -> &Thing	{&self.data().0}
 
 	pub fn get_name(&self) -> String
 	{
 		match self {
-			Instance(data) => {
-				let number=data.get("InstanceNumber").and_then(|v|v.as_str()).unwrap_or("--");
+			Instance(_) => {
+				let number=self.get_string("InstanceNumber").unwrap_or("--".to_string());
 				format!("Instance {number}")
 			},
-			Series(data) => {
-				let number=data.get("SeriesNumber").and_then(|v|v.as_str()).unwrap_or("--");
-				let desc= data.get("SeriesDescription").and_then(|v|v.as_str()).unwrap_or("--");
+			Series(_) => {
+				let number=self.get_string("SeriesNumber").unwrap_or("--".to_string());
+				let desc= self.get_string("SeriesDescription").unwrap_or("--".to_string());
 				format!("S{number}_{desc}")
 			},
-			Study(data) => {
-				let id=data.get("PatientID").and_then(|v|v.as_str()).unwrap_or("--");
-				let date=data.get("StudyDate").and_then(|v|v.as_str()).unwrap_or("--");
-				let time=data.get("StudyTime").and_then(|v|v.as_str()).unwrap_or("--");
+			Study(_) => {
+				let id=self.get_string("PatientID").unwrap_or("--".to_string());
+				let date=self.get_string("StudyDate").unwrap_or("--".to_string());
+				let time=self.get_string("StudyTime").unwrap_or("--".to_string());
 				format!("{id}/{date}_{time}")
 			}
 		}
 	}
 
-	pub fn remove(&mut self,key:&str)
+	pub fn remove(&mut self,key:&str) -> Option<sql::Value>
 	{
 		match self {
-			Instance(data) => data,
-			Series(data) => data,
-			Study(data) => data
-		}.remove(key);
+			Instance((_,data)) | Series((_,data)) | Study((_,data)) => data
+		}.remove(key)
 	}
 }
 
-impl TryFrom<JsonMap> for Entry
+impl TryFrom<sql::Object> for Entry
 {
 	type Error = anyhow::Error;
 
-	fn try_from(json_entry: JsonMap) -> std::result::Result<Self, Self::Error> {
-		let id=json_entry.get("id").ok_or(anyhow!(r#"no "id" in entry"#))?;
-		let table= json_to_thing(id.clone())?.tb;
+	fn try_from(mut obj: sql::Object) -> std::result::Result<Self, Self::Error>
+	{
+		match obj.remove("id").ok_or(anyhow!(r#"Entry missing "id""#))?
+		{
+			sql::Value::Thing(id) => {
+				match id.tb.as_str() {
+					"instances" => Ok(Instance((id, obj))),
+					"series" => Ok(Series((id, obj))),
+					"studies" => Ok(Study((id, obj))),
+					_ => Err(anyhow!("invalid table name"))
+				}
+			}
+			_ => Err(anyhow!(r#""id" is not an id"#))
+		}
+	}
+}
 
-		Ok(match table.as_str() {
-			"instances" => {Instance(json_entry)},
-			"series" => {Series(json_entry)},
-			"studies" => {Study(json_entry)}
-			_ => {panic!("invalid table name")}
-		})
+impl Serialize for Entry
+{
+	fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> where S: Serializer
+	{
+		let typename= match self {
+			Instance(_) => "instance",
+			Series(_) => "series",
+			Study(_) => "study"
+		};
+		let mut map = self.data().1.clone();
+		map.insert("id".to_string(),self.id().clone().into());
+
+		let mut s= serializer.serialize_map(Some(1))?;
+		s.serialize_entry(typename,&map)?;
+		s.end()
 	}
 }

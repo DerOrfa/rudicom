@@ -1,22 +1,23 @@
-use std::collections::LinkedList;
-use anyhow::{anyhow, bail, Context};
+use std::collections::{BTreeMap, LinkedList};
+use anyhow::{bail, Context};
 use html::content::Navigation;
 use html::root::{Body,Html};
 use html::inline_text::Anchor;
 use html::tables::{TableCell,TableRow};
 use html::tables::builders::TableCellBuilder;
 use html::tables::Table;
-use serde_json::Value;
-use surrealdb::sql::Thing;
+use surrealdb::sql;
+use surrealdb::sql::Value;
 use crate::db::{Entry,find_down_tree, json_to_thing};
 use crate::{db, JsonMap, JsonVal};
 use crate::server::html_item::HtmlItem;
-use crate::tools::{json_to_path, reduce_path};
+use crate::tools::{json_to_path, lookup_instance_filepath, reduce_path};
 
 pub(crate) struct HtmlEntry(Entry);
 
 impl HtmlEntry
 {
+	pub fn id(&self) -> &sql::Thing {self.0.id()}
 	pub fn get_link(&self) -> Anchor
 	{
 		let typename = match self.0 {
@@ -25,7 +26,7 @@ impl HtmlEntry
 			Entry::Study(_) => "studies"
 		};
 		Anchor::builder()
-			.href(format!("/{typename}/{}/html",self.0.get_id()))
+			.href(format!("/{typename}/{}/html",self.id()))
 			.text(self.0.get_name())
 			.build()
 	}
@@ -65,7 +66,7 @@ impl HtmlEntry
 		Ok(out)
 	}
 
-	pub async fn query(id:Thing) -> anyhow::Result<HtmlEntry>
+	pub async fn query(id:sql::Thing) -> anyhow::Result<HtmlEntry>
 	{
 		Ok(HtmlEntry{ 0: Entry::query(id).await? })
 	}
@@ -105,7 +106,7 @@ pub fn wrap_body<T>(body:Body, title:T) -> Html where T:Into<std::borrow::Cow<'s
 		.build()
 }
 
-async fn make_nav(entry:&Thing) -> anyhow::Result<Navigation>
+async fn make_nav(entry:&sql::Thing) -> anyhow::Result<Navigation>
 {
 	let mut anchors = Vec::<Anchor>::new();
 	let path= find_down_tree(&entry).await
@@ -128,7 +129,7 @@ async fn make_nav(entry:&Thing) -> anyhow::Result<Navigation>
 		.build())
 }
 
-fn make_table_from_map(map:JsonMap) -> Table{
+fn make_table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
 	let mut table_builder = Table::builder();
 	for (k,v) in map
 	{
@@ -140,12 +141,12 @@ fn make_table_from_map(map:JsonMap) -> Table{
 	table_builder.build()
 }
 
-pub(crate) async fn make_table_from_objects(
-	objs:Vec<JsonVal>,
+pub(crate) async fn make_table_from_objects<F>(
+	objs:Vec<Entry>,
 	id_name:String,
 	mut keys:Vec<String>,
-	additional: Vec<(&str,fn(&HtmlEntry,&mut TableCellBuilder))>
-) -> anyhow::Result<Table>
+	additional: Vec<(&str,F)>
+) -> anyhow::Result<Table> where F:Fn(&HtmlEntry,&mut TableCellBuilder)
 {
 	// make sure we have a proper list
 	if objs.is_empty(){bail!("Empty list")}
@@ -163,20 +164,8 @@ pub(crate) async fn make_table_from_objects(
 	);
 	//sneak in "id" so we will iterate through it (and query it) when building the rest of the table
 	keys.insert(0,"id".to_string());
-	let list:Result<Vec<_>,_> = objs.into_iter()
-		.map(|v| {
-			match v {
-				Value::Object(o) => {
-					HtmlEntry::try_from(o)
-						.context(anyhow!("Failed parsing list of db-entries"))
-				}
-				_ => {Err(anyhow!("json value {v} must be an object"))}
-			}
-		})
-		.collect();
-	let list = list?;
 	//build rest of the table
-	for entry in list.into_iter() //rows
+	for entry in objs.into_iter().map(HtmlEntry) //rows
 	{
 		let addcells:Vec<_> = additional.iter().map(|(_,func)|{
 			let mut cell = TableCell::builder();
@@ -200,39 +189,37 @@ pub(crate) async fn make_table_from_objects(
 	Ok(table_builder.build())
 }
 
-pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
+pub(crate) async fn make_entry_page(mut entry:Entry) -> anyhow::Result<Html>
 {
-	let id = json_to_thing(entry.remove("id").expect("entry should have an id"))?;
+	let id = entry.id();
 	let mut builder = Body::builder();
 	builder.push(make_nav(&id).await?);
-	let mut entry = Entry::query(id.clone()).await?;
 	let name = entry.get_name();
-	entry.remove("id");
 	builder.heading_1(|h|h.text(name.to_owned()));
 	match entry {
-		Entry::Instance(mut instance) => {
-			if let JsonVal::Object(file) = instance.remove("file")
-				.ok_or(anyhow!(r#""file" is missing for {}"#,id.id.to_raw()))?
-			{
-				let filepath=json_to_path(&file)?;
+		Entry::Instance((id,mut instance)) => {
+			if let Some(filepath)=lookup_instance_filepath(id.id.to_raw().as_str()).await?{
 				builder
 					.heading_2(|t|t.text("filename"))
 					.paragraph(|p|p.text(filepath.to_string_lossy().to_string()));
-			} else { bail!(r#""file" sould be an object"#) }
+			}
 
 			instance.remove("series");
 			builder.heading_2(|h|h.text("Attributes"))
-				.push(make_table_from_map(instance));
+				.push(make_table_from_map(instance.0));
 			builder.heading_2(|h|h.text("Image"))
 				.paragraph(|p|
 					p.image(|i|i.src(format!("/instances/{}/png",id.id.to_raw())))
 				);
 		}
-		Entry::Series(mut series) => {
+		Entry::Series((id,mut series)) => {
 			series.remove("instances");
 			series.remove("study");
-			builder.heading_2(|h|h.text("Attributes")).push(make_table_from_map(series));
-			let mut instances=db::list_children(id,"instances").await?;
+			builder.heading_2(|h|h.text("Attributes")).push(make_table_from_map(series.0));
+			let mut files:Vec<_>=db::list_children(&id, "instances").await?.into_iter()
+				.filter_map(|mut v|v.remove("file").and_then(|f|match f {Value::Object(o) => Some(o),_ => None}))
+				.collect()
+				;
 			let files:anyhow::Result<Vec<_>>=instances.iter()
 				.filter_map(|v|v.get("file").and_then(|f|f.as_object()))
 				.map(|o|json_to_path(o))
@@ -263,7 +250,7 @@ pub(crate) async fn make_entry_page(mut entry:JsonMap) -> anyhow::Result<Html>
 			study.remove("series");
 			builder.heading_2(|h|h.text("Attributes")).push(make_table_from_map(study));
 
-			let mut series=db::list_children(id.to_owned(),"series").await?;
+			let mut series=db::list_values(id.to_owned(), "series").await?;
 			// get flat list of file-attributes
 			// let files:Vec<_>=db::list_children(id,"series.instances.file").await?.into_iter()
 			// 	.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})

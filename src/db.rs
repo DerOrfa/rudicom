@@ -1,14 +1,15 @@
 
 use std::path::Path;
 use std::sync::OnceLock;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
+use std::any::type_name;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::{Surreal,Result};
+use surrealdb::{Surreal, Result};
 use surrealdb::Error::Api;
 use surrealdb::error::Api::Query;
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql::Thing;
+use surrealdb::sql::{Object,Value, Thing};
 use crate::JsonVal;
 
 mod into_db_value;
@@ -37,25 +38,44 @@ pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
 	Ok(res.unwrap_or(Vec::new()))
 }
 
-pub async fn list_table<T>(table:T) -> Result<Vec<JsonVal>> where T:AsRef<str> {
-	db().select(table.as_ref()).await
-}
-
-pub async fn list_children<T>(id:Thing, col:T) -> Result<Vec<JsonVal>> where T:AsRef<str> {
-	let res:Vec<JsonVal> = db()
-		.query(format!("select * from $id.{}",col.as_ref()))
-		.bind(("id",id)).await?.check()?
-		.take(0)?;
-	Ok(res)
-}
-
-pub async fn query_for_entry(id:Thing) -> Result<JsonVal>
+pub(crate) async fn list_table<T>(table:T) -> anyhow::Result<Vec<Entry>> where T:AsRef<str>
 {
-	let res:Option<JsonVal> = db().select(id).await?;
-	Ok(res.unwrap_or(JsonVal::Null))
+	db().select::<Vec<Object>>(table.as_ref()).await?
+		.into_iter().map(Entry::try_from).collect()
 }
 
-pub async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>
+pub(crate) async fn list_values<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Value>> where T:AsRef<str>
+{
+	if let Some(values) = db().query(format!("select * from $id.{}",col.as_ref()))
+		.bind(("id",id)).await?.check()?
+		.take::<Option<Value>>(0)?.map(|v|v.flatten())
+	{
+		Ok(match values {
+			Value::Array(v) => v.0,
+			_ => vec![values]
+		})
+	}
+	else
+	{
+		Ok(vec![])
+	}
+}
+pub(crate) async fn list_children<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Entry>> where T:AsRef<str>
+{
+	list_values(id, col).await?.into_iter()
+		.map(|v|
+			if let Value::Object(o)=v{Entry::try_from(o)}
+			else {Err(anyhow!(r#""{v}" is not an object"#))}
+		).collect()
+}
+pub(crate) async fn lookup(id:Thing) -> anyhow::Result<Option<Entry>>
+{
+	db().select::<Option<Object>>(&id).await.context(format!("failed looking up {}", id))?
+		.map(Entry::try_from).transpose()
+		.map_err(|e|e.context(format!("when looking up {}", id)))
+}
+
+async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>
 {
 	let res:Option<Thing> = db()
 		.query(format!("select {} from $id",col.as_ref()))
@@ -93,10 +113,11 @@ pub async fn init_local(file:&Path) -> anyhow::Result<()>
 	db().connect(file).await?;
 	init().await.map_err(|e|e.into())
 }
-pub async fn init_remote(addr:&str) -> Result<()> {
+pub async fn init_remote(addr:&str) -> Result<()>
+{
 	db().connect(addr).await?;
 
-	// Signin as a namespace, database, or root user
+	// Sign in as a namespace, database, or root user
 	db().signin(Root { username: "root", password: "root", }).await?;
 	init().await
 }
@@ -180,4 +201,12 @@ fn extract_json(key:&str,mut json_ob:JsonVal) -> anyhow::Result<(JsonVal,JsonVal
 		None => Err(anyhow!("{json_ob} must be an object")),
 		Some(o) => o.remove(key).ok_or(anyhow!("expected {key} in {json_ob}"))
 	}.and_then(|extracted|Ok((extracted,json_ob)))
+}
+
+pub fn extract<T>(obj:&mut Object, key:&str) -> anyhow::Result<T> where T:TryFrom<Value>
+{
+	let value= obj.remove(key).ok_or(anyhow!(r#"attr '{key}' is missing"#))?;
+	T::try_from(value).map_err(|_|
+		anyhow!(format!(r#"Failed to interpret {} as {}"#,key,type_name::<T>()))
+	).context(format!(r#"while extracting {key}"#))
 }
