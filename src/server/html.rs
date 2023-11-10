@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, LinkedList};
+use std::fs::File;
 use anyhow::{bail, Context};
 use html::content::Navigation;
 use html::root::{Body,Html};
@@ -11,9 +12,9 @@ use surrealdb::sql::Value;
 use crate::db::{Entry,find_down_tree, json_to_thing};
 use crate::{db, JsonMap, JsonVal};
 use crate::server::html_item::HtmlItem;
-use crate::tools::{json_to_path, lookup_instance_filepath, reduce_path};
+use crate::tools::{lookup_instance_filepath, reduce_path};
 
-pub(crate) struct HtmlEntry(Entry);
+pub(crate) struct HtmlEntry(pub Entry);
 
 impl HtmlEntry
 {
@@ -30,23 +31,19 @@ impl HtmlEntry
 			.text(self.0.get_name())
 			.build()
 	}
-	pub fn get(&self, key:&str) -> Option<&JsonVal>
+	pub fn get(&self, key:&str) -> Option<&Value>
 	{
 		self.0.get(key)
 	}
 
-	pub fn into_items(self, keys: &Vec<String>) -> anyhow::Result<LinkedList<(String,HtmlItem)>>
+	pub fn into_items(mut self, keys: &Vec<String>) -> anyhow::Result<LinkedList<(String,HtmlItem)>>
 	{
 		let link = self.get_link();
 		let mut out:LinkedList<(String,HtmlItem)> = LinkedList::new();
-		let mut inmap = match self.0 {
-			Entry::Instance(map) => map,
-			Entry::Series(map) => map,
-			Entry::Study(map) => map,
-		};
 		for k in keys
 		{
-			let item = match inmap.remove(k.as_str()).unwrap_or(JsonVal::String("-------".to_string())) {
+			let item = match self.0.remove(k.as_str()).unwrap_or(sql::Value::from("-------")).into_json()
+			{
 				JsonVal::Bool(b) => HtmlItem::Bool(b),
 				JsonVal::Number(n) => HtmlItem::Number(n),
 				JsonVal::String(s) => HtmlItem::String(s),
@@ -64,21 +61,6 @@ impl HtmlEntry
 			out.push_back((k.clone(), item));
 		}
 		Ok(out)
-	}
-
-	pub async fn query(id:sql::Thing) -> anyhow::Result<HtmlEntry>
-	{
-		Ok(HtmlEntry{ 0: Entry::query(id).await? })
-	}
-}
-
-impl TryFrom<JsonMap> for HtmlEntry
-{
-	type Error = anyhow::Error;
-
-	fn try_from(json_entry: JsonMap) -> std::result::Result<Self, Self::Error>
-	{
-		Ok(HtmlEntry{ 0: Entry::try_from(json_entry)? })
 	}
 }
 
@@ -106,13 +88,13 @@ pub fn wrap_body<T>(body:Body, title:T) -> Html where T:Into<std::borrow::Cow<'s
 		.build()
 }
 
-async fn make_nav(entry:&sql::Thing) -> anyhow::Result<Navigation>
+async fn make_nav(entry:&HtmlEntry) -> anyhow::Result<Navigation>
 {
 	let mut anchors = Vec::<Anchor>::new();
-	let path= find_down_tree(&entry).await
-		.context(format!("Failed finding parents for {entry}"))?;
+	let path= find_down_tree(entry.id()).await
+		.context(format!("Failed finding parents for {}", entry.id()))?;
 	for id in path {
-		anchors.push(HtmlEntry::query(id).await?.get_link());
+		anchors.push(entry.get_link());
 	}
 
 
@@ -189,14 +171,13 @@ pub(crate) async fn make_table_from_objects<F>(
 	Ok(table_builder.build())
 }
 
-pub(crate) async fn make_entry_page(mut entry:Entry) -> anyhow::Result<Html>
+pub(crate) async fn make_entry_page(mut entry:HtmlEntry) -> anyhow::Result<Html>
 {
-	let id = entry.id();
 	let mut builder = Body::builder();
-	builder.push(make_nav(&id).await?);
-	let name = entry.get_name();
+	builder.push(make_nav(&entry).await?);
+	let name = entry.0.get_name();
 	builder.heading_1(|h|h.text(name.to_owned()));
-	match entry {
+	match entry.0 {
 		Entry::Instance((id,mut instance)) => {
 			if let Some(filepath)=lookup_instance_filepath(id.id.to_raw().as_str()).await?{
 				builder
@@ -216,41 +197,38 @@ pub(crate) async fn make_entry_page(mut entry:Entry) -> anyhow::Result<Html>
 			series.remove("instances");
 			series.remove("study");
 			builder.heading_2(|h|h.text("Attributes")).push(make_table_from_map(series.0));
-			let mut files:Vec<_>=db::list_children(&id, "instances").await?.into_iter()
-				.filter_map(|mut v|v.remove("file").and_then(|f|match f {Value::Object(o) => Some(o),_ => None}))
-				.collect()
-				;
-			let files:anyhow::Result<Vec<_>>=instances.iter()
-				.filter_map(|v|v.get("file").and_then(|f|f.as_object()))
-				.map(|o|json_to_path(o))
-				.collect();
-			if let Ok(path) = files.map(reduce_path)
-			{
-				builder
-					.heading_2(|t|t.text("Path"))
-					.paragraph(|p|p.text(path.to_string_lossy().to_string()));
-			}
-
+			let mut instances=db::list_children(&id, "instances").await?;
 			instances.sort_by_key(|s|s
-				.get("InstanceNumber").expect("missing InstanceNumber").as_str().unwrap()
+				.get_string("InstanceNumber").expect("missing InstanceNumber")
 				.parse::<u64>().expect("InstanceNumber is not a number")
 			);
+			let files:Vec<_> = instances.iter_mut()
+				.filter_map(|v|v.remove("file"))
+				.filter_map(|f|db::File::try_from(f).ok())
+				.map(|f|f.path())
+				.collect();
+
+			let path = reduce_path(files);
+			builder
+				.heading_2(|t|t.text("Path"))
+				.paragraph(|p|p.text(path.to_string_lossy().to_string()));
+
 
 			let keys=crate::config::get::<Vec<String>>("instance_tags")?;
 			let makethumb = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
 				cell.image(|i|i.src(
-					format!("/instances/{}/png?width=64&height=64",obj.0.get_id())
+					format!("/instances/{}/png?width=64&height=64",obj.id())
 				));
 			};
 			let instance_text = format!("{} Instances",instances.len());
 			let instance_table = make_table_from_objects(instances, "Name".into(), keys, vec![("thumbnail",makethumb)]).await?;
 			builder.heading_2(|h|h.text(instance_text)).push(instance_table);
 		}
-		Entry::Study(mut study) => {
+		Entry::Study((id,mut study)) => {
 			study.remove("series");
-			builder.heading_2(|h|h.text("Attributes")).push(make_table_from_map(study));
+			builder.heading_2(|h|h.text("Attributes")).push(make_table_from_map(study.0));
 
-			let mut series=db::list_values(id.to_owned(), "series").await?;
+			let mut series=db::list_children(&id, "series").await?;
 			// get flat list of file-attributes
 			// let files:Vec<_>=db::list_children(id,"series.instances.file").await?.into_iter()
 			// 	.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})
@@ -269,13 +247,13 @@ pub(crate) async fn make_entry_page(mut entry:Entry) -> anyhow::Result<Html>
 			// }
 
 			series.sort_by_key(|s|s
-					.get("SeriesNumber").expect("missing SeriesNumber").as_str().unwrap()
+					.get_string("SeriesNumber").expect("missing SeriesNumber")
 					.parse::<u64>().expect("SeriesNumber is not a number")
 			);
 			let countinstances = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
 				if let Some(len)= obj.0
 					.get("instances")
-					.and_then(|i|i.as_array())
+					.and_then(|v|if let Value::Array(a) = v {Some(a)} else {None} )
 					.map(|l|l.len())
 				{
 					cell.text(format!("{} instances",len));

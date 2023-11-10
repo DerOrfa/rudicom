@@ -19,7 +19,7 @@ pub async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result<JsonVa
 	let mut guard=RegistryGuard::default();
 	let registered = register_instance(&obj,vec![("file".into(),fileinfo.into())],Some(&mut guard)).await?;
 	if registered.is_null() {
-		let path = complete_filepath(path);
+		let path = complete_filepath(&path);
 		let p = path.parent().unwrap();
 		tokio::fs::create_dir_all(p).await
 			.context(format!("Failed creating storage path {:?}",p))?;

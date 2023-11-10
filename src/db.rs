@@ -15,10 +15,12 @@ use crate::JsonVal;
 mod into_db_value;
 mod register;
 mod entry;
+mod file;
 
 pub(crate) use into_db_value::IntoDbValue;
 pub(crate) use register::register;
 pub(crate) use entry::Entry;
+pub(crate) use file::File;
 
 static DB: OnceLock<Surreal<Any>> = OnceLock::new();
 

@@ -94,7 +94,7 @@ pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Re
 {
 	if let Some(entry) = db::lookup((table.as_str(), id.as_str()).into()).await?
 	{
-		let page = make_entry_page(entry).await?;
+		let page = make_entry_page(HtmlEntry(entry)).await?;
 		Ok(axum::response::Html(page.to_string()).into_response())
 	}
 	else
@@ -120,7 +120,7 @@ pub(super) async fn query(Path((table,id,query)):Path<(String,String,String)>) -
 	if let Some(res) = db::lookup((table.as_str(), id.as_str()).into()).await?
 	{
 		let query=query.replace("/",".");
-		let children=res.list_children(query).await?;
+		let children=db::list_children(res.id(),query).await?;
 		Ok(Json(children).into_response())
 	} else {
 		Ok((
