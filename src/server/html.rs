@@ -1,6 +1,5 @@
-use std::collections::{BTreeMap, LinkedList};
-use std::fs::File;
-use anyhow::{bail, Context};
+use std::collections::BTreeMap;
+use anyhow::{anyhow, bail, Context};
 use html::content::Navigation;
 use html::root::{Body,Html};
 use html::inline_text::Anchor;
@@ -9,60 +8,36 @@ use html::tables::builders::TableCellBuilder;
 use html::tables::Table;
 use surrealdb::sql;
 use surrealdb::sql::Value;
-use crate::db::{Entry,find_down_tree, json_to_thing};
-use crate::{db, JsonMap, JsonVal};
-use crate::server::html_item::HtmlItem;
+use crate::db::{Entry,find_down_tree};
+use crate::db;
 use crate::tools::{lookup_instance_filepath, reduce_path};
 
-pub(crate) struct HtmlEntry(pub Entry);
-
-impl HtmlEntry
-{
-	pub fn id(&self) -> &sql::Thing {self.0.id()}
-	pub fn get_link(&self) -> Anchor
-	{
-		let typename = match self.0 {
-			Entry::Instance(_) => "instances",
-			Entry::Series(_) => "series",
-			Entry::Study(_) => "studies"
-		};
-		Anchor::builder()
-			.href(format!("/{typename}/{}/html",self.id()))
-			.text(self.0.get_name())
-			.build()
-	}
-	pub fn get(&self, key:&str) -> Option<&Value>
-	{
-		self.0.get(key)
-	}
-
-	pub fn into_items(mut self, keys: &Vec<String>) -> anyhow::Result<LinkedList<(String,HtmlItem)>>
-	{
-		let link = self.get_link();
-		let mut out:LinkedList<(String,HtmlItem)> = LinkedList::new();
-		for k in keys
-		{
-			let item = match self.0.remove(k.as_str()).unwrap_or(sql::Value::from("-------")).into_json()
-			{
-				JsonVal::Bool(b) => HtmlItem::Bool(b),
-				JsonVal::Number(n) => HtmlItem::Number(n),
-				JsonVal::String(s) => HtmlItem::String(s),
-				JsonVal::Array(a) => HtmlItem::String(format!("{} children", a.len())),
-				JsonVal::Object(o) => {
-					let jsonval=JsonVal::Object(o);
-					if let Some(id) = json_to_thing(jsonval.clone()).ok() {
-						HtmlItem::Id((id, link.clone()))
-					} else {
-						HtmlItem::String(jsonval.to_string())
-					}
-				}
-				_ => bail!("invalid value in {k}"),
-			};
-			out.push_back((k.clone(), item));
-		}
-		Ok(out)
-	}
-}
+	// pub fn into_items(mut self, keys: &Vec<String>) -> anyhow::Result<LinkedList<(String,HtmlItem)>>
+	// {
+	// 	let link = self.get_link();
+	// 	let mut out:LinkedList<(String,HtmlItem)> = LinkedList::new();
+	// 	for k in keys
+	// 	{
+	// 		let item = match self.0.remove(k.as_str()).unwrap_or(sql::Value::from("-------")).into_json()
+	// 		{
+	// 			JsonVal::Bool(b) => HtmlItem::Bool(b),
+	// 			JsonVal::Number(n) => HtmlItem::Number(n),
+	// 			JsonVal::String(s) => HtmlItem::String(s),
+	// 			JsonVal::Array(a) => HtmlItem::String(format!("{} children", a.len())),
+	// 			JsonVal::Object(o) => {
+	// 				let jsonval=JsonVal::Object(o);
+	// 				if let Some(id) = json_to_thing(jsonval.clone()).ok() {
+	// 					HtmlItem::Id((id, link.clone()))
+	// 				} else {
+	// 					HtmlItem::String(jsonval.to_string())
+	// 				}
+	// 			}
+	// 			_ => bail!("invalid value in {k}"),
+	// 		};
+	// 		out.push_back((k.clone(), item));
+	// 	}
+	// 	Ok(out)
+	// }
 
 pub fn wrap_body<T>(body:Body, title:T) -> Html where T:Into<std::borrow::Cow<'static, str>>
 {
@@ -88,27 +63,62 @@ pub fn wrap_body<T>(body:Body, title:T) -> Html where T:Into<std::borrow::Cow<'s
 		.build()
 }
 
-async fn make_nav(entry:&HtmlEntry) -> anyhow::Result<Navigation>
-{
-	let mut anchors = Vec::<Anchor>::new();
-	let path= find_down_tree(entry.id()).await
-		.context(format!("Failed finding parents for {}", entry.id()))?;
-	for id in path {
-		anchors.push(entry.get_link());
-	}
-
-
-	Ok(Navigation::builder().class("crumbs")
-		.ordered_list(|l| {
-			l.list_item(|i|i.anchor(|a|
-				a.href("/studies/html").text("Studies")
-			).class("crumb"));
-			anchors.into_iter().rev().fold(l, |l, anchor|
-				l.list_item(|i| i.push(anchor).class("crumb"))
-			)
+impl Entry {
+	pub async fn make_nav(&self) -> anyhow::Result<Navigation>
+	{
+		let mut anchors = Vec::<Anchor>::new();
+		let path= find_down_tree(self.id()).await
+			.context(format!("Failed finding parents for {}", self.id()))?;
+		for id in path {
+			anchors.push(db::lookup(&id).await?.unwrap().get_link());
 		}
-		)
-		.build())
+
+		Ok(Navigation::builder().class("crumbs")
+			.ordered_list(|l| {
+				l.list_item(|i|i.anchor(|a|
+					a.href("/studies/html").text("Studies")
+				).class("crumb"));
+				anchors.into_iter().rev().fold(l, |l, anchor|
+					l.list_item(|i| i.push(anchor).class("crumb"))
+				)
+			}
+			)
+			.build())
+	}
+	pub fn get_link(&self) -> Anchor
+	{
+		let id = self.id();
+		Anchor::builder()
+			.href(format!("/{}/{}/html",id.tb,id.id.to_raw()))
+			.text(self.name())
+			.build()
+	}
+	// pub fn into_items(mut self, keys: &Vec<String>) -> anyhow::Result<LinkedList<(String,HtmlItem)>>
+	// {
+	// 	let link = self.get_link();
+	// 	let mut out:LinkedList<(String,HtmlItem)> = LinkedList::new();
+	// 	for k in keys
+	// 	{
+	// 		let item = match self.remove(k.as_str()).unwrap_or(sql::Value::from("-------")).into_json()
+	// 		{
+	// 			JsonVal::Bool(b) => HtmlItem::Bool(b),
+	// 			JsonVal::Number(n) => HtmlItem::Number(n),
+	// 			JsonVal::String(s) => HtmlItem::String(s),
+	// 			JsonVal::Array(a) => HtmlItem::String(format!("{} children", a.len())),
+	// 			JsonVal::Object(o) => {
+	// 				let jsonval=JsonVal::Object(o);
+	// 				if let Some(id) = json_to_thing(jsonval.clone()).ok() {
+	// 					HtmlItem::Id((id, link.clone()))
+	// 				} else {
+	// 					HtmlItem::String(jsonval.to_string())
+	// 				}
+	// 			}
+	// 			_ => bail!("invalid value in {k}"),
+	// 		};
+	// 		out.push_back((k.clone(), item));
+	// 	}
+	// 	Ok(out)
+	// }
 }
 
 fn make_table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
@@ -128,7 +138,7 @@ pub(crate) async fn make_table_from_objects<F>(
 	id_name:String,
 	mut keys:Vec<String>,
 	additional: Vec<(&str,F)>
-) -> anyhow::Result<Table> where F:Fn(&HtmlEntry,&mut TableCellBuilder)
+) -> anyhow::Result<Table> where F:Fn(&Entry,&mut TableCellBuilder)
 {
 	// make sure we have a proper list
 	if objs.is_empty(){bail!("Empty list")}
@@ -147,7 +157,7 @@ pub(crate) async fn make_table_from_objects<F>(
 	//sneak in "id" so we will iterate through it (and query it) when building the rest of the table
 	keys.insert(0,"id".to_string());
 	//build rest of the table
-	for entry in objs.into_iter().map(HtmlEntry) //rows
+	for entry in objs //rows
 	{
 		let addcells:Vec<_> = additional.iter().map(|(_,func)|{
 			let mut cell = TableCell::builder();
@@ -156,13 +166,21 @@ pub(crate) async fn make_table_from_objects<F>(
 		}).collect();
 
 		let mut row_builder= TableRow::builder();
-		for (_,item) in entry.into_items(&keys)? //columns (cells)
+		for (k,item) in keys.iter().map(|k|(k,entry.get(k.as_str()))) //columns (cells)
 		{
 			let mut cellbuilder=TableCell::builder();
-			match item {
-				HtmlItem::Id((_,link)) => cellbuilder.push(link),
-				_ => cellbuilder.text(item.to_string())
-			};
+			if let Some(value) = item
+			{
+				if let sql::Value::Thing(id) = value
+				{
+					let entry=db::lookup(id).await?
+						.ok_or(anyhow!("could not find {id}"))
+						.context(format!("when looking for {k} in {}",entry.id()))?;
+					cellbuilder.push(entry.get_link());
+				} else {
+					cellbuilder.text(value.to_string());
+				}
+			} else {cellbuilder.text("----------");}
 			row_builder.push(cellbuilder.build());
 		}
 		row_builder.extend(addcells);
@@ -171,13 +189,13 @@ pub(crate) async fn make_table_from_objects<F>(
 	Ok(table_builder.build())
 }
 
-pub(crate) async fn make_entry_page(mut entry:HtmlEntry) -> anyhow::Result<Html>
+pub(crate) async fn make_entry_page(entry:Entry) -> anyhow::Result<Html>
 {
 	let mut builder = Body::builder();
-	builder.push(make_nav(&entry).await?);
-	let name = entry.0.get_name();
+	builder.push(entry.make_nav().await?);
+	let name = entry.name();
 	builder.heading_1(|h|h.text(name.to_owned()));
-	match entry.0 {
+	match entry {
 		Entry::Instance((id,mut instance)) => {
 			if let Some(filepath)=lookup_instance_filepath(id.id.to_raw().as_str()).await?{
 				builder
@@ -205,7 +223,7 @@ pub(crate) async fn make_entry_page(mut entry:HtmlEntry) -> anyhow::Result<Html>
 			let files:Vec<_> = instances.iter_mut()
 				.filter_map(|v|v.remove("file"))
 				.filter_map(|f|db::File::try_from(f).ok())
-				.map(|f|f.path())
+				.map(|f|f.get_path())
 				.collect();
 
 			let path = reduce_path(files);
@@ -215,7 +233,7 @@ pub(crate) async fn make_entry_page(mut entry:HtmlEntry) -> anyhow::Result<Html>
 
 
 			let keys=crate::config::get::<Vec<String>>("instance_tags")?;
-			let makethumb = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
+			let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
 				cell.image(|i|i.src(
 					format!("/instances/{}/png?width=64&height=64",obj.id())
 				));
@@ -250,13 +268,13 @@ pub(crate) async fn make_entry_page(mut entry:HtmlEntry) -> anyhow::Result<Html>
 					.get_string("SeriesNumber").expect("missing SeriesNumber")
 					.parse::<u64>().expect("SeriesNumber is not a number")
 			);
-			let countinstances = |obj:&HtmlEntry,cell:&mut TableCellBuilder|{
-				if let Some(len)= obj.0
+			let countinstances = |obj:&Entry,cell:&mut TableCellBuilder|{
+				if let Some(len)= obj
 					.get("instances")
 					.and_then(|v|if let Value::Array(a) = v {Some(a)} else {None} )
 					.map(|l|l.len())
 				{
-					cell.text(format!("{} instances",len));
+					cell.text(format!("{len} instances"));
 				}
 			};
 

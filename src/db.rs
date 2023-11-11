@@ -2,7 +2,6 @@
 use std::path::Path;
 use std::sync::OnceLock;
 use anyhow::{anyhow, Context};
-use std::any::type_name;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::{Surreal, Result};
@@ -10,17 +9,16 @@ use surrealdb::Error::Api;
 use surrealdb::error::Api::Query;
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql::{Object,Value, Thing};
-use crate::JsonVal;
 
 mod into_db_value;
 mod register;
 mod entry;
 mod file;
 
-pub(crate) use into_db_value::IntoDbValue;
-pub(crate) use register::register;
-pub(crate) use entry::Entry;
-pub(crate) use file::File;
+pub use into_db_value::IntoDbValue;
+pub use register::{unregister,register,register_instance,RegistryGuard};
+pub use entry::Entry;
+pub use file::File;
 
 static DB: OnceLock<Surreal<Any>> = OnceLock::new();
 
@@ -70,9 +68,9 @@ pub(crate) async fn list_children<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Ent
 			else {Err(anyhow!(r#""{v}" is not an object"#))}
 		).collect()
 }
-pub(crate) async fn lookup(id:Thing) -> anyhow::Result<Option<Entry>>
+pub(crate) async fn lookup(id:&Thing) -> anyhow::Result<Option<Entry>>
 {
-	db().select::<Option<Object>>(&id).await.context(format!("failed looking up {}", id))?
+	db().select::<Option<Object>>(id).await.context(format!("failed looking up {}", id))?
 		.map(Entry::try_from).transpose()
 		.map_err(|e|e.context(format!("when looking up {}", id)))
 }
@@ -101,12 +99,6 @@ pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
 		"studies" => Ok(vec![id.to_owned()]),
 		_ => {Err(Api(Query("invalid db table name when looking for parents".to_string())))}
 	}
-}
-
-pub async fn unregister(id:Thing) -> Result<JsonVal>
-{
-	let res:Option<JsonVal> = db().delete(id).await?;
-	Ok(res.unwrap_or(JsonVal::Null))
 }
 
 pub async fn init_local(file:&Path) -> anyhow::Result<()>
@@ -165,50 +157,7 @@ async fn init() -> Result<()>{
 	Ok(())
 }
 
-pub fn json_id_cleanup(val:&JsonVal) -> anyhow::Result<JsonVal>
-{
-	if let JsonVal::Array(list) = val
-	{
-		let res:anyhow::Result<Vec<_>> = list.into_iter()
-			.map(|v|json_id_cleanup(v))
-			.collect();
-		res.map(|list|JsonVal::from(list)).map_err(|e|e.into())
-	} else if val.is_object() {
-		let id= json_to_thing(val.to_owned())?;
-		Ok(JsonVal::from(format!("{}:{}",id.tb,id.id)))
-	} else {
-		Err(anyhow!("Json value {val} should be an array or an object"))
-	}
-}
-
 pub async fn version() -> Result<String>
 {
 	Ok(format!("{}",db().version().await?))
-}
-
-pub fn json_to_thing(v:JsonVal) -> anyhow::Result<Thing>{
-	let (tb, v) = extract_json("tb",v)?;
-	let (id,_) = extract_json("String", extract_json("id",v)?.0)?;
-
-	if let JsonVal::String(tb) = tb {
-		if let JsonVal::String(id) = id{
-			Ok(Thing::from((tb,id)))
-		} else { Err(anyhow!("{id} should be a string")) }
-	} else {Err(anyhow!("{tb} should be a string"))}
-}
-
-fn extract_json(key:&str,mut json_ob:JsonVal) -> anyhow::Result<(JsonVal,JsonVal)>
-{
-	match json_ob.as_object_mut(){
-		None => Err(anyhow!("{json_ob} must be an object")),
-		Some(o) => o.remove(key).ok_or(anyhow!("expected {key} in {json_ob}"))
-	}.and_then(|extracted|Ok((extracted,json_ob)))
-}
-
-pub fn extract<T>(obj:&mut Object, key:&str) -> anyhow::Result<T> where T:TryFrom<Value>
-{
-	let value= obj.remove(key).ok_or(anyhow!(r#"attr '{key}' is missing"#))?;
-	T::try_from(value).map_err(|_|
-		anyhow!(format!(r#"Failed to interpret {} as {}"#,key,type_name::<T>()))
-	).context(format!(r#"while extracting {key}"#))
 }

@@ -1,13 +1,13 @@
+use std::path::PathBuf;
 use surrealdb::sql;
-use crate::db;
-use anyhow::{anyhow, Result};
-use futures::StreamExt;
+use anyhow::anyhow;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeMap;
-use surrealdb::sql::Thing;
+use surrealdb::sql::Value;
+use crate::db;
 use self::Entry::{Instance, Series, Study};
 
-pub(crate) enum Entry
+pub enum Entry
 {
 	Instance((sql::Thing,sql::Object)),
 	Series((sql::Thing,sql::Object)),
@@ -24,30 +24,36 @@ impl Entry
 	{
 		self.get(key).map(|v|v.to_raw_string())
 	}
-	fn data(&self) -> &(Thing,sql::Object)
+	fn data(&self) -> &(sql::Thing,sql::Object)
 	{
 		match self {
 			Instance(data)| Series(data) | Study(data) => data
 		}
 	}
-	pub fn id(&self) -> &Thing	{&self.data().0}
+	fn mut_data(&mut self) -> &mut (sql::Thing,sql::Object)
+	{
+		match self {
+			Instance(data)| Series(data) | Study(data) => data
+		}
+	}
+	pub fn id(&self) -> &sql::Thing	{&self.data().0}
 
-	pub fn get_name(&self) -> String
+	pub fn name(&self) -> String
 	{
 		match self {
 			Instance(_) => {
-				let number=self.get_string("InstanceNumber").unwrap_or("--".to_string());
+				let number=self.get_string("InstanceNumber").unwrap_or("<-->".to_string());
 				format!("Instance {number}")
 			},
 			Series(_) => {
-				let number=self.get_string("SeriesNumber").unwrap_or("--".to_string());
-				let desc= self.get_string("SeriesDescription").unwrap_or("--".to_string());
+				let number=self.get_string("SeriesNumber").unwrap_or("<-->".to_string());
+				let desc= self.get_string("SeriesDescription").unwrap_or("<-->".to_string());
 				format!("S{number}_{desc}")
 			},
 			Study(_) => {
-				let id=self.get_string("PatientID").unwrap_or("--".to_string());
-				let date=self.get_string("StudyDate").unwrap_or("--".to_string());
-				let time=self.get_string("StudyTime").unwrap_or("--".to_string());
+				let id=self.get_string("PatientID").unwrap_or("<-->".to_string());
+				let date=self.get_string("StudyDate").unwrap_or("<-->".to_string());
+				let time=self.get_string("StudyTime").unwrap_or("<-->".to_string());
 				format!("{id}/{date}_{time}")
 			}
 		}
@@ -55,9 +61,62 @@ impl Entry
 
 	pub fn remove(&mut self,key:&str) -> Option<sql::Value>
 	{
+		self.mut_data().1.remove(key)
+	}
+	pub fn insert<T,K>(&mut self,key:K,value:T) -> Option<sql::Value> where T:Into<sql::Value>,K:Into<String>
+	{
+		self.mut_data().1.insert(key.into(),value.into())
+	}
+
+	pub fn get_file(&self) -> anyhow::Result<db::File>
+	{
+		if let Instance((_,o))=self {
+			o.get("file")
+				.ok_or(anyhow!(r#"Entry is missing "file""#))
+				.and_then(|v|db::File::try_from(v.clone()))
+		} else {Err(anyhow!("Not an instance"))}
+	}
+	pub fn get_path(&self) -> anyhow::Result<PathBuf>
+	{
 		match self {
-			Instance((_,data)) | Series((_,data)) | Study((_,data)) => data
-		}.remove(key)
+			Instance(_) =>
+				self.get_file().map(|f|f.get_path()),
+			Series(_) => {todo!()}
+			Study(_) => {todo!()}
+		}
+	}
+}
+
+impl From<Entry> for sql::Object {
+	fn from(entry: Entry) -> Self {
+		match entry {
+			Instance(mut data)| Series(mut data) | Study(mut data) => {
+				data.1.insert("id".into(),data.0.into());
+				data.1
+			}
+		}
+	}
+}
+impl From<Entry> for sql::Value {
+	fn from(entry: Entry) -> Self {	sql::Object::from(entry).into()	}
+}
+
+impl TryFrom<sql::Value> for Entry
+{
+	type Error = anyhow::Error;
+
+	fn try_from(value: sql::Value) -> Result<Self, Self::Error>
+	{
+		match value {
+			Value::None | Value::Null => Err(anyhow!("value is empty")),
+			Value::Array(mut array) => {
+				if array.len() == 1 { Entry::try_from(array.remove(0)) }
+				else {Err(anyhow!("Exactly one entry was expected"))}
+
+			},
+			Value::Object(obj) => Entry::try_from(obj),
+			_ => Err(anyhow!("Value {value:?} has invalid form"))
+		}
 	}
 }
 
@@ -65,7 +124,7 @@ impl TryFrom<sql::Object> for Entry
 {
 	type Error = anyhow::Error;
 
-	fn try_from(mut obj: sql::Object) -> std::result::Result<Self, Self::Error>
+	fn try_from(mut obj: sql::Object) -> Result<Self, Self::Error>
 	{
 		match obj.remove("id").ok_or(anyhow!(r#"Entry missing "id""#))?
 		{
@@ -84,7 +143,7 @@ impl TryFrom<sql::Object> for Entry
 
 impl Serialize for Entry
 {
-	fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> where S: Serializer
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer
 	{
 		let typename= match self {
 			Instance(_) => "instance",

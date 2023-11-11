@@ -9,15 +9,15 @@ use axum::body::Bytes;
 use dicom::pixeldata::PixelDecoder;
 use dicom_pixeldata::image::ImageOutputFormat;
 use super::{JsonError, TextError};
-use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove, store};
-use crate::{db, JsonVal, tools};
+use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove};
+use crate::{db, tools};
 use crate::storage::async_store;
 use futures::StreamExt;
 
 #[cfg(feature = "html")]
 use html::{root::Body,tables::builders::TableCellBuilder};
 #[cfg(feature = "html")]
-use crate::server::html::{HtmlEntry,make_entry_page, make_table_from_objects, wrap_body};
+use crate::server::html::{make_entry_page, make_table_from_objects, wrap_body};
 #[cfg(feature = "html")]
 use tokio::task::JoinSet;
 #[cfg(feature = "html")]
@@ -26,6 +26,7 @@ use serde::Deserialize;
 use serde_json::json;
 use surrealdb::sql;
 use crate::db::Entry;
+use crate::tools::store::store;
 
 pub(crate) async fn get_studies() -> Result<Json<Vec<Entry>>,JsonError>
 {
@@ -50,7 +51,7 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
 	let mut studies = db::list_table("studies").await?;
 	if let Some(filter) = filter
 	{
-		studies.retain(|e|e.get_name().find(filter.filter.as_str()).is_some());
+		studies.retain(|e|e.name().find(filter.filter.as_str()).is_some());
 	}
 
 	// count instances before as db::list_children cant be used in a closure / also parallelization
@@ -74,7 +75,7 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
 		let (k,v) = res?;
 		instance_count.insert(k,v);
 	}
-	let countinstances = |obj:&HtmlEntry,cell:&mut TableCellBuilder| {
+	let countinstances = |obj:&Entry,cell:&mut TableCellBuilder| {
 		let inst_cnt=instance_count[obj.id()];
 		cell.text(inst_cnt.to_string());
 	};
@@ -92,9 +93,10 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
 #[cfg(feature = "html")]
 pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Result<Response,TextError>
 {
-	if let Some(entry) = db::lookup((table.as_str(), id.as_str()).into()).await?
+	let id = sql::Thing::from((table, id));
+	if let Some(entry) = db::lookup(&id).await?
 	{
-		let page = make_entry_page(HtmlEntry(entry)).await?;
+		let page = make_entry_page(entry).await?;
 		Ok(axum::response::Html(page.to_string()).into_response())
 	}
 	else
@@ -105,7 +107,8 @@ pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Re
 
 pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<Response,JsonError>
 {
-	if let Some(res)=db::lookup((table.as_str(), id.as_str()).into()).await?
+	let id = sql::Thing::from((table, id));
+	if let Some(res)=db::lookup(&id).await?
 	{
 		Ok(Json(res).into_response())
 	} else {
@@ -117,7 +120,8 @@ pub(super) async fn get_entry(Path((table,id)):Path<(String,String)>) -> Result<
 }
 pub(super) async fn query(Path((table,id,query)):Path<(String,String,String)>) -> Result<Response,JsonError>
 {
-	if let Some(res) = db::lookup((table.as_str(), id.as_str()).into()).await?
+	let id = sql::Thing::from((table, id));
+	if let Some(res) = db::lookup(&id).await?
 	{
 		let query=query.replace("/",".");
 		let children=db::list_children(res.id(),query).await?;
@@ -139,7 +143,7 @@ pub(super) async fn get_entry_parents(Path((table,id)):Path<(String,String)>) ->
 	let mut ret:Vec<Entry>=Vec::new();
 	for id in db::find_down_tree(&sql::Thing::from((table,id))).await?
 	{
-		let e=db::lookup(id.clone()).await?
+		let e=db::lookup(&id).await?
 			.expect(format!("lookup for parent {id} not found").as_str());
 		ret.push(e);
 	}
@@ -153,13 +157,13 @@ pub(super) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Resu
 	let skip = if bytes.len() >= 132 && &bytes[128..132] == b"DICM" {Some(128)} else { None };
 	let obj= async_store::read(bytes, skip,Some(&mut md5))?;
 	match store(obj,md5.compute()).await? {
-		JsonVal::Null => Ok((
+		None => Ok((
 			StatusCode::CREATED,
 			Json(json!({"Status":"Success"}))
 		).into_response()),
-		JsonVal::Object(ob) => {
-			let id = ob.get("id").unwrap().as_object().unwrap();
-			let path = format!("/instances/{}",id.get("id").unwrap().get("String").unwrap().as_str().unwrap());
+		Some(ob) => {
+			let id = ob.id();
+			let path = format!("/{}/{}",id.tb,id.id.to_raw());
 			Ok((
 				StatusCode::FOUND,
 				Json(json!({
@@ -169,7 +173,6 @@ pub(super) async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Resu
 				}))
 			).into_response())
 		},
-		_ => Err(anyhow!("Unexpected reply from the database").into())
 	}
 }
 
