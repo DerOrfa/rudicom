@@ -6,8 +6,8 @@ use crate::db::IntoDbValue;
 use runtime_format::{FormatArgs, FormatKey, FormatKeyError};
 use core::fmt;
 use std::borrow::Cow;
+use surrealdb::sql;
 use dicom::core::header::HasLength;
-use crate::DbVal;
 
 struct DicomAdapter<'a>(&'a DefaultDicomObject);
 
@@ -35,7 +35,7 @@ pub fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
 		.collect()
 }
 
-pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> Vec<(String, DbVal)>
+pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> Vec<(String, sql::Value)>
 {
 	requested.into_iter()
 		.map(|(name,tag)|(name,obj.element_opt(tag).unwrap()))

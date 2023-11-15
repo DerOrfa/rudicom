@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
-use crate::{DbVal, tools};
+use crate::tools;
 use anyhow::anyhow;
 use surrealdb::sql;
 use crate::db::Entry;
@@ -21,11 +21,11 @@ impl File {
     }
 }
 
-impl TryFrom<DbVal> for File
+impl TryFrom<sql::Value> for File
 {
     type Error = anyhow::Error;
 
-    fn try_from(value: DbVal) -> Result<Self, Self::Error> {
+    fn try_from(value: sql::Value) -> Result<Self, Self::Error> {
         let json = value.into_json();
         Ok(serde_json::from_value(json)?)
     }

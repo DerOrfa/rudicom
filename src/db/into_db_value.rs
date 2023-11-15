@@ -4,25 +4,25 @@ use dicom::core::chrono;
 use dicom::object::mem::InMemElement;
 use dicom::core::value::Value::{Primitive,Sequence};
 use dicom::object::{InMemDicomObject, StandardDataDictionary};
-use crate::DbVal;
+use surrealdb::sql;
 
-fn flatten_iter<T,I>(iter:I) -> DbVal
-	where I:Iterator<Item=T>, T:Into<DbVal>, T:Clone
+fn flatten_iter<T,I>(iter:I) -> sql::Value
+	where I:Iterator<Item=T>, T:Into<sql::Value>, T:Clone
 {
-	let mut vec:Vec<DbVal> = iter.map(|v|v.into()).collect();
+	let mut vec:Vec<sql::Value> = iter.map(|v|v.into()).collect();
 	match vec.len() {
-		0 => DbVal::None,
+		0 => sql::Value::None,
 		1 => vec.pop().unwrap(),
 		_ => vec.into()
 	}
 }
 
 pub trait IntoDbValue{
-	fn into_db_value(self) -> DbVal;
+	fn into_db_value(self) -> sql::Value;
 }
 
 impl IntoDbValue for InMemDicomObject{
-	fn into_db_value(self) -> DbVal {
+	fn into_db_value(self) -> sql::Value {
 		let mut obj = BTreeMap::new();
 		for e in self{
 			let tag = e.header().tag;
@@ -38,10 +38,10 @@ impl IntoDbValue for InMemDicomObject{
 }
 
 impl IntoDbValue for PrimitiveValue {
-	fn into_db_value(self) -> DbVal {
+	fn into_db_value(self) -> sql::Value {
 		use PrimitiveValue::*;
 		match self {
-			Empty => DbVal::None, // no-op
+			Empty => sql::Value::None, // no-op
 			Date(dates) => flatten_iter(dates.into_iter().
 				map(|date|
 					date.to_naive_date().unwrap()
@@ -79,7 +79,7 @@ impl IntoDbValue for PrimitiveValue {
 }
 
 impl IntoDbValue for InMemElement{
-	fn into_db_value(self) -> DbVal {
+	fn into_db_value(self) -> sql::Value {
 		match self.into_value() {
 			Primitive(p) => p.into_db_value(),
 			Sequence (s)  =>
@@ -90,7 +90,7 @@ impl IntoDbValue for InMemElement{
 }
 
 impl<T> IntoDbValue for Option<T> where T:IntoDbValue{
-	fn into_db_value(self) -> DbVal {
-		self.map_or(DbVal::None,|v|v.into_db_value())
+	fn into_db_value(self) -> sql::Value {
+		self.map_or(sql::Value::None,|v|v.into_db_value())
 	}
 }
