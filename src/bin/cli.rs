@@ -1,6 +1,5 @@
 #![recursion_limit = "512"]
 
-use std::net::SocketAddr;
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 use futures::StreamExt;
@@ -10,6 +9,7 @@ use clap::{Args, Parser, Subcommand};
 use rudicom::server;
 use rudicom::{db, config};
 use rudicom::tools::import::import_glob_as_text;
+use tokio::net::TcpListener;
 
 #[cfg(feature = "embedded")]
 use clap::ValueHint::DirPath;
@@ -47,8 +47,8 @@ enum Commands {
     /// run the server
     Server {
         /// ip and port to listen on
-        #[arg(default_value_t = SocketAddr::from(([127, 0, 0, 1], 3000)))]
-        address: SocketAddr,
+        #[arg(default_value = "127.0.0.1:3000")]
+        address: String,
     },
     /// import (big chunks of) data from the filesystem
     Import {
@@ -87,7 +87,8 @@ async fn main() -> Result<()>
 
     match args.command {
         Commands::Server{address} => {
-            server::serve(address).await?;
+            let bound = TcpListener::bind(address).await?;
+            server::serve(bound).await?;
         }
         Commands::Import{ existing, imported, pattern } => {
             let stream=import_glob_as_text(pattern,imported,existing)?;

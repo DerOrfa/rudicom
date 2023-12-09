@@ -1,8 +1,8 @@
 use axum::{Json, Router, routing::{get, post, delete}};
-use std::net::SocketAddr;
 use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing;
 use crate::{config, db};
@@ -45,7 +45,7 @@ impl<E> From<E> for JsonError where E: Into<anyhow::Error>,
 	fn from(err: E) -> Self {Self(err.into())}
 }
 
-pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
+pub async fn serve(listener:TcpListener) -> anyhow::Result<()>
 {
 	tracing_subscriber::registry()
 		.with(
@@ -79,12 +79,8 @@ pub async fn serve(at:SocketAddr) -> anyhow::Result<()>
 	}
 
 	// run it
-	tracing::info!("listening on {}", at);
+	tracing::info!("listening on {}", listener.local_addr()?);
 	tracing::info!("database is {}",db::version().await?);
 	tracing::info!("storage path is {}",config::get::<String>("storage_path")?);
-	axum::Server::bind(&at)
-		.serve(app.into_make_service())
-		.await
-		.unwrap();
-	Ok(())
+	axum::serve(listener,app.into_make_service()).await.map_err(|e|e.into())
 }
