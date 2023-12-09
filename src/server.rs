@@ -1,4 +1,4 @@
-use axum::{Json, Router, routing::{get, post, delete}};
+use axum::{Json, Router};
 use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -7,11 +7,11 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing;
 use crate::{config, db};
 
-mod handler;
 #[cfg(feature = "html")]
-pub(crate) mod html;
-// #[cfg(feature = "html")]
-// pub(crate) mod html_item;
+mod html;
+mod json;
+mod import;
+mod other;
 
 pub(crate) struct TextError(anyhow::Error);
 impl IntoResponse for TextError {
@@ -55,27 +55,18 @@ pub async fn serve(listener:TcpListener) -> anyhow::Result<()>
 		.init();
 
 	// build our application with a route
-	let mut app = Router::new()
-		.route("/instances",post(handler::store_instance))
-		.route("/:table/:id",delete(handler::del_entry))
-		.route("/tools/import/json",post(handler::import_json))
-		.route("/tools/import/text",post(handler::import_text))
-		.route("/studies/json",get(handler::get_studies))
-		.route("/:table/:id/json",get(handler::get_entry))
-		.route("/:table/:id/json/*query",get(handler::query))
-		.route("/:table/:id/parents",get(handler::get_entry_parents))
-		.route("/instances/:id/json-ext",get(handler::get_instance_json_ext))
-		.route("/instances/:id/file",get(handler::get_instance_file))
-		.route("/instances/:id/png",get(handler::get_instance_png))
+	let mut app = Router::new();
+	app = app
+		.merge(other::router())
+		.merge(json::router())
+		.merge(import::router())
 		.layer(DefaultBodyLimit::max(
 			config::get::<usize>("upload_sizelimit_mb").unwrap_or(10)*1024*1024
 		))
 		;
 	#[cfg(feature = "html")]
 	{
-		app = app
-			.route("/studies/html",get(handler::get_studies_html))
-			.route("/:table/:id/html",get(handler::get_entry_html))
+		app = app.merge(html::router());
 	}
 
 	// run it

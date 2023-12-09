@@ -11,11 +11,12 @@ rust-version = "1.70.0"
 embedded = ["surrealdb/kv-rocksdb"]
 # enable html interface
 html = ["dep:html"]
+dicom-json = ["dep:dicom-json"]
 
 [dependencies]
 dicom = {version = ">0.6.1", features = ["pixeldata"] }
 dicom-pixeldata = { version = "0.2", features = ["image"] }
-dicom-json = "0.1"
+dicom-json = { version = "0.1", optional = true }
 anyhow = {version = "1.0", features = ["backtrace"]}
 clap = { version = "4.4", features = ["derive","color","usage"] }
 serde_json = "1.0"
@@ -38,5 +39,4 @@ itertools = "0.11"
 
 [profile.release]
 strip = true
-lto = false #fix geo-bug
-#codegen-units = 1
+lto = true #fix geo-bug
