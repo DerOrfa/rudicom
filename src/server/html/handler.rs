@@ -38,20 +38,15 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
     for id in studies.iter().map(|e|e.id().clone())
     {
         counts.spawn(async move {
-            if let Ok(instances)=db::list_values(&id, "series.instances").await
-            {
-                let instances= instances.into_iter()
-                    .filter_map(|v|if let sql::Value::Array(array) = v{Some(array)} else {None})
-                    .flatten().count();
-                (id,instances)
-            } else { (id, 0) }
+            db::list_values(&id, "series.instances",true).await
+                .map(|l|(id,l.len()))
         });
     }
     // collect results from above
     let mut instance_count : HashMap<_,_> = HashMap::new();
     while let Some(res) = counts.join_next().await
     {
-        let (k,v) = res?;
+        let (k,v) = res??;
         instance_count.insert(k,v);
     }
     let countinstances = |obj:&Entry,cell:&mut TableCellBuilder| {

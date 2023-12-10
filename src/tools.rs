@@ -42,7 +42,7 @@ pub async fn get_instance_dicom(id:&str) -> anyhow::Result<Option<DefaultDicomOb
 pub(crate) async fn lookup_instance_file(id:&str) -> anyhow::Result<Option<db::File>>
 {
 	let id = Thing::from(("instances",id));
-	if let Some(mut e)= crate::db::lookup(&id).await.context(format!("failed looking for file in {}", id))?
+	if let Some(mut e)= db::lookup(&id).await.context(format!("failed looking for file in {}", id))?
 	{
 		let file:db::File = e.remove("file")
 			.ok_or(anyhow!(r#""file" missing in entry instance:{}"#,id))?

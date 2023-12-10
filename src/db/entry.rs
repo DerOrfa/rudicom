@@ -3,7 +3,6 @@ use surrealdb::sql;
 use anyhow::anyhow;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeMap;
-use surrealdb::sql::Value;
 use crate::db;
 use self::Entry::{Instance, Series, Study};
 
@@ -108,13 +107,13 @@ impl TryFrom<sql::Value> for Entry
 	fn try_from(value: sql::Value) -> Result<Self, Self::Error>
 	{
 		match value {
-			Value::None | Value::Null => Err(anyhow!("value is empty")),
-			Value::Array(mut array) => {
+			sql::Value::None | sql::Value::Null => Err(anyhow!("value is empty")),
+			sql::Value::Array(mut array) => {
 				if array.len() == 1 { Entry::try_from(array.remove(0)) }
 				else {Err(anyhow!("Exactly one entry was expected"))}
 
 			},
-			Value::Object(obj) => Entry::try_from(obj),
+			sql::Value::Object(obj) => Entry::try_from(obj),
 			_ => Err(anyhow!("Value {value:?} has invalid form"))
 		}
 	}

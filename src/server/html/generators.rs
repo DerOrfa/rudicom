@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{bail, Context};
 use html::content::Navigation;
 use html::inline_text::Anchor;
 use html::root::{Body, Html};
@@ -84,7 +84,7 @@ fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
 pub(crate) async fn table_from_objects<F>(
     objs:Vec<Entry>,
     id_name:String,
-    mut keys:Vec<String>,
+    keys:Vec<String>,
     additional: Vec<(&str,F)>
 ) -> anyhow::Result<Table> where F:Fn(&Entry,&mut TableCellBuilder)
 {
@@ -92,7 +92,7 @@ pub(crate) async fn table_from_objects<F>(
     if objs.is_empty(){bail!("Empty list")}
     let addkeys:Vec<_> = additional.iter().map(|(k,_)|k.to_string()).collect();
 
-    //build header from the keys (defaults taken from first json-object)
+    //build header from the keys (defaults taken from first object)
     let mut table_builder =Table::builder();
     table_builder.table_row(|r|{
         r.table_header(|c|c.text(id_name));
@@ -102,8 +102,6 @@ pub(crate) async fn table_from_objects<F>(
                 r.table_header(|c|c.text(key.to_owned()))
             )}
     );
-    //sneak in "id" so we will iterate through it (and query it) when building the rest of the table
-    keys.insert(0,"id".to_string());
     //build rest of the table
     for entry in objs //rows
     {
@@ -114,20 +112,13 @@ pub(crate) async fn table_from_objects<F>(
         }).collect();
 
         let mut row_builder= TableRow::builder();
-        for (k,item) in keys.iter().map(|k|(k,entry.get(k.as_str()))) //columns (cells)
+        row_builder.table_cell(|c|c.push(entry.get_link()));
+        for item in keys.iter().map(|k|entry.get(k.as_str())) //columns (cells)
         {
             let mut cellbuilder=TableCell::builder();
             if let Some(value) = item
             {
-                if let sql::Value::Thing(id) = value
-                {
-                    let entry=db::lookup(id).await?
-                        .ok_or(anyhow!("could not find {id}"))
-                        .context(format!("when looking for {k} in {}",entry.id()))?;
-                    cellbuilder.push(entry.get_link());
-                } else {
-                    cellbuilder.text(value.to_string());
-                }
+                cellbuilder.text(value.to_string());
             } else {cellbuilder.text("----------");}
             row_builder.push(cellbuilder.build());
         }
@@ -183,7 +174,7 @@ pub(crate) async fn entry_page(entry:Entry) -> anyhow::Result<Html>
             let keys=crate::config::get::<Vec<String>>("instance_tags")?;
             let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
                 cell.image(|i|i.src(
-                    format!("/instances/{}/png?width=64&height=64",obj.id())
+                    format!("/instances/{}/png?width=64&height=64",obj.id().id.to_raw())
                 ));
             };
             let instance_text = format!("{} Instances",instances.len());

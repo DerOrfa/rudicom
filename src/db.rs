@@ -1,14 +1,15 @@
 
 use std::path::Path;
 use std::sync::OnceLock;
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
+use serde::Serialize;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::{Surreal, Result};
+use surrealdb::{Surreal, Result, sql};
 use surrealdb::Error::Api;
 use surrealdb::error::Api::Query;
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql::{Object,Value, Thing};
+use surrealdb::sql::{Value, Thing};
 
 mod into_db_value;
 mod register;
@@ -27,6 +28,14 @@ fn db() -> &'static Surreal<Any>
 	DB.get_or_init(Surreal::init)
 }
 
+async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> Result<Value>
+{
+	db()
+		.query(qry)
+		.bind(bindings)
+		.await?.take::<Value>(0)
+}
+
 pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
 {
 	let qry=format!("select array::flatten({target}) as id from $id").into_query()?;
@@ -40,29 +49,32 @@ pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
 
 pub(crate) async fn list_table<T>(table:T) -> anyhow::Result<Vec<Entry>> where T:AsRef<str>
 {
-	db().select::<Vec<Object>>(table.as_ref()).await?
-		.into_iter().map(Entry::try_from).collect()
+	let table = sql::Table::from(table.as_ref());
+	if let sql::Value::Array(rows) = query("select * from $table", ("table", table)).await?
+	{
+		rows.into_iter().map(Entry::try_from).collect()
+	} else {
+		bail!("Invalid response to query for table")
+	}
 }
 
-pub(crate) async fn list_values<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Value>> where T:AsRef<str>
+pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> anyhow::Result<Vec<Value>> where T:AsRef<str>
 {
-	if let Some(values) = db().query(format!("select * from $id.{}",col.as_ref()))
-		.bind(("id",id)).await?.check()?
-		.take::<Option<Value>>(0)?.map(|v|v.flatten())
+	let mut result = query(format!("select * from $id.{}",col.as_ref()),("id",id)).await?.flatten();
+	if flatten {result=result.flatten()}
+	match result
 	{
-		Ok(match values {
-			Value::Array(v) => v.0,
-			_ => vec![values]
-		})
-	}
-	else
-	{
-		Ok(vec![])
+		Value::Array(values) => Ok(values.0),
+		_ => Err(
+			anyhow!("unexpected result {:?}",result)
+				.context(format!("when looking up {} in {}",col.as_ref(),id))
+		)
+
 	}
 }
 pub(crate) async fn list_children<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Entry>> where T:AsRef<str>
 {
-	list_values(id, col).await?.into_iter()
+	list_values(id, col,false).await?.into_iter()
 		.map(|v|
 			if let Value::Object(o)=v{Entry::try_from(o)}
 			else {Err(anyhow!(r#""{v}" is not an object"#))}
@@ -70,9 +82,14 @@ pub(crate) async fn list_children<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Ent
 }
 pub(crate) async fn lookup(id:&Thing) -> anyhow::Result<Option<Entry>>
 {
-	db().select::<Option<Object>>(id).await.context(format!("failed looking up {}", id))?
-		.map(Entry::try_from).transpose()
-		.map_err(|e|e.context(format!("when looking up {}", id)))
+	match query("select * from only $id", ("id", id)).await
+	{
+		Ok(value) => {
+			if value.is_some() { Entry::try_from(value).map(|e|Some(e))}
+			else {Ok(None)}
+		}.into(),
+		Err(err) => Context::context(Err(err),format!("when looking up {}", id))
+	}
 }
 
 async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>
