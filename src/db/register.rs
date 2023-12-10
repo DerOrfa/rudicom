@@ -31,7 +31,7 @@ pub async fn register(
 		.bind(("study_meta",study_meta))
 		.await?.check()?;
 
-	res.take(2)
+	res.take::<sql::Value>(2).map(|r|r.first())
 }
 
 pub async fn unregister(id:sql::Thing) -> Result<sql::Value>
@@ -94,13 +94,13 @@ pub async fn register_instance(
 		.collect();
 
 	let res=register(instance_meta,series_meta,study_meta).await?;
-	if res.is_none() { // we just created an entry, set the guard if provided
+	if res.is_some() { // we just created an entry, set the guard if provided
+		Some(res.try_into()).transpose()
+	} else { // data already existed - no data stored - return existing data
 		if let Some(g) = guard {
 			g.set(instance_id_bak);
 		}
 		Ok(None) //and return None existing entry
-	} else { // data already existed - no data stored - return existing data
-		Some(res.try_into()).transpose()
 	}
 
 }
