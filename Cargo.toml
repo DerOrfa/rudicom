@@ -1,42 +1,7 @@
-[package]
-name = "rudicom"
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.70.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[features]
-# embedded surrealdb (enables direct use of database vs. connecting to a server)
-embedded = ["surrealdb/kv-rocksdb"]
-# enable html interface
-html = ["dep:html"]
-dicom-json = ["dep:dicom-json"]
-
-[dependencies]
-dicom = {version = ">0.6.1", features = ["pixeldata"] }
-dicom-pixeldata = { version = "0.2", features = ["image"] }
-dicom-json = { version = "0.1", optional = true }
-anyhow = {version = "1.0", features = ["backtrace"]}
-clap = { version = "4.4", features = ["derive","color","usage"] }
-serde_json = "1.0"
-surrealdb = {version = "1.0", features = ["protocol-ws"]}
-serde = "1.0"
-tokio = { version = "1.35", features = ["macros", "rt-multi-thread", "fs"] }
-glob = "0.3"
-config = {version = "0.13", default-features = false, features = ["toml"]}
-md5 = "0.7"
-runtime-format = "0.1"
-axum = {version = "0.7", features = ["tracing","query"]}
-axum-extra = {version = "0.9", features = ["async-read-body"]}
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = "0.11"
-futures = {version = "0.3", default-features = false}
-axum-streams = {version = "0.11", default-features = false, features = ["text","json"]}
-html = { version = "0.6", optional = true}
-itertools = "0.11"
+[workspace]
+members = ["cli","fuzzer"]
+resolver = "2"
 
 [profile.release]
 strip = true
-lto = true #fix geo-bug
+lto = true

@@ -1,5 +1,3 @@
-
-use std::path::Path;
 use std::sync::OnceLock;
 use anyhow::{anyhow, bail, Context};
 use serde::Serialize;
@@ -17,7 +15,7 @@ mod entry;
 mod file;
 
 pub use into_db_value::IntoDbValue;
-pub use register::{unregister,register,register_instance,RegistryGuard};
+pub use register::{unregister, register_instance, RegistryGuard};
 pub use entry::Entry;
 pub use file::File;
 
@@ -118,7 +116,8 @@ pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
 	}
 }
 
-pub async fn init_local(file:&Path) -> anyhow::Result<()>
+#[cfg(feature = "embedded")]
+pub async fn init_local(file:&std::path::Path) -> anyhow::Result<()>
 {
 	let file = format!("file://{}",file.to_str().ok_or(anyhow!(r#""{}" is an invalid filename"#,file.to_string_lossy()))?);
 	db().connect(file).await?;

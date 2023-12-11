@@ -1,14 +1,19 @@
 #![recursion_limit = "512"]
 
+mod storage;
+mod db;
+mod dcm;
+mod tools;
+mod server;
+mod config;
+
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 use futures::StreamExt;
 use clap::ValueHint::Hostname;
 
 use clap::{Args, Parser, Subcommand};
-use rudicom::server;
-use rudicom::{db, config};
-use rudicom::tools::import::import_glob_as_text;
+use tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
 
 #[cfg(feature = "embedded")]

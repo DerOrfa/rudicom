@@ -1,5 +1,5 @@
 use std::io;
-use std::io::Write;
+use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
@@ -8,11 +8,10 @@ use reqwest;
 use clap::Parser;
 use dicom::dictionary_std::tags;
 use dicom::core::PrimitiveValue;
-use dicom::object::{DefaultDicomObject, Tag};
+use dicom::core::value::ConvertValueError;
+use dicom::object::{DefaultDicomObject, open_file, Tag};
 use reqwest::{Body, Client, RequestBuilder};
 use tokio::time::interval;
-use rudicom::storage::async_store::read_file;
-use rudicom::Result;
 
 #[derive(Default)]
 struct UploadInfo {
@@ -48,15 +47,19 @@ async fn status_update()
 	}
 }
 
-async fn send_instance(obj:DefaultDicomObject,req:RequestBuilder) -> Result<()>{
-	let buffer=rudicom::storage::async_store::write(&obj,None)?.into_inner();
+async fn send_instance(obj:DefaultDicomObject,req:RequestBuilder) -> anyhow::Result<()>{
+	let mut buffer = Cursor::new(Vec::new());
+	buffer.seek(SeekFrom::Start(128))?;
+	Write::write_all(&mut buffer, b"DICM")?;
+	obj.write_meta(&mut buffer)?;
+	obj.write_dataset(&mut buffer)?;
 
-	req.body(Body::from(buffer)).send().await?.error_for_status()?;
+	req.body(Body::from(buffer.into_inner())).send().await?.error_for_status()?;
 	UPLOAD_INFO.get().unwrap().count.fetch_add(1, Ordering::Relaxed);
 	Ok(())
 }
 
-fn set_tag<T,const M:usize>(obj:&mut DefaultDicomObject,new_vals:[T;M],tag:Tag) -> Result<()> where T:ToString
+fn set_tag<T,const M:usize>(obj:&mut DefaultDicomObject,new_vals:[T;M],tag:Tag) -> Result<(),ConvertValueError> where T:ToString
 {
 	let mut e=obj.take_element(tag).unwrap();
 	let vals:Vec<_>=e.to_str()?.split('.').map(|s|s.to_string()).collect();
@@ -69,21 +72,21 @@ fn set_tag<T,const M:usize>(obj:&mut DefaultDicomObject,new_vals:[T;M],tag:Tag) 
 	Ok(())
 }
 
-async fn modify_and_send(mut copy:DefaultDicomObject, instance:u32, series:u32, study:u32, req: RequestBuilder) -> Result<()>
+async fn modify_and_send(mut copy:DefaultDicomObject, instance:u32, series:u32, study:u32, req: RequestBuilder) -> anyhow::Result<()>
 {
 	set_tag(&mut copy, [study,series,instance], tags::SOP_INSTANCE_UID)?;
 	set_tag(&mut copy, [study,series], tags::SERIES_INSTANCE_UID)?;
 	set_tag(&mut copy, [study], tags::STUDY_INSTANCE_UID)?;
 
-	send_instance(copy, req).await
+	Ok(send_instance(copy, req).await?)
 }
 
 #[tokio::main]
-async fn main() -> Result<()>
+async fn main() -> anyhow::Result<()>
 {
 	let path=PathBuf::from("assets/MR000000.IMA");
 	UPLOAD_INFO.get_or_init(||UploadInfo::default()).size.store(std::fs::metadata(&path)?.len(), Ordering::Relaxed);
-	let artifact=read_file(path,None).await?;
+	let artifact=open_file(path)?;
 	let mut tasks=tokio::task::JoinSet::new();
 
 
