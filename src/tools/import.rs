@@ -26,15 +26,17 @@ impl Serialize for ImportResult
 			}
 			ImportResult::ExistedConflict {existed, filename, my_md5  } => {
 				let mut s=s.serialize_struct("existed_with_conflicting_checksum",3)?;
+				let existed = serde_json::Value::from(existed.clone());
 				s.serialize_field("filename",filename)?;
 				s.serialize_field("incoming_md5", my_md5)?;
-				s.serialize_field("existing entry", existed)?;
+				s.serialize_field("existing entry", &existed)?;
 				s.end()
 			}
 			ImportResult::Existed { filename,existed } => {
 				let mut s=s.serialize_struct("existed",2)?;
+				let existed = serde_json::Value::from(existed.clone());
 				s.serialize_field("filename",filename)?;
-				s.serialize_field("existing entry", existed)?;
+				s.serialize_field("existing entry", &existed)?;
 				s.end()
 			}
 			ImportResult::Err { filename,error} => {

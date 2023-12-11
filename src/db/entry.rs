@@ -2,12 +2,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use surrealdb::sql;
 use anyhow::anyhow;
-use serde::{Serialize, Serializer};
-use serde::ser::SerializeMap;
 use crate::db;
 use crate::tools::transform;
 use self::Entry::{Instance, Series, Study};
 
+#[derive(Clone,Debug)]
 pub enum Entry
 {
 	Instance((sql::Thing,sql::Object)),
@@ -17,14 +16,6 @@ pub enum Entry
 
 impl Entry
 {
-	fn type_name(&self) -> &str
-	{
-		match self {
-			Instance(_) => "instance",
-			Series(_) => "series",
-			Study(_) => "study"
-		}
-	}
 	pub fn get(&self, key:&str) -> Option<&sql::Value>
 	{
 		self.data().1.get(key)
@@ -147,20 +138,6 @@ impl TryFrom<sql::Object> for Entry
 			}
 			_ => Err(anyhow!(r#""id" is not an id"#))
 		}
-	}
-}
-
-impl Serialize for Entry
-{
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer
-	{
-		let typename= self.type_name();
-		let mut map = self.data().1.clone();
-		map.insert("id".to_string(),self.id().id.to_raw().into());
-
-		let mut s= serializer.serialize_map(Some(1))?;
-		s.serialize_entry(typename,&map)?;
-		s.end()
 	}
 }
 
