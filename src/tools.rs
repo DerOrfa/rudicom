@@ -2,13 +2,28 @@ pub mod store;
 pub mod remove;
 pub mod import;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context};
 use dicom::object::DefaultDicomObject;
-use surrealdb::sql::Thing;
+use surrealdb::sql;
 pub use remove::remove;
 use crate::{db, storage};
 
+pub fn transform(root:sql::Value, transformer:fn(sql::Value)->sql::Value) -> sql::Value
+{
+	match root {
+		sql::Value::Array(a) => {
+			let a:sql::Array=a.into_iter().map(|v|transform(v,transformer)).collect();
+			sql::Value::Array(a)
+		}
+		sql::Value::Object(o) => {
+			let o:BTreeMap<_,_>=o.into_iter().map(|(k,v)|(k,transform(v,transformer))).collect();
+			sql::Object(o).into()
+		}
+		_ => transformer(root)
+	}
+}
 pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 {
 	let first=paths.first().expect("path list must not be empty");
@@ -41,7 +56,7 @@ pub async fn get_instance_dicom(id:&str) -> anyhow::Result<Option<DefaultDicomOb
 }
 pub(crate) async fn lookup_instance_file(id:&str) -> anyhow::Result<Option<db::File>>
 {
-	let id = Thing::from(("instances",id));
+	let id = sql::Thing::from(("instances",id));
 	if let Some(mut e)= db::lookup(&id).await.context(format!("failed looking for file in {}", id))?
 	{
 		let file:db::File = e.remove("file")

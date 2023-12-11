@@ -48,8 +48,8 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 			Json(json!({"Status":"Success"}))
 		).into_response()),
 		Some(ob) => {
-			let id = ob.id();
-			let path = format!("/{}/{}",id.tb,id.id.to_raw());
+			let path = format!("/{}/{}",ob.id().tb,ob.id().id.to_raw());
+			let ob = serde_json::Value::from(ob);
 			Ok((
 				StatusCode::FOUND,
 				Json(json!({

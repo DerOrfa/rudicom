@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use surrealdb::sql;
 use anyhow::anyhow;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeMap;
 use crate::db;
+use crate::tools::transform;
 use self::Entry::{Instance, Series, Study};
 
 pub enum Entry
@@ -15,6 +17,14 @@ pub enum Entry
 
 impl Entry
 {
+	fn type_name(&self) -> &str
+	{
+		match self {
+			Instance(_) => "instance",
+			Series(_) => "series",
+			Study(_) => "study"
+		}
+	}
 	pub fn get(&self, key:&str) -> Option<&sql::Value>
 	{
 		self.data().1.get(key)
@@ -144,16 +154,28 @@ impl Serialize for Entry
 {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer
 	{
-		let typename= match self {
-			Instance(_) => "instance",
-			Series(_) => "series",
-			Study(_) => "study"
-		};
+		let typename= self.type_name();
 		let mut map = self.data().1.clone();
-		map.insert("id".to_string(),self.id().clone().into());
+		map.insert("id".to_string(),self.id().id.to_raw().into());
 
 		let mut s= serializer.serialize_map(Some(1))?;
 		s.serialize_entry(typename,&map)?;
 		s.end()
+	}
+}
+
+impl From<Entry> for serde_json::Value
+{
+	fn from(entry: Entry) -> Self {
+		// transform all Thing-objects into generic Objects to make them more useful in json
+		let transformer = |v|if let sql::Value::Thing(id)=v{
+			sql::Object(BTreeMap::from([
+				("tb".into(), id.tb.into()),
+				("id".into(), id.id.to_raw().into()),
+			])).into()
+		} else {v};
+		let value = transform(entry.into(),transformer);
+		let object = sql::Object::try_from(value).unwrap();
+		serde_json::Value::from(sql::Value::Object(object))
 	}
 }

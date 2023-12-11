@@ -6,7 +6,6 @@ use surrealdb::sql;
 use axum::http::StatusCode;
 use serde_json::json;
 use crate::db;
-use crate::db::Entry;
 use crate::server::JsonError;
 
 pub(super) fn router() -> axum::Router
@@ -18,9 +17,12 @@ pub(super) fn router() -> axum::Router
 		.route("/:table/:id/json/*query",get(query))
 }
 
-async fn get_studies() -> Result<Json<Vec<Entry>>,JsonError>
+fn not_found() -> Result<Response,JsonError> { Ok((StatusCode::NOT_FOUND,Json(json!({"Status":"not found"}))).into_response()) }
+
+async fn get_studies() -> Result<Json<Vec<serde_json::Value>>,JsonError>
 {
-	let studies = db::list_table("studies").await?;
+	let studies:Vec<_> = db::list_table("studies").await?.into_iter()
+		.map(serde_json::Value::from).collect();
 	Ok(Json(studies))
 }
 
@@ -29,12 +31,9 @@ async fn get_entry(Path((table,id)):Path<(String, String)>) -> Result<Response,J
 	let id = sql::Thing::from((table, id));
 	if let Some(res)=db::lookup(&id).await?
 	{
-		Ok(Json(res).into_response())
+		Ok(Json(serde_json::Value::from(res)).into_response())
 	} else {
-		Ok((
-			StatusCode::NOT_FOUND,
-			Json(json!({"Status":"not found"}))
-		).into_response())
+		not_found()
 	}
 }
 
@@ -44,24 +43,24 @@ async fn query(Path((table,id,query)):Path<(String, String, String)>) -> Result<
 	if let Some(res) = db::lookup(&id).await?
 	{
 		let query=query.replace("/",".");
-		let children=db::list_children(res.id(),query).await?;
+		let children:Vec<_>=db::list_children(res.id(),query).await?.into_iter()
+			.map(serde_json::Value::from).collect();
 		Ok(Json(children).into_response())
 	} else {
-		Ok((
-			StatusCode::NOT_FOUND,
-			Json(json!({"Status":"not found"}))
-		).into_response())
+		not_found()
 	}
 }
 
-async fn get_entry_parents(Path((table,id)):Path<(String, String)>) -> Result<Json<Vec<Entry>>,JsonError>
+async fn get_entry_parents(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
 {
-	let mut ret:Vec<Entry>=Vec::new();
-	for id in db::find_down_tree(&sql::Thing::from((table,id))).await?
+	let mut ret:Vec<serde_json::Value>=Vec::new();
+	let parents = db::find_down_tree(&sql::Thing::from((table,id))).await?;
+	if parents.is_empty() {	return not_found() }
+	for id in parents
 	{
 		let e=db::lookup(&id).await?
 			.expect(format!("lookup for parent {id} not found").as_str());
-		ret.push(e);
+		ret.push(e.into());
 	}
-	Ok(Json(ret))
+	Ok(Json(ret).into_response())
 }

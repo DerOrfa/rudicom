@@ -41,32 +41,6 @@ impl Entry {
             .text(self.name())
             .build()
     }
-    // pub fn into_items(mut self, keys: &Vec<String>) -> anyhow::Result<LinkedList<(String,HtmlItem)>>
-    // {
-    // 	let link = self.get_link();
-    // 	let mut out:LinkedList<(String,HtmlItem)> = LinkedList::new();
-    // 	for k in keys
-    // 	{
-    // 		let item = match self.remove(k.as_str()).unwrap_or(sql::Value::from("-------")).into_json()
-    // 		{
-    // 			JsonVal::Bool(b) => HtmlItem::Bool(b),
-    // 			JsonVal::Number(n) => HtmlItem::Number(n),
-    // 			JsonVal::String(s) => HtmlItem::String(s),
-    // 			JsonVal::Array(a) => HtmlItem::String(format!("{} children", a.len())),
-    // 			JsonVal::Object(o) => {
-    // 				let jsonval=JsonVal::Object(o);
-    // 				if let Some(id) = json_to_thing(jsonval.clone()).ok() {
-    // 					HtmlItem::Id((id, link.clone()))
-    // 				} else {
-    // 					HtmlItem::String(jsonval.to_string())
-    // 				}
-    // 			}
-    // 			_ => bail!("invalid value in {k}"),
-    // 		};
-    // 		out.push_back((k.clone(), item));
-    // 	}
-    // 	Ok(out)
-    // }
 }
 
 fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
