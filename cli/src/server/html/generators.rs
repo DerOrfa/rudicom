@@ -163,21 +163,17 @@ pub(crate) async fn entry_page(entry:Entry) -> anyhow::Result<Html>
 
             let mut series=db::list_children(&id, "series").await?;
             // get flat list of file-attributes
-            // let files:Vec<_>=db::list_children(id,"series.instances.file").await?.into_iter()
-            // 	.filter_map(|v|if let JsonVal::Array(array)=v{Some(array)} else {None})
-            // 	.flatten().collect();
+            let files=list_values(&id, "series.instances.file",true).await?;
             // makes PathBuf of them
-            // let files:anyhow::Result<Vec<_>>=files.iter()
-            // 	.filter_map(|f|f.as_object())
-            // 	.map(|o|json_to_path(o))
-            // 	.collect();
-            // reduce them ant print them @todo this is very expensive, maybe find a better way
-            // if let Ok(path) = files.map(reduce_path)
-            // {
-            // 	builder
-            // 		.heading_2(|t|t.text("Path"))
-            // 		.paragraph(|p|p.text(path.to_string_lossy().to_string()));
-            // }
+            let files:Vec<_>=files.into_iter()
+            	.filter_map(|v|File::try_from(v).ok())
+                .map(File::into_path)
+            	.collect();
+            // reduce them and print them @todo this is very expensive, maybe find a better way
+            let common_path= reduce_path(files);
+            builder
+                .heading_2(|t|t.text("Path"))
+                .paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
 
             series.sort_by_key(|s|s
                 .get_string("SeriesNumber").expect("missing SeriesNumber")
