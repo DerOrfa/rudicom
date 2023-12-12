@@ -49,7 +49,7 @@ pub fn gen_filepath(obj:&DefaultDicomObject) -> String
 	FormatArgs::new(pattern.as_str(),&DicomAdapter(obj)).to_string()
 }
 
-impl<'a> FormatKey for DicomAdapter<'a> {
+impl FormatKey for DicomAdapter<'_> {
 	fn fmt(&self, key: &str, f: &mut fmt::Formatter<'_>) -> Result<(), FormatKeyError> {
 		if let Some(key) = find_tag(key){
 			let val= self.0.element_opt(key).unwrap()

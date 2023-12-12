@@ -19,6 +19,11 @@ impl File {
         if self.owned { tools::complete_filepath(&self.path.as_str()) }
         else { PathBuf::from(self.path.clone().to_raw()) }
     }
+    pub(crate) fn into_path(self) -> PathBuf
+    {
+        if self.owned { tools::complete_filepath(&self.path.as_str()) }
+        else { PathBuf::from(self.path.to_raw()) }
+    }
 }
 
 impl TryFrom<sql::Value> for File

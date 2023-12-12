@@ -112,7 +112,6 @@ impl TryFrom<sql::Value> for Entry
 			sql::Value::Array(mut array) => {
 				if array.len() == 1 { Entry::try_from(array.remove(0)) }
 				else {Err(anyhow!("Exactly one entry was expected"))}
-
 			},
 			sql::Value::Object(obj) => Entry::try_from(obj),
 			_ => Err(anyhow!("Value {value:?} has invalid form"))

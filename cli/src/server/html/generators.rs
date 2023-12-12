@@ -8,8 +8,8 @@ use html::tables::{Table, TableCell, TableRow};
 use surrealdb::sql;
 use surrealdb::sql::Value;
 use crate::db;
-use crate::db::{Entry, find_down_tree};
-use crate::tools::{lookup_instance_filepath, reduce_path};
+use crate::db::{Entry, File, find_down_tree, list_values};
+use crate::tools::reduce_path;
 
 impl Entry {
     pub async fn make_nav(&self) -> anyhow::Result<Navigation>
@@ -49,7 +49,13 @@ fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
     {
         table_builder.table_row(|r|{r
             .table_cell(|c|c.text(k))
-            .table_cell(|c|c.text(v.to_string()))
+            .table_cell(|c| {
+                match v {
+                    Value::Object(o) => c.push(table_from_map(o.0)),
+                    _ => c.text(v.as_raw_string())
+                }
+
+            })
         });
     };
     table_builder.build()
@@ -77,7 +83,7 @@ pub(crate) async fn table_from_objects<F>(
             )}
     );
     //build rest of the table
-    for entry in objs //rows
+    for mut entry in objs //rows
     {
         let addcells:Vec<_> = additional.iter().map(|(_,func)|{
             let mut cell = TableCell::builder();
@@ -87,12 +93,12 @@ pub(crate) async fn table_from_objects<F>(
 
         let mut row_builder= TableRow::builder();
         row_builder.table_cell(|c|c.push(entry.get_link()));
-        for item in keys.iter().map(|k|entry.get(k.as_str())) //columns (cells)
+        for item in keys.iter().map(|k|entry.remove(k.as_str())) //columns (cells)
         {
             let mut cellbuilder=TableCell::builder();
             if let Some(value) = item
             {
-                cellbuilder.text(value.to_string());
+                cellbuilder.text(value.to_raw_string());
             } else {cellbuilder.text("----------");}
             row_builder.push(cellbuilder.build());
         }
@@ -110,12 +116,6 @@ pub(crate) async fn entry_page(entry:Entry) -> anyhow::Result<Html>
     builder.heading_1(|h|h.text(name.to_owned()));
     match entry {
         Entry::Instance((id,mut instance)) => {
-            if let Some(filepath)=lookup_instance_filepath(id.id.to_raw().as_str()).await?{
-                builder
-                    .heading_2(|t|t.text("filename"))
-                    .paragraph(|p|p.text(filepath.to_string_lossy().to_string()));
-            }
-
             instance.remove("series");
             builder.heading_2(|h|h.text("Attributes"))
                 .push(table_from_map(instance.0));
@@ -130,13 +130,15 @@ pub(crate) async fn entry_page(entry:Entry) -> anyhow::Result<Html>
             builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.0));
             let mut instances=db::list_children(&id, "instances").await?;
             instances.sort_by_key(|s|s
-                .get_string("InstanceNumber").expect("missing InstanceNumber")
-                .parse::<u64>().expect("InstanceNumber is not a number")
+                .get_string("InstanceNumber")
+                .map_or(0,|s|s
+                    .parse::<u64>().unwrap_or(0)
+                )
             );
             let files:Vec<_> = instances.iter_mut()
                 .filter_map(|v|v.remove("file"))
                 .filter_map(|f|db::File::try_from(f).ok())
-                .map(|f|f.get_path())
+                .map(File::into_path)
                 .collect();
 
             let path = reduce_path(files);
@@ -184,7 +186,7 @@ pub(crate) async fn entry_page(entry:Entry) -> anyhow::Result<Html>
             let countinstances = |obj:&Entry,cell:&mut TableCellBuilder|{
                 if let Some(len)= obj
                     .get("instances")
-                    .and_then(|v|if let Value::Array(a) = v {Some(a)} else {None} )
+                    .and_then(|v|if let sql::Value::Array(a) = v {Some(a)} else {None} )
                     .map(|l|l.len())
                 {
                     cell.text(format!("{len} instances"));

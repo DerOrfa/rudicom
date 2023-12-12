@@ -58,7 +58,7 @@ pub(crate) async fn list_table<T>(table:T) -> anyhow::Result<Vec<Entry>> where T
 
 pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> anyhow::Result<Vec<Value>> where T:AsRef<str>
 {
-	let mut result = query(format!("select * from $id.{}",col.as_ref()),("id",id)).await?.flatten();
+	let mut result = query(format!("select * from $id.{}",col.as_ref()),("id",id)).await?;
 	if flatten {result=result.flatten()}
 	match result
 	{
@@ -72,7 +72,7 @@ pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> anyhow::Re
 }
 pub(crate) async fn list_children<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Entry>> where T:AsRef<str>
 {
-	list_values(id, col,false).await?.into_iter()
+	list_values(id, col,true).await?.into_iter()
 		.map(|v|
 			if let Value::Object(o)=v{Entry::try_from(o)}
 			else {Err(anyhow!(r#""{v}" is not an object"#))}
@@ -80,7 +80,7 @@ pub(crate) async fn list_children<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Ent
 }
 pub(crate) async fn lookup(id:&Thing) -> anyhow::Result<Option<Entry>>
 {
-	match query("select * from only $id", ("id", id)).await
+	match query("select * from $id", ("id", id)).await
 	{
 		Ok(value) => {
 			if value.is_some() { Entry::try_from(value).map(|e|Some(e))}
