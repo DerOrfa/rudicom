@@ -3,13 +3,11 @@ use dicom::core::{DataDictionary, Tag};
 use dicom::object::{DefaultDicomObject, StandardDataDictionary};
 use crate::config;
 use crate::db::IntoDbValue;
-use runtime_format::{FormatArgs, FormatKey, FormatKeyError};
-use core::fmt;
-use std::borrow::Cow;
+use std::fmt::Write;
+use std::ops::Deref;
 use surrealdb::sql;
 use dicom::core::header::HasLength;
-
-struct DicomAdapter<'a>(&'a DefaultDicomObject);
+use strfmt::{FmtError, strfmt_map};
 
 pub fn find_tag(name:&str) -> Option<Tag>
 {
@@ -43,27 +41,41 @@ pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> Vec<(S
 		.collect()
 }
 
-pub fn gen_filepath(obj:&DefaultDicomObject) -> String
+pub fn gen_filepath(obj:&DefaultDicomObject) -> strfmt::Result<String>
 {
 	let pattern:String = config::get("filename_pattern").expect(r#""filename_pattern"  missing or invalid in config"#);
-	FormatArgs::new(pattern.as_str(),&DicomAdapter(obj)).to_string()
+	strfmt_map(pattern.as_str(),|f| format_filepath(f, &obj))
 }
 
-impl FormatKey for DicomAdapter<'_> {
-	fn fmt(&self, key: &str, f: &mut fmt::Formatter<'_>) -> Result<(), FormatKeyError> {
-		if let Some(key) = find_tag(key){
-			let val= self.0.element_opt(key).unwrap()
-				.map_or(Cow::from("<<none>>"),|e|
-					if e.is_empty(){
-						Cow::from("<<empty>>")
-					} else {
-						e.to_str().unwrap_or(Cow::from("<<invalid>>"))
-					}
-				);
-			write!(f,"{}",val).map_err(FormatKeyError::Fmt)
-		}
-		else {
-			Err(FormatKeyError::UnknownKey)
+fn format_filepath(mut f:strfmt::Formatter, obj:&DefaultDicomObject) -> strfmt::Result<()>
+{
+	let key = find_tag(f.key).ok_or(FmtError::KeyError(format!(r#"Tag "{}" is not known"#,f.key)))?;
+	let val = obj.element_opt(key).unwrap();
+	if val.is_none(){
+		return f.write_str("<<none>>").map_err(|e|FmtError::Invalid(e.to_string()))
+	}
+	let val = val.unwrap();
+	if val.is_empty(){
+		return f.write_str("<<empty>>").map_err(|e|FmtError::Invalid(e.to_string()))
+	}
+	let val=val.to_str().map_err(|e|FmtError::Invalid(e.to_string()))?;
+	let mut val=val.deref();
+	if let Some(width)=f.width()
+	{
+		match f.align()
+		{
+			strfmt::Alignment::Left => {//"<" -> shrink from the right side
+				if val.len()>width{
+					val= &val[..width];
+				}
+			}
+			strfmt::Alignment::Right => {//">" -> shrink from the left side
+				if val.len()>width{
+					val= &val[val.len() - width..];
+				}
+			}
+			_ => {}
 		}
 	}
+	f.write_str(val).map_err(|e|FmtError::Invalid(e.to_string()))
 }

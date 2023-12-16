@@ -10,7 +10,7 @@ use crate::db::RegistryGuard;
 
 pub(crate) async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result<Option<db::Entry>>
 {
-	let path = gen_filepath(&obj);
+	let path = gen_filepath(&obj)?;
 	let fileinfo:BTreeMap<String,sql::Value>= BTreeMap::from([
 		("path".into(),path.clone().into()),
 		("owned".into(),true.into()),
