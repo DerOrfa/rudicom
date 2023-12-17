@@ -43,9 +43,8 @@ async fn query(Path((table,id,query)):Path<(String, String, String)>) -> Result<
 	if let Some(res) = db::lookup(&id).await?
 	{
 		let query=query.replace("/",".");
-		let children:Vec<_>=db::list_children(res.id(),query).await?.into_iter()
-			.map(serde_json::Value::from).collect();
-		Ok(Json(children).into_response())
+		let values=db::list_json(res.id(),query).await?;
+		Ok(Json(values).into_response())
 	} else {
 		not_found()
 	}

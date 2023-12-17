@@ -78,6 +78,12 @@ pub(crate) async fn list_children<T>(id:&Thing, col:T) -> anyhow::Result<Vec<Ent
 			else {Err(anyhow!(r#""{v}" is not an object"#))}
 		).collect()
 }
+
+pub(crate) async fn list_json<T>(id:&Thing, col:T) -> anyhow::Result<Vec<serde_json::Value>> where T:AsRef<str>
+{
+	let list=list_values(id, col,true).await?;
+	Ok(list.into_iter().map(Value::into_json).collect())
+}
 pub(crate) async fn lookup(id:&Thing) -> anyhow::Result<Option<Entry>>
 {
 	match query("select * from $id", ("id", id)).await
