@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 reqwest = "0.11"
-clap = "4.4"
+clap = { version = "4.4", features = ["derive","color","usage"] }
 dicom = "0.6"
 tokio = "1.35"
 anyhow = "1.0"

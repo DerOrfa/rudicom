@@ -68,6 +68,6 @@ pub(crate) async fn lookup_instance_file(id:&str) -> anyhow::Result<Option<db::F
 
 pub async fn lookup_instance_filepath(id:&str) -> anyhow::Result<Option<PathBuf>>
 {
-	lookup_instance_file(id).await.context("looking up fileinfo failed")
+	lookup_instance_file(id).await.context(format!("looking up fileinfo for {id} failed"))
 		.map(|f|f.map(|f|f.get_path()))
 }

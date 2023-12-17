@@ -86,7 +86,7 @@ pub(crate) async fn lookup(id:&Thing) -> anyhow::Result<Option<Entry>>
 			if value.is_some() { Entry::try_from(value).map(|e|Some(e))}
 			else {Ok(None)}
 		}.into(),
-		Err(err) => Context::context(Err(err),format!("when looking up {}", id))
+		Err(err) => Context::context(Err(err),format!("when looking up {id}"))
 	}
 }
 
