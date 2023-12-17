@@ -1,6 +1,7 @@
 pub mod store;
 pub mod remove;
 pub mod import;
+pub mod verify;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -63,11 +64,25 @@ pub(crate) async fn lookup_instance_file(id:&str) -> anyhow::Result<Option<db::F
 			.ok_or(anyhow!(r#""file" missing in entry instance:{}"#,id))?
 			.try_into()?;
 		Ok(Some(file))
-	} else {Ok(None)}
+	} else {
+		Ok(None)
+	}
 }
 
 pub async fn lookup_instance_filepath(id:&str) -> anyhow::Result<Option<PathBuf>>
 {
 	lookup_instance_file(id).await.context(format!("looking up fileinfo for {id} failed"))
 		.map(|f|f.map(|f|f.get_path()))
+}
+
+pub async fn instances_for_entry(id:sql::Thing) -> anyhow::Result<Vec<sql::Thing>>
+{
+	match id.tb.as_str() {
+		"studies" => db::query_for_list(&id,"series.instances").await
+			.context(format!("looking up instances in {}",id)),
+		"series" => db::query_for_list(&id,"instances").await
+			.context(format!("looking up instances in series {}",id)),
+		"instances" => Ok(vec![id]),
+		_ => Err(anyhow!("Invalid table name {} (available [\"studies\",\"series\",\"instances\"])",id.tb))
+	}
 }

@@ -1,4 +1,7 @@
 use std::collections::BTreeMap;
+use std::io::{Error, Write};
+use std::pin::Pin;
+use std::task::Poll;
 use anyhow::{Context, Result};
 use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
@@ -7,6 +10,29 @@ use crate::storage::async_store::write_file;
 use crate::tools::complete_filepath;
 use crate::db;
 use crate::db::RegistryGuard;
+
+pub(crate) struct AsyncMd5(md5::Context);
+
+impl AsyncMd5
+{
+	pub fn new() -> Self
+	{Self(md5::Context::new())}
+	pub fn compute(self) -> String
+	{format!("{:x}", self.0.compute())}
+}
+impl tokio::io::AsyncWrite for AsyncMd5{
+	fn poll_write(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>, buf: &[u8]) -> Poll<std::result::Result<usize, Error>> {
+		Poll::Ready(self.get_mut().0.write(buf))
+	}
+
+	fn poll_flush(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), Error>> {
+		Poll::Ready(self.get_mut().0.flush())
+	}
+
+	fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), Error>> {
+		Poll::Ready(Ok(()))
+	}
+}
 
 pub(crate) async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result<Option<db::Entry>>
 {
@@ -28,3 +54,4 @@ pub(crate) async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result
 	}
 	Ok(registered)
 }
+

@@ -34,7 +34,7 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> Result<Value>
 		.await?.take::<Value>(0)
 }
 
-pub async fn query_for_list(id:Thing,target:&str) -> Result<Vec<Thing>>
+pub async fn query_for_list(id: &Thing, target:&str) -> Result<Vec<Thing>>
 {
 	let qry=format!("select array::flatten({target}) as id from $id").into_query()?;
 	let res:Option<Vec<Thing>>=db()

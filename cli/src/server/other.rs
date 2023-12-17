@@ -16,6 +16,7 @@ use crate::server::{JsonError, TextError};
 use crate::storage::async_store;
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove};
 use crate::tools::store::store;
+use crate::tools::verify::verify_entry;
 
 pub(super) fn router() -> axum::Router
 {
@@ -23,6 +24,7 @@ pub(super) fn router() -> axum::Router
 	rtr=rtr
         .route("/instances",post(store_instance))
         .route("/:table/:id",delete(del_entry))
+		.route("/:table/:id/verify",get(verify))
         .route("/instances/:id/file",get(get_instance_file))
         .route("/instances/:id/png",get(get_instance_png));
     #[cfg(feature="dicom-json")]
@@ -35,6 +37,11 @@ pub(super) fn router() -> axum::Router
 async fn del_entry(Path((table,id)):Path<(String, String)>) -> Result<(),JsonError>
 {
 	remove((table.as_str(),id.as_str()).into()).await.map_err(|e|e.into())
+}
+
+async fn verify(Path((table,id)):Path<(String, String)>) -> Result<(),JsonError>
+{
+	verify_entry((table.as_str(),id.as_str()).into()).await.map_err(|e|e.into())
 }
 
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {

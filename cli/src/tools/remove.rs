@@ -1,18 +1,20 @@
 use std::path::{Path, PathBuf};
 use surrealdb::sql::Thing;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use tokio::fs::{remove_file,remove_dir};
 use crate::db;
+use crate::tools::instances_for_entry;
 
-pub async fn remove(id:Thing) -> Result<()>{
-	let instances= match id.tb.as_str() {
-		"studies" => db::query_for_list(id,"series.instances").await?,
-		"series" => db::query_for_list(id,"instances").await?,
-		"instances" => vec![id],
-		_ => bail!("Invalid table name {} (available [\"studies\",\"series\",\"instances\"])",id.tb)
-	};
-	for instance in instances{
-		remove_instance(instance).await?;
+pub async fn remove(id:Thing) -> Result<()>
+{
+	let mut jobs=tokio::task::JoinSet::new();
+	for job in instances_for_entry(id).await?
+		.into_iter().map(remove_instance)
+	{
+		jobs.spawn(job);
+	}
+	while let Some(result) = jobs.join_next().await {
+		result??;
 	}
 	Ok(())
 }
