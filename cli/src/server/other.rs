@@ -34,14 +34,14 @@ pub(super) fn router() -> axum::Router
     rtr
 }
 
-async fn del_entry(Path((table,id)):Path<(String, String)>) -> Result<(),JsonError>
+async fn del_entry(Path(id):Path<(String, String)>) -> Result<(),JsonError>
 {
-	remove((table.as_str(),id.as_str()).into()).await.map_err(|e|e.into())
+	remove(id.into()).await.map_err(|e|e.into())
 }
 
-async fn verify(Path((table,id)):Path<(String, String)>) -> Result<(),JsonError>
+async fn verify(Path(id):Path<(String, String)>) -> Result<(),JsonError>
 {
-	verify_entry((table.as_str(),id.as_str()).into()).await.map_err(|e|e.into())
+	verify_entry(id.into()).await.map_err(|e|e.into())
 }
 
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {

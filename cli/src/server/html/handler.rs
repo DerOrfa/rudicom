@@ -8,7 +8,6 @@ use html::tables::builders::TableCellBuilder;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
-use surrealdb::sql;
 use tokio::task::JoinSet;
 use crate::db;
 use crate::db::Entry;
@@ -64,10 +63,9 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
     builder.push(table);
     Ok(axum::response::Html(generators::wrap_body(builder.build(), "Studies").to_string()))
 }
-pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Result<Response,TextError>
+pub(crate) async fn get_entry_html(Path(id):Path<(String,String)>) -> Result<Response,TextError>
 {
-    let id = sql::Thing::from((table, id));
-    if let Some(entry) = db::lookup(&id).await?
+    if let Some(entry) = db::lookup(&id.into()).await?
     {
         let page = generators::entry_page(entry).await?;
         Ok(axum::response::Html(page.to_string()).into_response())
