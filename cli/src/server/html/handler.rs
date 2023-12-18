@@ -26,7 +26,8 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
         .unique()//make sure there are no duplicates
         .collect();
 
-    let mut studies = db::list_table("studies").await?;
+    let mut studies = db::list_table("studies").await?.into_iter()
+        .map(Entry::try_from).collect::<anyhow::Result<Vec<Entry>>>()?;
     if let Some(filter) = filter
     {
         studies.retain(|e|e.name().find(filter.filter.as_str()).is_some());

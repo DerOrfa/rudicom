@@ -45,14 +45,12 @@ pub async fn query_for_list(id: &Thing, target:&str) -> Result<Vec<Thing>>
 	Ok(res.unwrap_or(Vec::new()))
 }
 
-pub(crate) async fn list_table<T>(table:T) -> anyhow::Result<Vec<Entry>> where T:AsRef<str>
+pub(crate) async fn list_table<T>(table:T) -> anyhow::Result<Vec<Value>> where sql::Table:From<T>
 {
-	let table = sql::Table::from(table.as_ref());
-	if let sql::Value::Array(rows) = query("select * from $table", ("table", table)).await?
-	{
-		rows.into_iter().map(Entry::try_from).collect()
-	} else {
-		bail!("Invalid response to query for table")
+	let table = sql::Table::from(table);
+	match query("select * from $table", ("table", table)).await? {
+		Value::Array(rows) => Ok(rows.0),
+		_ => Err(anyhow!("Invalid response to query for table"))
 	}
 }
 

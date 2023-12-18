@@ -22,7 +22,7 @@ fn not_found() -> Result<Response,JsonError> { Ok((StatusCode::NOT_FOUND,Json(js
 async fn get_studies() -> Result<Json<Vec<serde_json::Value>>,JsonError>
 {
 	let studies:Vec<_> = db::list_table("studies").await?.into_iter()
-		.map(serde_json::Value::from).collect();
+		.map(sql::Value::into_json).collect();
 	Ok(Json(studies))
 }
 
@@ -50,10 +50,10 @@ async fn query(Path((table,id,query)):Path<(String, String, String)>) -> Result<
 	}
 }
 
-async fn get_entry_parents(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
+async fn get_entry_parents(Path(id):Path<(String, String)>) -> Result<Response,JsonError>
 {
 	let mut ret:Vec<serde_json::Value>=Vec::new();
-	let parents = db::find_down_tree(&sql::Thing::from((table,id))).await?;
+	let parents = db::find_down_tree(&id.into()).await?;
 	if parents.is_empty() {	return not_found() }
 	for id in parents
 	{
