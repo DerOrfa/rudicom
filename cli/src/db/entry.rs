@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use surrealdb::sql;
 use anyhow::anyhow;
+use surrealdb::sql::Value;
 use crate::db;
 use crate::tools::transform;
 use self::Entry::{Instance, Series, Study};
@@ -103,39 +104,53 @@ impl From<Entry> for sql::Value {
 
 impl TryFrom<sql::Value> for Entry
 {
-	type Error = anyhow::Error;
+	type Error = surrealdb::error::Api;
 
-	fn try_from(value: sql::Value) -> Result<Self, Self::Error>
+	fn try_from(mut value: sql::Value) -> Result<Self, Self::Error>
 	{
 		match value {
-			sql::Value::None | sql::Value::Null => Err(anyhow!("value is empty")),
-			sql::Value::Array(mut array) => {
-				if array.len() == 1 { Entry::try_from(array.remove(0)) }
-				else {Err(anyhow!("Exactly one entry was expected"))}
-			},
+			sql::Value::Array(ref mut array) => {
+				if array.len() == 1 { Entry::try_from(array.0.remove(0)) } else {
+					Err(Self::Error::FromValue {
+						error:"Array must have exactly one element for conversion to entry".to_string(),
+						value:value.to_owned()
+					})
+				}
+			}
 			sql::Value::Object(obj) => Entry::try_from(obj),
-			_ => Err(anyhow!("Value {value:?} has invalid form"))
+			_ => Err(Self::Error::FromValue {
+				error:"Invalid value to convert into entry".to_string(),
+				value
+			}),
 		}
 	}
 }
-
 impl TryFrom<sql::Object> for Entry
 {
-	type Error = anyhow::Error;
+	type Error = surrealdb::error::Api;
 
 	fn try_from(mut obj: sql::Object) -> Result<Self, Self::Error>
 	{
-		match obj.remove("id").ok_or(anyhow!(r#"Entry missing "id""#))?
+		let id_val = obj.remove("id")
+			.ok_or(Self::Error::FromValue{
+				error:r#"Entry missing "id""#.to_string(),
+				value:Value::from(obj.clone())
+			})?;
+		match id_val
 		{
 			sql::Value::Thing(id) => {
 				match id.tb.as_str() {
 					"instances" => Ok(Instance((id, obj))),
 					"series" => Ok(Series((id, obj))),
 					"studies" => Ok(Study((id, obj))),
-					_ => Err(anyhow!("invalid table name"))
+					_ => Err(Self::Error::FromValue{
+						error:r#"invalid table name"#.to_string(),value:id.into()
+					})
 				}
 			}
-			_ => Err(anyhow!(r#""id" is not an id"#))
+			_ => Err(Self::Error::FromValue{
+				error:r#"not an id"#.to_string(),value:id_val.into()
+			})
 		}
 	}
 }

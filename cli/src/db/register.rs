@@ -51,7 +51,7 @@ impl Drop for RegistryGuard
 {
 	fn drop(&mut self) {
 		if let Some(ref id)=self.0{
-			tokio::spawn(db::unregister(id.clone()));//todo https://github.com/tokio-rs/tokio/issues/2289
+			tokio::spawn(unregister(id.clone()));//todo https://github.com/tokio-rs/tokio/issues/2289
 		}
 		self.0=None;
 	}
@@ -95,7 +95,7 @@ pub async fn register_instance(
 
 	let res=register(instance_meta,series_meta,study_meta).await?;
 	if res.is_some() { // we just created an entry, set the guard if provided
-		Some(res.try_into()).transpose()
+		Ok(Some(db::Entry::try_from(res)?))
 	} else { // data already existed - no data stored - return existing data
 		if let Some(g) = guard {
 			g.set(instance_id_bak);

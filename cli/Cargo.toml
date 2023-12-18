@@ -36,4 +36,4 @@ futures = {version = "0.3", default-features = false}
 axum-streams = {version = "0.11", default-features = false, features = ["text","json"]}
 html = { version = "0.6", optional = true}
 itertools = "0.11"
-
+thiserror = { version = "1.0" }
