@@ -1,5 +1,5 @@
 use std::sync::OnceLock;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, Context};
 use serde::Serialize;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;

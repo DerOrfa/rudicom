@@ -12,6 +12,7 @@ use anyhow::{anyhow, Context};
 use serde_json::json;
 use serde::Deserialize;
 use dicom_pixeldata::PixelDecoder;
+use crate::db;
 use crate::server::{JsonError, TextError};
 use crate::storage::async_store;
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove};
@@ -39,9 +40,11 @@ async fn del_entry(Path(id):Path<(String, String)>) -> Result<(),JsonError>
 	remove(id.into()).await.map_err(|e|e.into())
 }
 
-async fn verify(Path(id):Path<(String, String)>) -> Result<(),JsonError>
+async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<db::File>>,JsonError>
 {
-	verify_entry(id.into()).await.map_err(|e|e.into())
+	verify_entry(id.into()).await
+		.map_err(|e|e.into())
+		.map(Json)
 }
 
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
