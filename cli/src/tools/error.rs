@@ -1,5 +1,19 @@
 use thiserror::Error;
 
+
+#[derive(Error,Debug)]
+pub enum DicomError
+{
+	#[error("dicom error {0}")]
+	DicomTypeError(#[from] dicom::core::value::ConvertValueError),
+	#[error("dicom error {0}")]
+	DicomAccessError(#[from] dicom::object::AccessError),
+	#[error("dicom io error {0}")]
+	DicomReadError(#[from] dicom::object::ReadError),
+	#[error("dicom io error {0}")]
+	DicomWriteError(#[from] dicom::object::WriteError),
+}
+
 #[derive(Error,Debug)]
 pub enum Error
 {
@@ -12,14 +26,8 @@ pub enum Error
 	#[error("io error {0}")]
 	IoError(#[from] std::io::Error),
 
-	#[error("dicom error {0}")]
-	DicomTypeError(#[from] dicom::core::value::ConvertValueError),
-	#[error("dicom error {0}")]
-	DicomAccessError(#[from] dicom::object::AccessError),
-	#[error("dicom io error {0}")]
-	DicomReadError(#[from] dicom::object::ReadError),
-	#[error("dicom io error {0}")]
-	DicomWriteError(#[from] dicom::object::WriteError),
+	#[error("{0}")]
+	DicomError(#[from] DicomError),
 
 	#[error("{source} when {context}")]
 	Context{

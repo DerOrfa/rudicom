@@ -3,6 +3,7 @@ use std::path::Path;
 use dicom::object::{DefaultDicomObject, from_reader};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt,AsyncReadExt};
+use crate::tools::Error::DicomError;
 use crate::tools::Result;
 
 pub fn read<T>(input: T, with_md5:Option<&mut md5::Context>) -> Result<DefaultDicomObject> where T:AsRef<[u8]>
@@ -12,15 +13,17 @@ pub fn read<T>(input: T, with_md5:Option<&mut md5::Context>) -> Result<DefaultDi
 		std::io::copy(&mut buffer,md5).unwrap();
 		buffer.seek(SeekFrom::Start(0))?;
 	}
-	Ok(from_reader(buffer)?)
+	from_reader(buffer).map_err(|e|DicomError(e.into()))
 }
 
 pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Result<Cursor<Vec<u8>>>{
 	let mut out = Cursor::new(Vec::new());
 	out.seek(SeekFrom::Start(128))?;
 	Write::write_all(&mut out, b"DICM")?;
-	obj.write_meta(&mut out)?;
-	obj.write_dataset(&mut out)?;
+	obj
+		.write_meta(&mut out)
+		.and_then(|_|obj.write_dataset(&mut out))
+		.map_err(|e|DicomError(e.into()))?;
 	if let Some( md5) = with_md5{
 		out.seek(SeekFrom::Start(0))?;
 		std::io::copy(&mut out,md5).unwrap();

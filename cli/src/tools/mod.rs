@@ -11,7 +11,8 @@ use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
 pub use remove::remove;
 use crate::{db, storage};
-pub use error::{Error,Result,Context};
+pub use error::{Error, Result, Context};
+use crate::tools::Error::DicomError;
 
 pub fn transform(root:sql::Value, transformer:fn(sql::Value)->sql::Value) -> sql::Value
 {
@@ -92,7 +93,7 @@ pub async fn instances_for_entry(id:sql::Thing) -> Result<Vec<sql::Thing>>
 pub fn extract_from_dicom(obj:&DefaultDicomObject,tag:dicom::core::Tag) -> Result<Cow<str>>
 {
 	obj
-		.element(tag).map_err(Error::from)
-		.and_then(|v|v.to_str().map_err(Error::from))
+		.element(tag).map_err(|e|DicomError(e.into()))
+		.and_then(|v|v.to_str().map_err(|e|DicomError(e.into())))
 		.context(format!("getting {} from dicom object",tag))
 }
