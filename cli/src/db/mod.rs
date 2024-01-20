@@ -22,8 +22,22 @@ pub enum DBErr
 {
 	#[error("Database error {0}")]
 	SurrealError(#[from] surrealdb::Error),
+
 	#[error("Json error {0}")]
 	JsonError(#[from] serde_json::Error),
+
+	#[error("io error {0}")]
+	IoError(#[from] std::io::Error),
+
+	#[error("dicom error {0}")]
+	DicomTypeError(#[from] dicom::core::value::ConvertValueError),
+	#[error("dicom error {0}")]
+	DicomAccessError(#[from] dicom::object::AccessError),
+	#[error("dicom io error {0}")]
+	DicomReadError(#[from] dicom::object::ReadError),
+	#[error("dicom io error {0}")]
+	DicomWriteError(#[from] dicom::object::WriteError),
+
 	#[error("{source} when {context}")]
 	Context{
 		source:Box<DBErr>,
@@ -45,14 +59,16 @@ pub enum DBErr
 	InvalidTable{table:String},
 	#[error("No data found")]
 	NotFound,
+	#[error("checksum {checksum} for {file} doesn't fit")]
+	ChecksumErr{checksum:String,file:String}
 }
 
 impl DBErr{
-	fn context<T>(self,context:T) -> DBErr where String:From<T>
+	pub(crate) fn context<T>(self, context:T) -> DBErr where String:From<T>
 	{
 		DBErr::Context {source:Box::new(self),context:context.into()}
 	}
-	fn context_from<E,T>(error:E,context:T) -> DBErr where String:From<T>, DBErr:From<E>
+	pub(crate) fn context_from<E,T>(error:E,context:T) -> DBErr where String:From<T>, DBErr:From<E>
 	{
 		DBErr::from(error).context(context)
 	}

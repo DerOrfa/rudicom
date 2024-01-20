@@ -7,7 +7,9 @@ use surrealdb::sql;
 use dicom::object::{DefaultDicomObject, Tag};
 use dicom::dictionary_std::tags;
 use crate::db;
+use crate::db::DBErr;
 use crate::dcm;
+use crate::tools::extract_from_dicom;
 
 static INSERT_STUDY:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_SERIES:OnceLock<Vec<sql::Statement>> = OnceLock::new();
@@ -62,16 +64,16 @@ pub async fn register_instance(
 	obj:&DefaultDicomObject,
 	add_meta:Vec<(String,db::Value)>,
 	guard:Option<&mut RegistryGuard>
-) -> anyhow::Result<Option<db::Entry>>
+) -> std::result::Result<Option<db::Entry>,DBErr>
 {
 	pub static INSTANCE_TAGS:OnceLock<Vec<(String, Tag)>> = OnceLock::new();
 	pub static SERIES_TAGS:OnceLock<Vec<(String, Tag)>> = OnceLock::new();
 	pub static STUDY_TAGS:OnceLock<Vec<(String, Tag)>> = OnceLock::new();
 
 
-	let instance_id = obj.element(tags::SOP_INSTANCE_UID)?.to_str()?;
-	let series_id = obj.element(tags::SERIES_INSTANCE_UID)?.to_str()?;
-	let study_id = obj.element(tags::STUDY_INSTANCE_UID)?.to_str()?;
+	let instance_id = extract_from_dicom(obj,tags::SOP_INSTANCE_UID)?;
+	let series_id =  extract_from_dicom(obj,tags::SERIES_INSTANCE_UID)?;
+	let study_id =  extract_from_dicom(obj,tags::STUDY_INSTANCE_UID)?;
 
 	let instance_id_bak = db::Thing::from(("instances",instance_id.as_ref()));
 	let instance_id:db::Value = instance_id_bak.clone().into();
@@ -95,7 +97,7 @@ pub async fn register_instance(
 
 	let res=register(instance_meta,series_meta,study_meta).await?;
 	if res.is_some() { // we just created an entry, set the guard if provided
-		Ok(Some(db::Entry::try_from(res)?))
+		Ok(Some(db::Entry::try_from(res).map_err(surrealdb::Error::from)?))
 	} else { // data already existed - no data stored - return existing data
 		if let Some(g) = guard {
 			g.set(instance_id_bak);
