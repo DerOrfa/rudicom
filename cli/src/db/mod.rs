@@ -5,7 +5,7 @@ use surrealdb::opt::auth::Root;
 use surrealdb::{Surreal, sql, Response};
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql::{Value, Thing};
-use thiserror::Error;
+use crate::tools::{Result,Context};
 
 mod into_db_value;
 mod register;
@@ -16,65 +16,7 @@ pub use into_db_value::IntoDbValue;
 pub use register::{unregister, register_instance, RegistryGuard};
 pub use entry::Entry;
 pub use file::File;
-
-#[derive(Error,Debug)]
-pub enum DBErr
-{
-	#[error("Database error {0}")]
-	SurrealError(#[from] surrealdb::Error),
-
-	#[error("Json error {0}")]
-	JsonError(#[from] serde_json::Error),
-
-	#[error("io error {0}")]
-	IoError(#[from] std::io::Error),
-
-	#[error("dicom error {0}")]
-	DicomTypeError(#[from] dicom::core::value::ConvertValueError),
-	#[error("dicom error {0}")]
-	DicomAccessError(#[from] dicom::object::AccessError),
-	#[error("dicom io error {0}")]
-	DicomReadError(#[from] dicom::object::ReadError),
-	#[error("dicom io error {0}")]
-	DicomWriteError(#[from] dicom::object::WriteError),
-
-	#[error("{source} when {context}")]
-	Context{
-		source:Box<DBErr>,
-		context:String
-	},
-	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
-	UnexpectedResult{
-		expected: String,
-		found: Value,
-	},
-	#[error("Entry {id} is not an {expected}")]
-	UnexpectedEntry{
-		expected: String,
-		id: Thing,
-	},
-	#[error("'{element}' is missing in '{parent}'")]
-	ElementMissing{element:String,parent:String},
-	#[error("Invalid table {table}")]
-	InvalidTable{table:String},
-	#[error("No data found")]
-	NotFound,
-	#[error("checksum {checksum} for {file} doesn't fit")]
-	ChecksumErr{checksum:String,file:String}
-}
-
-impl DBErr{
-	pub(crate) fn context<T>(self, context:T) -> DBErr where String:From<T>
-	{
-		DBErr::Context {source:Box::new(self),context:context.into()}
-	}
-	pub(crate) fn context_from<E,T>(error:E,context:T) -> DBErr where String:From<T>, DBErr:From<E>
-	{
-		DBErr::from(error).context(context)
-	}
-}
-
-pub type Result<T> = std::result::Result<T,DBErr>;
+use crate::tools;
 
 static DB: OnceLock<Surreal<Any>> = OnceLock::new();
 
@@ -98,7 +40,7 @@ pub async fn query_for_list(id: &Thing, target:&str) -> Result<Vec<Thing>>
 		.bind(("id",id)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take("id"))
-		.map_err(|e|DBErr::context_from(e,format!("querying for {target} from {id}")))?;
+		.context(format!("querying for {target} from {id}"))?;
 	Ok(res.unwrap_or(Vec::new()))
 }
 
@@ -106,8 +48,7 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 {
 	let table:sql::Table = table.into();
 	let query_context = format!("querying for contents of table {table}");
-	let value=query("select * from $table", ("table", table)).await
-		.map_err(|e|DBErr::context_from(e,&query_context))?;
+	let value=query("select * from $table", ("table", table)).await.context(&query_context)?;
 	let result:surrealdb::Result<Vec<_>> = match value {
 		Value::Array(rows) => {
 			rows.0.into_iter()
@@ -117,20 +58,20 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 		Value::None => Err(surrealdb::error::Db::NoRecordFound.into()),
 		_ => Err(surrealdb::error::Db::InvalidContent { value }.into())
 	};
-	result.map_err(|e|DBErr::context_from(e,query_context))
+	result.context(query_context)
 }
 
 pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
 	let mut result = query(format!("select * from $id.{}",col.as_ref()),("id",id)).await
-		.map_err(|e|DBErr::context_from(e,&query_context))?;
+		.context(&query_context)?;
 	if flatten {result=Value::flatten(result)}
 	match result
 	{
 		Value::Array(values) => Ok(values.0),
 		_ => Err(
-				DBErr::UnexpectedResult	{
+				tools::Error::UnexpectedResult	{
 					expected: String::from("Array"),
 					found: result
 				}.context(query_context)
@@ -141,9 +82,9 @@ pub(crate) async fn list_children<T>(id:&Thing, col:T) -> Result<Vec<Entry>> whe
 {
 	let result:Result<Vec<_>>=list_values(id, col.as_ref(),true).await?.into_iter()
 		.map(|v|Entry::try_from(v).map_err(surrealdb::Error::Api))
-		.map(|r|r.map_err(DBErr::from))
+		.map(|r|r.map_err(tools::Error::from))
 		.collect();
-	result.map_err(|e|e.context(format!("listing children of {id} in column {}",col.as_ref())))
+	result.context(format!("listing children of {id} in column {}",col.as_ref()))
 }
 
 pub(crate) async fn list_json<T>(id:&Thing, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
@@ -157,11 +98,9 @@ pub(crate) async fn lookup(id:&Thing) -> Result<Option<Entry>>
 		.and_then(|value|
 			if value.is_some() {
 				Entry::try_from(value).map(|e|Some(e)).map_err(surrealdb::Error::Api)
-			} else {
-				Ok(None)
-			}
+			} else {Ok(None)}
 		);
-	result.map_err(|e|DBErr::context_from(e,format!("when looking up {id}")))
+	result.context(format!("when looking up {id}"))
 }
 
 async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>
@@ -172,8 +111,8 @@ async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str
 		.bind(("id",id.to_owned())).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take(col.as_ref()))
-		.map_err(|e|DBErr::context_from(e,&query_context))?;
-	res.ok_or(DBErr::NotFound.context(query_context))
+		.context(&query_context)?;
+	res.ok_or(tools::Error::NotFound.context(query_context))
 }
 
 pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
@@ -190,7 +129,7 @@ pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
 			Ok(vec![id.to_owned(), study])
 		},
 		"studies" => Ok(vec![id.to_owned()]),
-		_ => {Err(DBErr::InvalidTable {table:id.tb.to_string()}.context(query_context))}
+		_ => {Err(tools::Error::InvalidTable {table:id.tb.to_string()}.context(query_context))}
 	}
 }
 

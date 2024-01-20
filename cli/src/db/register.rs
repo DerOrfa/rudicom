@@ -1,15 +1,14 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
-use surrealdb::Result;
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql;
 
 use dicom::object::{DefaultDicomObject, Tag};
 use dicom::dictionary_std::tags;
 use crate::db;
-use crate::db::DBErr;
 use crate::dcm;
 use crate::tools::extract_from_dicom;
+use surrealdb::Result;
 
 static INSERT_STUDY:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_SERIES:OnceLock<Vec<sql::Statement>> = OnceLock::new();
@@ -64,7 +63,7 @@ pub async fn register_instance(
 	obj:&DefaultDicomObject,
 	add_meta:Vec<(String,db::Value)>,
 	guard:Option<&mut RegistryGuard>
-) -> std::result::Result<Option<db::Entry>,DBErr>
+) -> crate::tools::Result<Option<db::Entry>>
 {
 	pub static INSTANCE_TAGS:OnceLock<Vec<(String, Tag)>> = OnceLock::new();
 	pub static SERIES_TAGS:OnceLock<Vec<(String, Tag)>> = OnceLock::new();

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use surrealdb::sql;
 use crate::db;
-use crate::db::{DBErr, File};
 use crate::tools::transform;
+use crate::tools::Result;
 use self::Entry::{Instance, Series, Study};
 
 #[derive(Clone,Debug)]
@@ -68,11 +68,11 @@ impl Entry
 		self.mut_data().1.insert(key.into(),value.into())
 	}
 
-	pub fn get_file(&self) -> Result<db::File,DBErr>
+	pub fn get_file(&self) -> Result<db::File>
 	{
-		File::try_from(self.clone())
+		db::File::try_from(self.clone())
 	}
-	pub fn get_path(&self) -> Result<PathBuf,DBErr>
+	pub fn get_path(&self) -> Result<PathBuf>
 	{
 		match self {
 			Instance(_) =>
@@ -101,7 +101,7 @@ impl TryFrom<sql::Value> for Entry
 {
 	type Error = surrealdb::error::Api;
 
-	fn try_from(mut value: sql::Value) -> Result<Self, Self::Error>
+	fn try_from(mut value: sql::Value) -> std::result::Result<Self, Self::Error>
 	{
 		match value {
 			sql::Value::Array(ref mut array) => {
@@ -124,7 +124,7 @@ impl TryFrom<sql::Object> for Entry
 {
 	type Error = surrealdb::error::Api;
 
-	fn try_from(mut obj: sql::Object) -> Result<Self, Self::Error>
+	fn try_from(mut obj: sql::Object) -> std::result::Result<Self, Self::Error>
 	{
 		let id_val = obj.remove("id")
 			.ok_or(Self::Error::FromValue{
