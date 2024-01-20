@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use crate::tools;
-use anyhow::anyhow;
 use surrealdb::sql;
 use crate::db::Entry;
+use crate::db::DBErr;
 
 #[derive(Serialize,Deserialize)]
 pub struct File
@@ -28,17 +28,19 @@ impl File {
 
 impl TryFrom<sql::Value> for File
 {
-    type Error = anyhow::Error;
+    type Error = DBErr;
 
     fn try_from(value: sql::Value) -> Result<Self, Self::Error> {
+        let context = format!("parsing database object {value} as File object");
         let json = value.into_json();
-        Ok(serde_json::from_value(json)?)
+        serde_json::from_value(json)
+            .map_err(|e|DBErr::context_from(e,context))
     }
 }
 
 impl TryFrom<File> for sql::Object
 {
-    type Error = anyhow::Error;
+    type Error = DBErr;
 
     fn try_from(file: File) -> Result<Self, Self::Error> {
         let mut ret=sql::Object::default();
@@ -51,14 +53,16 @@ impl TryFrom<File> for sql::Object
 
 impl TryFrom<Entry> for File
 {
-    type Error = anyhow::Error;
+    type Error = DBErr;
 
     fn try_from(entry: Entry) -> Result<Self, Self::Error> {
-        if let Entry::Instance((id,mut inst)) = entry
+        let context= format!("trying to extract a File object from {}",entry.id());
+        let result = if let Entry::Instance((id,mut inst)) = entry
         {
             inst.remove("file")
-                .ok_or(anyhow!(r#""file" missing in instance {id}"#))?
+                .ok_or(DBErr::ElementMissing{element:"file".into(), parent:id.to_raw()})?
                 .try_into()
-        } else {Err(anyhow!("entry {} is not an instance",entry.id()))}
+        } else {Err(DBErr::UnexpectedEntry {expected:"instance".into(),id:entry.id().clone()})};
+        result.map_err(|e|e.context(context))
     }
 }

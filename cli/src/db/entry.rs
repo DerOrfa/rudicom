@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use surrealdb::sql;
-use anyhow::anyhow;
-use surrealdb::sql::Value;
 use crate::db;
+use crate::db::{DBErr, File};
 use crate::tools::transform;
 use self::Entry::{Instance, Series, Study};
 
@@ -69,15 +68,11 @@ impl Entry
 		self.mut_data().1.insert(key.into(),value.into())
 	}
 
-	pub fn get_file(&self) -> anyhow::Result<db::File>
+	pub fn get_file(&self) -> Result<db::File,DBErr>
 	{
-		if let Instance((_,o))=self {
-			o.get("file")
-				.ok_or(anyhow!(r#"Entry is missing "file""#))
-				.and_then(|v|db::File::try_from(v.clone()))
-		} else {Err(anyhow!("Not an instance"))}
+		File::try_from(self.clone())
 	}
-	pub fn get_path(&self) -> anyhow::Result<PathBuf>
+	pub fn get_path(&self) -> Result<PathBuf,DBErr>
 	{
 		match self {
 			Instance(_) =>
@@ -134,7 +129,7 @@ impl TryFrom<sql::Object> for Entry
 		let id_val = obj.remove("id")
 			.ok_or(Self::Error::FromValue{
 				error:r#"Entry missing "id""#.to_string(),
-				value:Value::from(obj.clone())
+				value:sql::Value::from(obj.clone())
 			})?;
 		match id_val
 		{

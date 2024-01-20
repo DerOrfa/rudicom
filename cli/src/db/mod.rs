@@ -20,22 +20,31 @@ pub use file::File;
 #[derive(Error,Debug)]
 pub enum DBErr
 {
+	#[error("Database error {0}")]
+	SurrealError(#[from] surrealdb::Error),
+	#[error("Json error {0}")]
+	JsonError(#[from] serde_json::Error),
 	#[error("{source} when {context}")]
 	Context{
 		source:Box<DBErr>,
 		context:String
 	},
-	#[error("Database error {0} when")]
-	SurrealError(#[from] surrealdb::Error),
-	#[error("Invalid data type (expected {expected:?}, found {found:?})")]
+	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
 	UnexpectedResult{
 		expected: String,
 		found: Value,
 	},
+	#[error("Entry {id} is not an {expected}")]
+	UnexpectedEntry{
+		expected: String,
+		id: Thing,
+	},
+	#[error("'{element}' is missing in '{parent}'")]
+	ElementMissing{element:String,parent:String},
 	#[error("Invalid table {table}")]
 	InvalidTable{table:String},
 	#[error("No data found")]
-	NotFound
+	NotFound,
 }
 
 impl DBErr{
