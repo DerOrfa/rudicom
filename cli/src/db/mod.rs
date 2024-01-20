@@ -43,6 +43,10 @@ impl DBErr{
 	{
 		DBErr::Context {source:Box::new(self),context:context.into()}
 	}
+	fn context_from<E,T>(error:E,context:T) -> DBErr where String:From<T>, DBErr:From<E>
+	{
+		DBErr::from(error).context(context)
+	}
 }
 
 pub type Result<T> = std::result::Result<T,DBErr>;
@@ -69,7 +73,7 @@ pub async fn query_for_list(id: &Thing, target:&str) -> Result<Vec<Thing>>
 		.bind(("id",id)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take("id"))
-		.map_err(|e|DBErr::from(e).context(format!("querying for {target} from {id}")))?;
+		.map_err(|e|DBErr::context_from(e,format!("querying for {target} from {id}")))?;
 	Ok(res.unwrap_or(Vec::new()))
 }
 
@@ -78,7 +82,7 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 	let table:sql::Table = table.into();
 	let query_context = format!("querying for contents of table {table}");
 	let value=query("select * from $table", ("table", table)).await
-		.map_err(|e|DBErr::from(e).context(&query_context))?;
+		.map_err(|e|DBErr::context_from(e,&query_context))?;
 	let result:surrealdb::Result<Vec<_>> = match value {
 		Value::Array(rows) => {
 			rows.0.into_iter()
@@ -88,14 +92,14 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 		Value::None => Err(surrealdb::error::Db::NoRecordFound.into()),
 		_ => Err(surrealdb::error::Db::InvalidContent { value }.into())
 	};
-	result.map_err(|e|DBErr::from(e).context(query_context))
+	result.map_err(|e|DBErr::context_from(e,query_context))
 }
 
 pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
 	let mut result = query(format!("select * from $id.{}",col.as_ref()),("id",id)).await
-		.map_err(|e|DBErr::from(e).context(&query_context))?;
+		.map_err(|e|DBErr::context_from(e,&query_context))?;
 	if flatten {result=Value::flatten(result)}
 	match result
 	{
@@ -132,7 +136,7 @@ pub(crate) async fn lookup(id:&Thing) -> Result<Option<Entry>>
 				Ok(None)
 			}
 		);
-	result.map_err(|e|DBErr::from(e).context(format!("when looking up {id}")))
+	result.map_err(|e|DBErr::context_from(e,format!("when looking up {id}")))
 }
 
 async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>
@@ -143,7 +147,7 @@ async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str
 		.bind(("id",id.to_owned())).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take(col.as_ref()))
-		.map_err(|e|DBErr::from(e).context(&query_context))?;
+		.map_err(|e|DBErr::context_from(e,&query_context))?;
 	res.ok_or(DBErr::NotFound.context(query_context))
 }
 
