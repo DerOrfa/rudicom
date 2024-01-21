@@ -6,7 +6,7 @@ use surrealdb::sql;
 use axum::http::StatusCode;
 use serde_json::json;
 use crate::db;
-use crate::server::JsonError;
+use crate::server::http_error::JsonError;
 
 pub(super) fn router() -> axum::Router
 {

@@ -12,7 +12,7 @@ use tokio::task::JoinSet;
 use crate::db;
 use crate::db::Entry;
 use crate::server::html::generators;
-use crate::server::TextError;
+use crate::server::http_error::TextError;
 
 #[derive(Deserialize)]
 pub(crate) struct StudyFilter {

@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 use config::{Config, File, FileFormat::Toml};
 use std::sync::OnceLock;
-use anyhow::bail;
 use serde::Deserialize;
-use crate::Result;
+use crate::tools::{Result,Context};
 
 static CONFIG:OnceLock<Config> = OnceLock::new();
 
@@ -21,12 +20,11 @@ storage_path = "/tmp/db/store" #will be use if filename_pattern does not result 
 pub fn init(config_file:Option<PathBuf>) -> Result<()>{
 	let mut builder = Config::builder()
 		.add_source(File::from_str(CONFIG_STR,Toml));
-	if config_file.is_some() {
-		let Some(filename) = config_file.as_ref().unwrap().to_str()
-			else {bail!("Failed to encode filename as UTF-8")};
+	if let Some(filename) = config_file {
+		let filename = filename.to_str().expect("Failed to encode filename as UTF-8");
 		builder=builder.add_source(File::new(filename,Toml));
 	}
-	CONFIG.set(builder.build()?).expect("Failed to set global config");
+	CONFIG.set(builder.build()?).expect("failed initializing config");
 	Ok(())
 }
 
@@ -39,5 +37,5 @@ pub(crate) fn get<'de, T: Deserialize<'de>>(key: &str) -> Result<T>
 {
 	CONFIG.get()
 		.expect("accessing uninitialized global config")
-		.get(key).map_err(|e|e.into())
+		.get(key).context(format!("looking for {key} in configuration"))
 }

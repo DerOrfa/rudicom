@@ -1,51 +1,19 @@
 use axum::{Json, Router};
 use axum::extract::DefaultBodyLimit;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing;
 use crate::{config, db};
+use crate::tools::Result;
 
 #[cfg(feature = "html")]
 mod html;
 mod json;
 mod import;
 mod other;
-
-pub(crate) struct TextError(anyhow::Error);
-impl IntoResponse for TextError {
-	fn into_response(self) -> Response
-	{
-		tracing::error!("Internal error {} reported (root cause {})",self.0,self.0.root_cause());
-		(
-			StatusCode::INTERNAL_SERVER_ERROR,
-			format!("{:#}", self.0)
-		).into_response()
-	}
-}
-impl<E> From<E> for TextError where E: Into<anyhow::Error>,
-{
-	fn from(err: E) -> Self {Self(err.into())}
-}
-
-pub(crate) struct JsonError(anyhow::Error);
-impl IntoResponse for JsonError {
-	fn into_response(self) -> Response
-	{
-		let chain:Vec<_>=self.0.chain().into_iter()
-			.map(|e|e.to_string())
-			.collect();
-		tracing::error!("Internal error {} reported (root cause {})",self.0,self.0.root_cause());
-		(StatusCode::INTERNAL_SERVER_ERROR,Json(chain)).into_response()
-	}
-}
-impl<E> From<E> for JsonError where E: Into<anyhow::Error>,
-{
-	fn from(err: E) -> Self {Self(err.into())}
-}
+mod http_error;
 
 #[derive(Serialize,Clone)]
 struct Info
@@ -63,7 +31,7 @@ async fn server_info() -> Info
 		storage_path:config::get::<String>("storage_path").unwrap(),
 	}
 }
-pub async fn serve(listener:TcpListener) -> anyhow::Result<()>
+pub async fn serve(listener:TcpListener) -> Result<()>
 {
 	let inf=server_info().await;
 	tracing_subscriber::registry()

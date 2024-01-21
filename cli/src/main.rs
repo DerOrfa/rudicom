@@ -6,7 +6,6 @@ mod tools;
 mod server;
 mod config;
 
-use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 use futures::StreamExt;
 use clap::ValueHint::Hostname;
@@ -14,6 +13,7 @@ use clap::ValueHint::Hostname;
 use clap::{Args, Parser, Subcommand};
 use tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
+use crate::tools::Context;
 
 #[cfg(feature = "embedded")]
 use clap::ValueHint::DirPath;
@@ -72,7 +72,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<()>
+async fn main() -> crate::tools::Result<()>
 {
     let args = Cli::parse();
     config::init(args.config)?;
@@ -83,10 +83,10 @@ async fn main() -> Result<()>
         if let Some(file) = args.endpoint.file {
             db::init_local(file.as_path()).await.context(format!("Failed opening {}", file.to_string_lossy()))?;
         } else {
-            bail!("No data backend, go away..")
+            println!("No data backend, go away..");return Ok(());
         }
         #[cfg(not(feature = "embedded"))]
-        bail!("No data backend, go away..")
+        println!("No data backend, go away..");return Ok(());
     }
 
     match args.command {

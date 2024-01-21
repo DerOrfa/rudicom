@@ -1,5 +1,4 @@
 use std::path::Path;
-use anyhow::anyhow;
 use tokio::task::JoinError;
 use crate::storage::register_file;
 use futures::{Stream, TryStreamExt, StreamExt};
@@ -79,11 +78,11 @@ async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 }
 
 
-pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:bool) -> anyhow::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
+pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:bool) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
 {
 	let mut tasks=tokio::task::JoinSet::new();
 	let mut files= glob(pattern.as_ref())
-		.map_err(|e|anyhow!("Invalid globbing pattern {}:({})",pattern.as_ref(),e))?
+		.map_err(|e|crate::tools::Error::GlobbingError{pattern:pattern.as_ref().to_string(),err:e})?
 		.filter_map(|f|
 			if let Ok(f)=f{
 				if f.is_file(){Some(f)} else {None}
@@ -119,7 +118,7 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 	Ok(stream)
 }
 
-pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:bool) -> anyhow::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
+pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:bool) -> crate::tools::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
 {
 	Ok(import_glob(pattern,report_registered,report_existing)?
 		.map_ok(|item|match item {

@@ -4,9 +4,11 @@ pub mod import;
 pub mod verify;
 mod error;
 
+use std::any::type_name;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
 pub use remove::remove;
@@ -97,3 +99,16 @@ pub fn extract_from_dicom(obj:&DefaultDicomObject,tag:dicom::core::Tag) -> Resul
 		.and_then(|v|v.to_str().map_err(|e|DicomError(e.into())))
 		.context(format!("getting {} from dicom object",tag))
 }
+
+pub(crate) fn extract_query_param<T>(params:&mut HashMap<String,String>, name:&str) -> Result<Option<T>>
+	where
+		T:FromStr,
+		<T as FromStr>::Err: std::error::Error  + Send + Sync +'static
+{
+	params.remove("registered")
+		.map(|s|s.parse::<T>()
+			.map_err(|e|Error::ParseError {to_parse:s,source:e.into()})
+		).transpose()
+		.context(format!("extracting parameter {name} as {}",type_name::<T>()))
+}
+

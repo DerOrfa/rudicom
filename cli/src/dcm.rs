@@ -8,6 +8,7 @@ use std::ops::Deref;
 use surrealdb::sql;
 use dicom::core::header::HasLength;
 use strfmt::{FmtError, strfmt_map};
+use crate::tools::Context;
 
 pub fn find_tag(name:&str) -> Option<Tag>
 {
@@ -41,10 +42,11 @@ pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> Vec<(S
 		.collect()
 }
 
-pub fn gen_filepath(obj:&DefaultDicomObject) -> strfmt::Result<String>
+pub fn gen_filepath(obj:&DefaultDicomObject) -> crate::tools::Result<String>
 {
 	let pattern:String = config::get("filename_pattern").expect(r#""filename_pattern"  missing or invalid in config"#);
 	strfmt_map(pattern.as_str(),|f| format_filepath(f, &obj))
+		.context(format!("generating filename using pattern '{pattern}'"))
 }
 
 fn format_filepath(mut f:strfmt::Formatter, obj:&DefaultDicomObject) -> strfmt::Result<()>
