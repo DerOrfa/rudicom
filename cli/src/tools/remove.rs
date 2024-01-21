@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 use surrealdb::sql::Thing;
-use anyhow::Result;
 use tokio::fs::{remove_file,remove_dir};
 use crate::db;
 use crate::tools::instances_for_entry;
+use crate::tools::Result;
 
 pub async fn remove(id:Thing) -> Result<()>
 {

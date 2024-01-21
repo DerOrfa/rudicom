@@ -96,7 +96,7 @@ pub async fn register_instance(
 
 	let res=register(instance_meta,series_meta,study_meta).await?;
 	if res.is_some() { // we just created an entry, set the guard if provided
-		Ok(Some(db::Entry::try_from(res).map_err(surrealdb::Error::from)?))
+		Ok(Some(db::Entry::try_from(res)?))
 	} else { // data already existed - no data stored - return existing data
 		if let Some(g) = guard {
 			g.set(instance_id_bak);

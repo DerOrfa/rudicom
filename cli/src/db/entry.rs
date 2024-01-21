@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use surrealdb::sql;
 use crate::db;
 use crate::tools::transform;
-use crate::tools::Result;
+use crate::tools::{Result,Context};
 use self::Entry::{Instance, Series, Study};
 
 #[derive(Clone,Debug)]
@@ -99,54 +99,43 @@ impl From<Entry> for sql::Value {
 
 impl TryFrom<sql::Value> for Entry
 {
-	type Error = surrealdb::error::Api;
+	type Error = crate::tools::Error;
 
 	fn try_from(mut value: sql::Value) -> std::result::Result<Self, Self::Error>
 	{
 		match value {
 			sql::Value::Array(ref mut array) => {
 				if array.len() == 1 { Entry::try_from(array.0.remove(0)) } else {
-					Err(Self::Error::FromValue {
-						error:"Array must have exactly one element for conversion to entry".to_string(),
-						value:value.to_owned()
-					})
+					Err(Self::Error::UnexpectedResult {expected:"single object".into(),found:value.to_owned()})
 				}
 			}
 			sql::Value::Object(obj) => Entry::try_from(obj),
-			_ => Err(Self::Error::FromValue {
-				error:"Invalid value to convert into entry".to_string(),
-				value
-			}),
-		}
+			_ => Err(Self::Error::UnexpectedResult {expected:"single object".into(),found:value}),
+		}.context("trying to convert database value into an Entry")
 	}
 }
 impl TryFrom<sql::Object> for Entry
 {
-	type Error = surrealdb::error::Api;
+	type Error = crate::tools::Error;
 
 	fn try_from(mut obj: sql::Object) -> std::result::Result<Self, Self::Error>
 	{
-		let id_val = obj.remove("id")
-			.ok_or(Self::Error::FromValue{
-				error:r#"Entry missing "id""#.to_string(),
-				value:sql::Value::from(obj.clone())
-			})?;
-		match id_val
-		{
-			sql::Value::Thing(id) => {
-				match id.tb.as_str() {
-					"instances" => Ok(Instance((id, obj))),
-					"series" => Ok(Series((id, obj))),
-					"studies" => Ok(Study((id, obj))),
-					_ => Err(Self::Error::FromValue{
-						error:r#"invalid table name"#.to_string(),value:id.into()
-					})
+		obj.remove("id")
+			.ok_or(Self::Error::ElementMissing{element:"id".into(),parent:obj.to_string()})
+			.and_then(|id_val|
+				match id_val
+				{
+					sql::Value::Thing(id) => {
+						match id.tb.as_str() {
+							"instances" => Ok(Instance((id, obj))),
+							"series" => Ok(Series((id, obj))),
+							"studies" => Ok(Study((id, obj))),
+							_ => Err(Self::Error::InvalidTable{table:id.tb})
+						}
+					}
+					_ => Err(Self::Error::UnexpectedResult{expected:"id".into(),found:id_val.into()})
 				}
-			}
-			_ => Err(Self::Error::FromValue{
-				error:r#"not an id"#.to_string(),value:id_val.into()
-			})
-		}
+			).context("trying to convert database object into an Entry")
 	}
 }
 

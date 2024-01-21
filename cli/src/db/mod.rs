@@ -49,16 +49,15 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 	let table:sql::Table = table.into();
 	let query_context = format!("querying for contents of table {table}");
 	let value=query("select * from $table", ("table", table)).await.context(&query_context)?;
-	let result:surrealdb::Result<Vec<_>> = match value {
+	match value {
 		Value::Array(rows) => {
 			rows.0.into_iter()
-				.map(|v|Entry::try_from(v).map_err(surrealdb::Error::from))
+				.map(Entry::try_from)
 				.collect()
 		},
-		Value::None => Err(surrealdb::error::Db::NoRecordFound.into()),
-		_ => Err(surrealdb::error::Db::InvalidContent { value }.into())
-	};
-	result.context(query_context)
+		Value::None => Err(tools::Error::NotFound),
+		_ => Err(tools::Error::UnexpectedResult {expected:"list of entries".into(),found:value})
+	}.context(query_context)
 }
 
 pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
@@ -81,8 +80,7 @@ pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec
 pub(crate) async fn list_children<T>(id:&Thing, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
 {
 	let result:Result<Vec<_>>=list_values(id, col.as_ref(),true).await?.into_iter()
-		.map(|v|Entry::try_from(v).map_err(surrealdb::Error::Api))
-		.map(|r|r.map_err(tools::Error::from))
+		.map(Entry::try_from)
 		.collect();
 	result.context(format!("listing children of {id} in column {}",col.as_ref()))
 }
@@ -94,13 +92,14 @@ pub(crate) async fn list_json<T>(id:&Thing, col:T) -> Result<Vec<serde_json::Val
 }
 pub(crate) async fn lookup(id:&Thing) -> Result<Option<Entry>>
 {
-	let result = query("select * from $id", ("id", id)).await
+	query("select * from $id", ("id", id)).await
+		.map_err(crate::tools::Error::from)
 		.and_then(|value|
 			if value.is_some() {
-				Entry::try_from(value).map(|e|Some(e)).map_err(surrealdb::Error::Api)
+				Some(Entry::try_from(value)).transpose()
 			} else {Ok(None)}
-		);
-	result.context(format!("when looking up {id}"))
+		)
+		.context(format!("when looking up {id}"))
 }
 
 async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>

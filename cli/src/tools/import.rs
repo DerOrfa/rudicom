@@ -1,5 +1,5 @@
 use std::path::Path;
-use anyhow::{Result,anyhow};
+use anyhow::anyhow;
 use tokio::task::JoinError;
 use crate::storage::register_file;
 use futures::{Stream, TryStreamExt, StreamExt};
@@ -12,7 +12,7 @@ pub(crate) enum ImportResult {
 	Registered{filename:String},
 	Existed{filename:String,existed:Entry},
 	ExistedConflict {filename:String,my_md5:String,existed:Entry},
-	Err{filename:String,error:anyhow::Error}
+	Err{filename:String,error:crate::tools::Error}
 }
 
 impl Serialize for ImportResult
@@ -79,7 +79,7 @@ async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 }
 
 
-pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:bool) -> Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
+pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:bool) -> anyhow::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
 {
 	let mut tasks=tokio::task::JoinSet::new();
 	let mut files= glob(pattern.as_ref())

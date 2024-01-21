@@ -17,6 +17,9 @@ pub enum DicomError
 #[derive(Error,Debug)]
 pub enum Error
 {
+	#[error("task error {0}")]
+	JoinError(#[from] tokio::task::JoinError),
+
 	#[error("Database error {0}")]
 	SurrealError(#[from] surrealdb::Error),
 
@@ -25,6 +28,9 @@ pub enum Error
 
 	#[error("io error {0}")]
 	IoError(#[from] std::io::Error),
+
+	#[error("filename {name} is invalid")]
+	InvalidFilename{name:std::path::PathBuf},
 
 	#[error("{0}")]
 	DicomError(#[from] DicomError),
@@ -62,6 +68,26 @@ impl Error {
 	pub(crate) fn context_from<E,T>(error:E,context:T) -> Error where String:From<T>, Error:From<E>
 	{
 		Error::from(error).context(context)
+	}
+	pub(crate) fn chain(&self) -> ErrorChain
+	{
+		ErrorChain{current:Some(self)}
+	}
+}
+
+pub(crate) struct ErrorChain<'a>{
+	current:Option<&'a(dyn std::error::Error)>
+}
+
+impl<'a> Iterator for ErrorChain<'a>
+{
+	type Item = &'a(dyn std::error::Error);
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		match self.current{
+			None => None,
+			Some(c) => std::mem::replace(&mut self.current,c.source())
+		}
 	}
 }
 
