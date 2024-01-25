@@ -13,7 +13,7 @@ use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
 pub use remove::remove;
 use crate::{db, storage};
-pub use error::{Error, Result, Context};
+pub use error::{Error, Result, Context, Source};
 use crate::tools::Error::DicomError;
 
 pub fn transform(root:sql::Value, transformer:fn(sql::Value)->sql::Value) -> sql::Value

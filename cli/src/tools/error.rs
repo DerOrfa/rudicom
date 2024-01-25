@@ -61,7 +61,7 @@ pub enum Error
 	#[error("Failed to parse {to_parse} ({source})")]
 	ParseError{
 		to_parse: String,
-		source: Box<dyn std::error::Error + Send + Sync>,
+		source: Box<dyn std::error::Error + Send + Sync + 'static>,
 	},
 	#[error("'{element}' is missing in '{parent}'")]
 	ElementMissing{element:String,parent:String},
@@ -87,25 +87,26 @@ impl Error {
 	{
 		Error::from(error).context(context)
 	}
-	pub(crate) fn chain(&self) -> ErrorChain
-	{
-		ErrorChain{current:Some(self)}
+	pub(crate) fn sources(&self) -> Source<'_> {
+		Source { current: Some( self ) }
 	}
+	pub(crate) fn root_cause(&self) -> &(dyn std::error::Error + 'static) {
+		self.sources().last().expect("Error chains can't be empty")
+	}
+
 }
 
-pub(crate) struct ErrorChain<'a>{
-	current:Option<&'a(dyn std::error::Error)>
+pub struct Source<'a> {
+	pub current: Option<&'a (dyn std::error::Error + 'static)>,
 }
 
-impl<'a> Iterator for ErrorChain<'a>
-{
-	type Item = &'a(dyn std::error::Error);
-	fn next(&mut self) -> Option<Self::Item>
-	{
-		match self.current{
-			None => None,
-			Some(c) => std::mem::replace(&mut self.current,c.source())
-		}
+impl<'a> Iterator for Source<'a> {
+	type Item = &'a (dyn std::error::Error + 'static);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let current = self.current;
+		self.current = self.current.and_then(std::error::Error::source);
+		current
 	}
 }
 

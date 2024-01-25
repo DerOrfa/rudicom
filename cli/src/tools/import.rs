@@ -42,7 +42,7 @@ impl Serialize for ImportResult
 				let mut s=s.serialize_struct("failed",2)?;
 				s.serialize_field("filename", filename)?;
 				s.serialize_field("error", error.to_string().as_str())?;
-				let chain:Vec<_>= error.chain().map(|e|e.to_string()).collect();
+				let chain:Vec<_>= error.sources().map(|e|e.to_string()).collect();
 				if chain.len()>0 {
 					s.serialize_field("causation",&chain)?;
 				}
