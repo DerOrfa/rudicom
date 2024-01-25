@@ -100,7 +100,7 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 		files.next().map(|nextfile|
 			tasks.spawn(import_file(nextfile)));
 	}
-	// make a stream that polls tasks an feeds new ones
+	// make a stream that polls tasks and feeds new ones
 	let stream=futures::stream::poll_fn(move |c|{
 		let p=tasks.poll_join_next(c);
 		if p.is_ready() {//if a task finished
