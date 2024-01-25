@@ -16,7 +16,6 @@ pub use into_db_value::IntoDbValue;
 pub use register::{unregister, register_instance, RegistryGuard};
 pub use entry::Entry;
 pub use file::File;
-use crate::tools;
 
 static DB: OnceLock<Surreal<Any>> = OnceLock::new();
 
@@ -55,8 +54,8 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 				.map(Entry::try_from)
 				.collect()
 		},
-		Value::None => Err(tools::Error::NotFound),
-		_ => Err(tools::Error::UnexpectedResult {expected:"list of entries".into(),found:value})
+		Value::None => Err(crate::tools::Error::NotFound),
+		_ => Err(crate::tools::Error::UnexpectedResult {expected:"list of entries".into(),found:value})
 	}.context(query_context)
 }
 
@@ -70,7 +69,7 @@ pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec
 	{
 		Value::Array(values) => Ok(values.0),
 		_ => Err(
-				tools::Error::UnexpectedResult	{
+				crate::tools::Error::UnexpectedResult	{
 					expected: String::from("Array"),
 					found: result
 				}.context(query_context)
@@ -111,7 +110,7 @@ async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str
 		.and_then(Response::check)
 		.and_then(|mut r|r.take(col.as_ref()))
 		.context(&query_context)?;
-	res.ok_or(tools::Error::NotFound.context(query_context))
+	res.ok_or(crate::tools::Error::NotFound.context(query_context))
 }
 
 pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
@@ -128,7 +127,7 @@ pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
 			Ok(vec![id.to_owned(), study])
 		},
 		"studies" => Ok(vec![id.to_owned()]),
-		_ => {Err(tools::Error::InvalidTable {table:id.tb.to_string()}.context(query_context))}
+		_ => {Err(crate::tools::Error::InvalidTable {table:id.tb.to_string()}.context(query_context))}
 	}
 }
 
