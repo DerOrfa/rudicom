@@ -90,7 +90,13 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 		);
 
 	//pre-fill first 10 register tasks so there will always be some tasks that can do stuff
-	for _ in 0..9{
+	//also if there is not at least one file, it's probably a good idea to return an error
+	if let Some(file)=files.next(){
+		tasks.spawn(import_file(file));
+	} else {
+		return Err(crate::tools::Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
+	}
+	for _ in 1..9{
 		files.next().map(|nextfile|
 			tasks.spawn(import_file(nextfile)));
 	}

@@ -65,10 +65,6 @@ enum Commands {
         /// file or globbing to import
         pattern: String,
     },
-    // Remove{
-    //     // database id of the object to delete
-    //     id:String
-    // }
 }
 
 #[tokio::main]
