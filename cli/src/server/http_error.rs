@@ -1,40 +1,66 @@
 use axum::http::StatusCode;
+use axum::Json;
 use axum::response::{IntoResponse, Response};
 use thiserror::Error;
 
 #[derive(Error,Debug)]
-#[repr(u16)]
 pub(crate) enum HttpError{
-    #[error("internal error {source}")]
-    Internal{source:crate::tools::Error}=500,
-    #[error("Not found")]
-    NotFound{source:crate::tools::Error}=404,
+    #[error("internal error {0}")]
+    Internal(crate::tools::Error),
     #[error("Bad request {message}")]
-    BadRequest {message:String}=400,
+    BadRequest {message:String},
 }
 
 impl<T> From<T> for HttpError where crate::tools::Error:From<T>
 {
     fn from(error: T) -> Self
     {
-        let error = crate::tools::Error::from(error);
-        match &error {
-            crate::tools::Error::NotFound => HttpError::NotFound {source:error},
-            _ => HttpError::Internal{source:error}
-        }
+        HttpError::Internal(error.into())
     }
 }
+
+impl HttpError
+{
+    fn internal_status_code(error:&crate::tools::Error) -> StatusCode
+    {
+        let error_code = error.root_cause().downcast_ref::<crate::tools::Error>().map(
+            |e|match e {
+                crate::tools::Error::NotFound | crate::tools::Error::IdNotFound {..} => StatusCode::NOT_FOUND,
+                _ => StatusCode::INTERNAL_SERVER_ERROR
+            });
+        error_code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+    pub(crate) fn status_code(&self) -> StatusCode
+    {
+        match &self {
+            HttpError::Internal(e) => Self::internal_status_code(e),
+            HttpError::BadRequest { .. } => StatusCode::BAD_REQUEST
+        }
+    }
+    pub(crate) fn do_trace(&self)
+    {
+        match self {
+            HttpError::Internal(e) => tracing::error!("internal error {} reported (root cause {})", e, e.root_cause()),
+            _ => tracing::error!("http error {} reported", self),
+        }
+    }
+    pub(crate) fn sources(&self) -> crate::tools::Source<'_> {
+        crate::tools::Source { current: Some( self ) }
+    }
+}
+
 
 pub(crate) struct TextError(HttpError);
 impl IntoResponse for TextError {
     fn into_response(self) -> Response
     {
-        todo!();
-        // tracing::error!("Internal error {} reported (root cause {})", self.0, self.0.root_cause());
-        // (
-        //     StatusCode::INTERNAL_SERVER_ERROR,
-        //     format!("{:#}", self.0)
-        // ).into_response()
+        self.0.do_trace();
+        let status_code = self.0.status_code();
+        let sources:Vec<_>=self.0.sources().map(<dyn std::error::Error>::to_string).collect();
+        (
+            status_code,
+            sources.join("\n")
+        ).into_response()
     }
 }
 
@@ -49,16 +75,12 @@ pub(crate) struct JsonError(HttpError);
 impl IntoResponse for JsonError {
     fn into_response(self) -> Response
     {
-        todo!();
-        // let chain:Vec<_>=self.0.chain().collect();
-        // let text_chain:Vec<_> = chain.iter().map(|e|e.to_string()).collect();
-        // tracing::error!("Internal error {} reported (root cause {})",chain.first().unwrap(),chain.last().unwrap());
-        // if let Some(root_error) = chain.last().unwrap().downcast_ref::<crate::tools::Error>(){
-        //     match root_error {
-        //         Error::NotFound => {return (StatusCode::NOT_FOUND,Json(text_chain)).into_response()}
-        //     }
-        // }
-        // (StatusCode::INTERNAL_SERVER_ERROR,Json(text_chain)).into_response()
+        self.0.do_trace();
+        let status_code = self.0.status_code();
+        let sources:Vec<_>=self.0.sources().map(|e|{
+            serde_json::Value::String(e.to_string())
+        }).collect();
+        (status_code,Json(sources)).into_response()
     }
 }
 
