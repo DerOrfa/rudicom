@@ -41,7 +41,7 @@ impl IntoResponse for TextError {
 impl<T> From<T> for TextError where HttpError:From<T>
 {
     fn from(error: T) -> Self {
-        HttpError::from(error).into()
+        TextError(HttpError::from(error))
     }
 }
 
@@ -65,6 +65,6 @@ impl IntoResponse for JsonError {
 impl<T> From<T> for JsonError where HttpError:From<T>
 {
     fn from(error: T) -> Self {
-        HttpError::from(error).into()
+        JsonError(HttpError::from(error))
     }
 }
