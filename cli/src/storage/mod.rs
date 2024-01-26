@@ -1,7 +1,7 @@
 use std::path::Path;
 use surrealdb::sql;
 use crate::db;
-use crate::tools::Context;
+use crate::tools::{Context,Error::InvalidFilename};
 
 pub mod async_store;
 
@@ -10,9 +10,7 @@ pub(crate) async fn register_file<T>(path:T) -> crate::tools::Result<Option<db::
 	let mut md5=md5::Context::new();
 
 	let path_str = path.as_ref().to_str()
-		.ok_or(crate::tools::Error::InvalidFilename {
-			name:path.as_ref().to_path_buf()
-		})?;
+		.ok_or(InvalidFilename {name:path.as_ref().to_path_buf()})?;
 	let file = async_store::read_file(path.as_ref(),Some(&mut md5)).await
 		.context(format!("reading {path_str}"))?;
 	let md5:sql::Strand= format!("{:x}", md5.compute()).into();

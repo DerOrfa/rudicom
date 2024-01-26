@@ -5,7 +5,7 @@ use surrealdb::opt::auth::Root;
 use surrealdb::{Surreal, sql, Response};
 use surrealdb::opt::IntoQuery;
 use surrealdb::sql::{Value, Thing};
-use crate::tools::{Result,Context};
+use crate::tools::{Result,Context,Error};
 
 mod into_db_value;
 mod register;
@@ -54,8 +54,8 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 				.map(Entry::try_from)
 				.collect()
 		},
-		Value::None => Err(crate::tools::Error::NotFound),
-		_ => Err(crate::tools::Error::UnexpectedResult {expected:"list of entries".into(),found:value})
+		Value::None => Err(Error::NotFound),
+		_ => Err(Error::UnexpectedResult {expected:"list of entries".into(),found:value})
 	}.context(query_context)
 }
 
@@ -69,7 +69,7 @@ pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec
 	{
 		Value::Array(values) => Ok(values.0),
 		_ => Err(
-				crate::tools::Error::UnexpectedResult	{
+				Error::UnexpectedResult	{
 					expected: String::from("Array"),
 					found: result
 				}.context(query_context)
@@ -92,7 +92,7 @@ pub(crate) async fn list_json<T>(id:&Thing, col:T) -> Result<Vec<serde_json::Val
 pub(crate) async fn lookup(id:&Thing) -> Result<Option<Entry>>
 {
 	query("select * from $id", ("id", id)).await
-		.map_err(crate::tools::Error::from)
+		.map_err(Error::from)
 		.and_then(|value|
 			if value.is_some() {
 				Some(Entry::try_from(value)).transpose()
@@ -110,7 +110,7 @@ async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str
 		.and_then(Response::check)
 		.and_then(|mut r|r.take(col.as_ref()))
 		.context(&query_context)?;
-	res.ok_or(crate::tools::Error::NotFound.context(query_context))
+	res.ok_or(Error::NotFound.context(query_context))
 }
 
 pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
@@ -127,7 +127,7 @@ pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
 			Ok(vec![id.to_owned(), study])
 		},
 		"studies" => Ok(vec![id.to_owned()]),
-		_ => {Err(crate::tools::Error::InvalidTable {table:id.tb.to_string()}.context(query_context))}
+		_ => {Err(Error::InvalidTable {table:id.tb.to_string()}.context(query_context))}
 	}
 }
 

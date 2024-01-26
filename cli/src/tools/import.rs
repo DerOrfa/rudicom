@@ -6,17 +6,18 @@ use glob::glob;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use crate::db::Entry;
+use crate::tools::Error;
 
 pub(crate) enum ImportResult {
 	Registered{filename:String},
 	Existed{filename:String,existed:Entry},
 	ExistedConflict {filename:String,my_md5:String,existed:Entry},
-	Err{filename:String,error:crate::tools::Error}
+	Err{filename:String,error:Error}
 }
 
 impl Serialize for ImportResult
 {
-	fn serialize<S>(&self, s: S) -> std::result::Result<S::Ok, S::Error> where S: Serializer {
+	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error> where S: Serializer {
 		match self {
 			ImportResult::Registered { filename } => {
 				let mut s=s.serialize_struct("registered",1)?;
@@ -82,7 +83,7 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 {
 	let mut tasks=tokio::task::JoinSet::new();
 	let mut files= glob(pattern.as_ref())
-		.map_err(|e|crate::tools::Error::GlobbingError{pattern:pattern.as_ref().to_string(),err:e})?
+		.map_err(|e|Error::GlobbingError{pattern:pattern.as_ref().to_string(),err:e})?
 		.filter_map(|f|
 			if let Ok(f)=f{
 				if f.is_file(){Some(f)} else {None}
@@ -94,7 +95,7 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 	if let Some(file)=files.next(){
 		tasks.spawn(import_file(file));
 	} else {
-		return Err(crate::tools::Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
+		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
 	}
 	for _ in 1..9{
 		files.next().map(|nextfile|

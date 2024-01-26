@@ -2,16 +2,17 @@ use axum::http::StatusCode;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use thiserror::Error;
+use crate::tools;
 
 #[derive(Error,Debug)]
 pub(crate) enum HttpError{
     #[error("internal error {0}")]
-    Internal(crate::tools::Error),
+    Internal(tools::Error),
     #[error("Bad request {message}")]
     BadRequest {message:String},
 }
 
-impl<T> From<T> for HttpError where crate::tools::Error:From<T>
+impl<T> From<T> for HttpError where tools::Error:From<T>
 {
     fn from(error: T) -> Self
     {
@@ -21,12 +22,12 @@ impl<T> From<T> for HttpError where crate::tools::Error:From<T>
 
 impl HttpError
 {
-    fn internal_status_code(error:&crate::tools::Error) -> StatusCode
+    fn internal_status_code(error:&tools::Error) -> StatusCode
     {
         let root = error.root_cause();
-        let error_code = root.downcast_ref::<Box<crate::tools::Error>>().map(
+        let error_code = root.downcast_ref::<Box<tools::Error>>().map(
             |e|match **e {
-                crate::tools::Error::NotFound | crate::tools::Error::IdNotFound {..} => StatusCode::NOT_FOUND,
+                tools::Error::NotFound | tools::Error::IdNotFound {..} => StatusCode::NOT_FOUND,
                 _ => StatusCode::INTERNAL_SERVER_ERROR
             });
         error_code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)

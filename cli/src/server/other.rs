@@ -16,7 +16,7 @@ use crate::storage::async_store;
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove};
 use crate::tools::store::store;
 use crate::tools::verify::verify_entry;
-use crate::tools::Context;
+use crate::tools::{Context,Error::DicomError};
 
 pub(super) fn router() -> axum::Router
 {
@@ -117,7 +117,7 @@ async fn get_instance_png(Path(id):Path<String>, size: Option<Query<ImageSize>>)
 		let mut buffer = Cursor::new(Vec::<u8>::new());
 		let mut image = obj.decode_pixel_data()
 			.and_then(|p|p.to_dynamic_image(0))
-			.map_err(|e|crate::tools::Error::DicomError(e.into()))
+			.map_err(|e|DicomError(e.into()))
 			.context(format!("decoding pixel data of {id}"))?;
 		if let Some(size) = size{
 			image=image.thumbnail(size.width,size.height);
