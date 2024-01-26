@@ -1,5 +1,4 @@
 use std::path::Path;
-use anyhow::{Result,anyhow};
 use tokio::task::JoinError;
 use crate::storage::register_file;
 use futures::{Stream, TryStreamExt, StreamExt};
@@ -7,17 +6,18 @@ use glob::glob;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use crate::db::Entry;
+use crate::tools::Error;
 
 pub(crate) enum ImportResult {
 	Registered{filename:String},
 	Existed{filename:String,existed:Entry},
 	ExistedConflict {filename:String,my_md5:String,existed:Entry},
-	Err{filename:String,error:anyhow::Error}
+	Err{filename:String,error:Error}
 }
 
 impl Serialize for ImportResult
 {
-	fn serialize<S>(&self, s: S) -> std::result::Result<S::Ok, S::Error> where S: Serializer {
+	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error> where S: Serializer {
 		match self {
 			ImportResult::Registered { filename } => {
 				let mut s=s.serialize_struct("registered",1)?;
@@ -43,7 +43,7 @@ impl Serialize for ImportResult
 				let mut s=s.serialize_struct("failed",2)?;
 				s.serialize_field("filename", filename)?;
 				s.serialize_field("error", error.to_string().as_str())?;
-				let chain:Vec<_>= error.chain().map(|e|e.to_string()).collect();
+				let chain:Vec<_>= error.sources().map(|e|e.to_string()).collect();
 				if chain.len()>0 {
 					s.serialize_field("causation",&chain)?;
 				}
@@ -79,11 +79,11 @@ async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 }
 
 
-pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:bool) -> Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
+pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:bool) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
 {
 	let mut tasks=tokio::task::JoinSet::new();
 	let mut files= glob(pattern.as_ref())
-		.map_err(|e|anyhow!("Invalid globbing pattern {}:({})",pattern.as_ref(),e))?
+		.map_err(|e|Error::GlobbingError{pattern:pattern.as_ref().to_string(),err:e})?
 		.filter_map(|f|
 			if let Ok(f)=f{
 				if f.is_file(){Some(f)} else {None}
@@ -91,11 +91,17 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 		);
 
 	//pre-fill first 10 register tasks so there will always be some tasks that can do stuff
-	for _ in 0..9{
+	//also if there is not at least one file, it's probably a good idea to return an error
+	if let Some(file)=files.next(){
+		tasks.spawn(import_file(file));
+	} else {
+		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
+	}
+	for _ in 1..9{
 		files.next().map(|nextfile|
 			tasks.spawn(import_file(nextfile)));
 	}
-	// make a stream that polls tasks an feeds new ones
+	// make a stream that polls tasks and feeds new ones
 	let stream=futures::stream::poll_fn(move |c|{
 		let p=tasks.poll_join_next(c);
 		if p.is_ready() {//if a task finished
@@ -119,7 +125,7 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 	Ok(stream)
 }
 
-pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:bool) -> anyhow::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
+pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:bool) -> crate::tools::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
 {
 	Ok(import_glob(pattern,report_registered,report_existing)?
 		.map_ok(|item|match item {

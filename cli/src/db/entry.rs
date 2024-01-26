@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use surrealdb::sql;
-use anyhow::anyhow;
 use crate::db;
 use crate::tools::transform;
+use crate::tools::{Result,Context};
 use self::Entry::{Instance, Series, Study};
 
 #[derive(Clone,Debug)]
@@ -68,15 +68,11 @@ impl Entry
 		self.mut_data().1.insert(key.into(),value.into())
 	}
 
-	pub fn get_file(&self) -> anyhow::Result<db::File>
+	pub fn get_file(&self) -> Result<db::File>
 	{
-		if let Instance((_,o))=self {
-			o.get("file")
-				.ok_or(anyhow!(r#"Entry is missing "file""#))
-				.and_then(|v|db::File::try_from(v.clone()))
-		} else {Err(anyhow!("Not an instance"))}
+		db::File::try_from(self.clone())
 	}
-	pub fn get_path(&self) -> anyhow::Result<PathBuf>
+	pub fn get_path(&self) -> Result<PathBuf>
 	{
 		match self {
 			Instance(_) =>
@@ -103,40 +99,43 @@ impl From<Entry> for sql::Value {
 
 impl TryFrom<sql::Value> for Entry
 {
-	type Error = anyhow::Error;
+	type Error = crate::tools::Error;
 
-	fn try_from(value: sql::Value) -> Result<Self, Self::Error>
+	fn try_from(mut value: sql::Value) -> std::result::Result<Self, Self::Error>
 	{
 		match value {
-			sql::Value::None | sql::Value::Null => Err(anyhow!("value is empty")),
-			sql::Value::Array(mut array) => {
-				if array.len() == 1 { Entry::try_from(array.remove(0)) }
-				else {Err(anyhow!("Exactly one entry was expected"))}
-			},
-			sql::Value::Object(obj) => Entry::try_from(obj),
-			_ => Err(anyhow!("Value {value:?} has invalid form"))
-		}
-	}
-}
-
-impl TryFrom<sql::Object> for Entry
-{
-	type Error = anyhow::Error;
-
-	fn try_from(mut obj: sql::Object) -> Result<Self, Self::Error>
-	{
-		match obj.remove("id").ok_or(anyhow!(r#"Entry missing "id""#))?
-		{
-			sql::Value::Thing(id) => {
-				match id.tb.as_str() {
-					"instances" => Ok(Instance((id, obj))),
-					"series" => Ok(Series((id, obj))),
-					"studies" => Ok(Study((id, obj))),
-					_ => Err(anyhow!("invalid table name"))
+			sql::Value::Array(ref mut array) => {
+				if array.len() == 1 { Entry::try_from(array.0.remove(0)) } else {
+					Err(Self::Error::UnexpectedResult {expected:"single object".into(),found:value.to_owned()})
 				}
 			}
-			_ => Err(anyhow!(r#""id" is not an id"#))
-		}
+			sql::Value::Object(obj) => Entry::try_from(obj),
+			_ => Err(Self::Error::UnexpectedResult {expected:"single object".into(),found:value}),
+		}.context("trying to convert database value into an Entry")
+	}
+}
+impl TryFrom<sql::Object> for Entry
+{
+	type Error = crate::tools::Error;
+
+	fn try_from(mut obj: sql::Object) -> std::result::Result<Self, Self::Error>
+	{
+		obj.remove("id")
+			.ok_or(Self::Error::ElementMissing{element:"id".into(),parent:obj.to_string()})
+			.and_then(|id_val|
+				match id_val
+				{
+					sql::Value::Thing(id) => {
+						match id.tb.as_str() {
+							"instances" => Ok(Instance((id, obj))),
+							"series" => Ok(Series((id, obj))),
+							"studies" => Ok(Study((id, obj))),
+							_ => Err(Self::Error::InvalidTable{table:id.tb})
+						}
+					}
+					_ => Err(Self::Error::UnexpectedResult{expected:"id".into(),found:id_val.into()})
+				}
+			).context("trying to convert database object into an Entry")
 	}
 }
 

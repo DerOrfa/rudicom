@@ -1,12 +1,11 @@
 use axum::routing::post;
 use axum::extract::Query;
-use std::collections::HashMap;
 use axum::response::{IntoResponse, Response};
-use anyhow::anyhow;
 use serde_json::json;
-use crate::server::{JsonError, TextError};
+use crate::server::http_error::{JsonError, TextError};
 use crate::tools;
 use futures::StreamExt;
+use serde::Deserialize;
 
 pub(super) fn router() -> axum::Router
 {
@@ -15,14 +14,14 @@ pub(super) fn router() -> axum::Router
         .route("/tools/import/text",post(import_text))
 }
 
-async fn import_text(Query(mut params): Query<HashMap<String, String>>, pattern:String) -> Result<Response,TextError>
+#[derive(Deserialize)]
+struct ImportConfig {registered:Option<bool>,existing:Option<bool>}
+
+async fn import_text(Query(config): Query<ImportConfig>, pattern:String) -> Result<Response,TextError>
 {
-	let registered= params.remove("registered").map_or(Ok(false),|s|s.parse::<bool>())?;
-	let existing= params.remove("existing").map_or(Ok(true),|s|s.parse::<bool>())?;
-	if !params.is_empty(){
-		return Err(anyhow!(r#"unrecognized query parameters ("registered" and "existing" are allowed)"#).into());
-	}
-	let stream=tools::import::import_glob_as_text(pattern,registered,existing)?
+	let registered = config.registered.unwrap_or(false);
+	let existing = config.existing.unwrap_or(false);
+	let stream= tools::import::import_glob_as_text(pattern,registered,existing)?
 		.map(|r|match r {
 			Ok(s) => s+"\n",
 			Err(e) => format!("Import task panicked:{e}")
@@ -30,14 +29,10 @@ async fn import_text(Query(mut params): Query<HashMap<String, String>>, pattern:
 	Ok(axum_streams::StreamBodyAs::text(stream).into_response())
 }
 
-async fn import_json(Query(mut params): Query<HashMap<String, String>>, pattern:String) -> Result<Response,JsonError>
+async fn import_json(Query(config): Query<ImportConfig>, pattern:String) -> Result<Response,JsonError>
 {
-	let registered= params.remove("registered").map_or(Ok(false),|s|s.parse::<bool>())?;
-	let existing= params.remove("existing").map_or(Ok(true),|s|s.parse::<bool>())?;
-	if !params.is_empty(){
-		return Err(anyhow!(r#"unrecognized query parameters ("registered" and "existing" are allowed)"#).into());
-	}
-
+	let registered = config.registered.unwrap_or(false);
+	let existing = config.existing.unwrap_or(false);
 	let stream=tools::import::import_glob(pattern,registered,existing)?
 		.map(|r|match r {
 			Ok(s) => serde_json::to_value(s)

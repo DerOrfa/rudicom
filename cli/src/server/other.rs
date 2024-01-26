@@ -8,16 +8,15 @@ use axum::Json;
 use axum_extra::body::AsyncReadBody;
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
-use anyhow::{anyhow, Context};
 use serde_json::json;
 use serde::Deserialize;
 use dicom_pixeldata::PixelDecoder;
-use crate::db;
-use crate::server::{JsonError, TextError};
+use crate::server::http_error::{HttpError, JsonError, TextError};
 use crate::storage::async_store;
 use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove};
 use crate::tools::store::store;
 use crate::tools::verify::verify_entry;
+use crate::tools::{Context,Error::DicomError};
 
 pub(super) fn router() -> axum::Router
 {
@@ -40,7 +39,7 @@ async fn del_entry(Path(id):Path<(String, String)>) -> Result<(),JsonError>
 	remove(id.into()).await.map_err(|e|e.into())
 }
 
-async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<db::File>>,JsonError>
+async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<crate::db::File>>,JsonError>
 {
 	verify_entry(id.into()).await
 		.map_err(|e|e.into())
@@ -48,8 +47,8 @@ async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<db::File>>,J
 }
 
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
-	let bytes = payload?;
-	if bytes.is_empty(){return Err(anyhow!("Ignoring empty upload").into())}
+	let bytes = payload.map_err(|e|HttpError::BadRequest {message:format!("failed to receive data {e}")})?;
+	if bytes.is_empty(){return Err(HttpError::BadRequest {message:"Ignoring empty upload".into()}.into())}
 	let mut md5= md5::Context::new();
 	let obj= async_store::read(bytes,Some(&mut md5))?;
 	match store(obj,md5.compute()).await? {
@@ -118,11 +117,14 @@ async fn get_instance_png(Path(id):Path<String>, size: Option<Query<ImageSize>>)
 	if let Some(obj)=get_instance_dicom(id.as_str()).await?
 	{
 		let mut buffer = Cursor::new(Vec::<u8>::new());
-		let mut image = obj.decode_pixel_data()?.to_dynamic_image(0)?;
+		let mut image = obj.decode_pixel_data()
+			.and_then(|p|p.to_dynamic_image(0))
+			.map_err(|e|DicomError(e.into()))
+			.context(format!("decoding pixel data of {id}"))?;
 		if let Some(size) = size{
 			image=image.thumbnail(size.width,size.height);
 		}
-		image.write_to(&mut buffer, ImageOutputFormat::Png)?;
+		image.write_to(&mut buffer, ImageOutputFormat::Png).expect("Unexpectedly failed to write png data to memory buffer");
 
 		Ok((
 			[(header::CONTENT_TYPE, "image/png")],

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use anyhow::{bail, Context};
 use html::content::Navigation;
 use html::inline_text::Anchor;
 use html::root::{Body, Html};
@@ -10,9 +9,10 @@ use surrealdb::sql::Value;
 use crate::db;
 use crate::db::{Entry, File, find_down_tree, list_values};
 use crate::tools::reduce_path;
+use crate::tools::{Result,Context};
 
 impl Entry {
-    pub async fn make_nav(&self) -> anyhow::Result<Navigation>
+    pub async fn make_nav(&self) -> Result<Navigation>
     {
         let mut anchors = Vec::<Anchor>::new();
         let path= find_down_tree(self.id()).await
@@ -66,10 +66,8 @@ pub(crate) async fn table_from_objects<F>(
     id_name:String,
     keys:Vec<String>,
     additional: Vec<(&str,F)>
-) -> anyhow::Result<Table> where F:Fn(&Entry,&mut TableCellBuilder)
+) -> Result<Table> where F:Fn(&Entry,&mut TableCellBuilder)
 {
-    // make sure we have a proper list
-    if objs.is_empty(){bail!("Empty list")}
     let addkeys:Vec<_> = additional.iter().map(|(k,_)|k.to_string()).collect();
 
     //build header from the keys (defaults taken from first object)
@@ -108,7 +106,7 @@ pub(crate) async fn table_from_objects<F>(
     Ok(table_builder.build())
 }
 
-pub(crate) async fn entry_page(entry:Entry) -> anyhow::Result<Html>
+pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 {
     let mut builder = Body::builder();
     builder.push(entry.make_nav().await?);
@@ -147,7 +145,7 @@ pub(crate) async fn entry_page(entry:Entry) -> anyhow::Result<Html>
                 .paragraph(|p|p.text(path.to_string_lossy().to_string()));
 
 
-            let keys=crate::config::get::<Vec<String>>("instance_tags")?;
+            let keys=crate::config::get::<Vec<String>>("instance_tags").expect("failed to get instance_tags");
             let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
                 cell.image(|i|i.src(
                     format!("/instances/{}/png?width=64&height=64",obj.id().id.to_raw())
@@ -189,7 +187,7 @@ pub(crate) async fn entry_page(entry:Entry) -> anyhow::Result<Html>
                 }
             };
 
-            let keys= crate::config::get::<Vec<String>>("series_tags")?;
+            let keys= crate::config::get::<Vec<String>>("series_tags").expect("failed to get series_tags");
             let series_text = format!("{} Series",series.len());
             let series_table = table_from_objects(series, "Name".into(), keys, vec![("Instances",countinstances)]).await?;
             builder.heading_2(|h|h.text(series_text)).push(series_table);

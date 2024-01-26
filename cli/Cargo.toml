@@ -18,7 +18,6 @@ dicom-json = ["dep:dicom-json"]
 dicom = {version = ">0.6.1", features = ["pixeldata"] }
 dicom-pixeldata = { version = "0.2", features = ["image"] }
 dicom-json = { version = "0.1", optional = true }
-anyhow = {version = "1.0", features = ["backtrace"]}
 clap = { version = "4.4", features = ["derive","color","usage"] }
 serde_json = "1.0"
 surrealdb = {version = "1.0", features = ["protocol-ws"]}
@@ -36,4 +35,4 @@ futures = {version = "0.3", default-features = false}
 axum-streams = {version = "0.11", default-features = false, features = ["text","json"]}
 html = { version = "0.6", optional = true}
 itertools = "0.11"
-
+thiserror = { version = "1.0" }

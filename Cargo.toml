@@ -3,5 +3,5 @@ members = ["cli","fuzzer"]
 resolver = "2"
 
 [profile.release]
-strip = true
-lto = true
+strip = "symbols"
+lto = "fat"

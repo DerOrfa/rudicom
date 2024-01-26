@@ -12,7 +12,7 @@ use tokio::task::JoinSet;
 use crate::db;
 use crate::db::Entry;
 use crate::server::html::generators;
-use crate::server::TextError;
+use crate::server::http_error::TextError;
 
 #[derive(Deserialize)]
 pub(crate) struct StudyFilter {
@@ -26,8 +26,7 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
         .unique()//make sure there are no duplicates
         .collect();
 
-    let mut studies = db::list_table("studies").await?.into_iter()
-        .map(Entry::try_from).collect::<anyhow::Result<Vec<Entry>>>()?;
+    let mut studies = db::list_table("studies").await?;
     if let Some(filter) = filter
     {
         studies.retain(|e|e.name().find(filter.filter.as_str()).is_some());

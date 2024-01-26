@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::io::{Error, Write};
 use std::pin::Pin;
 use std::task::Poll;
-use anyhow::{Context, Result};
 use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
 use crate::dcm::gen_filepath;
@@ -10,6 +9,7 @@ use crate::storage::async_store::write_file;
 use crate::tools::complete_filepath;
 use crate::db;
 use crate::db::RegistryGuard;
+use crate::tools::Context;
 
 pub(crate) struct AsyncMd5(md5::Context);
 
@@ -34,7 +34,7 @@ impl tokio::io::AsyncWrite for AsyncMd5{
 	}
 }
 
-pub(crate) async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> Result<Option<db::Entry>>
+pub(crate) async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> crate::tools::Result<Option<db::Entry>>
 {
 	let path = gen_filepath(&obj)?;
 	let fileinfo:BTreeMap<String,sql::Value>= BTreeMap::from([
