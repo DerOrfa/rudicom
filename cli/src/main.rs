@@ -73,16 +73,19 @@ async fn main() -> crate::tools::Result<()>
     let args = Cli::parse();
     config::init(args.config)?;
     if let Some(database) = args.endpoint.database{
-        db::init_remote(database.as_str()).await.context(format!("Failed connecting to {}", database))?;
+        db::init_remote(database.as_str()).await
+            .context(format!("Failed connecting to {}", database))?;
     } else {
         #[cfg(feature = "embedded")]
         if let Some(file) = args.endpoint.file {
-            db::init_local(file.as_path()).await.context(format!("Failed opening {}", file.to_string_lossy()))?;
+            db::init_local(file.as_path()).await
+                .context(format!("Failed opening {}", file.to_string_lossy()))?;
         } else {
-            println!("No data backend, go away..");return Ok(());
+            println!("No data backend, go away..");
+            return Ok(());
         }
         #[cfg(not(feature = "embedded"))]
-        println!("No data backend, go away..");return Ok(());
+        {println!("No data backend, go away..");return Ok(());}
     }
 
     match args.command {
