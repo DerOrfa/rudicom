@@ -3,6 +3,7 @@ use tokio::task::JoinError;
 use crate::storage::register_file;
 use futures::{Stream, TryStreamExt, StreamExt};
 use glob::glob;
+use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use crate::db::Entry;
@@ -138,9 +139,10 @@ pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:
 				let existing_file=existed.get_file().unwrap().path;
 				format!("{filename} already existed as {existing_file}")
 			},
-			ImportResult::Err { filename, error } =>
-				format!("===========================================================\n{:?}",
-						error.context(format!("Importing {filename} failed")))
+			ImportResult::Err { filename, error } => {
+				let sources = error.sources().map(|e|e.to_string()).join("\nE:>");
+				format!("E:Importing {filename} failed\nE:>{sources}")
+			}
 		})
 	)
 }
