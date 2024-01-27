@@ -14,7 +14,7 @@ instance_tags = ["InstanceCreationDate", "InstanceCreationTime"] # InstanceNumbe
 upload_sizelimit_mb = 10
 
 filename_pattern = "{PatientID}/{StudyDate:>6}_{StudyTime:<6}/S{SeriesNumber}_{SeriesDescription}/Mr.{SOPInstanceUID}.ima"
-storage_path = "/tmp/db/store" #will be use if filename_pattern does not result in an absolute path
+storage_path = "/tmp/db/store" #will be uses if filename_pattern does not result in an absolute path
 "#;
 
 pub fn init(config_file:Option<PathBuf>) -> Result<()>{
