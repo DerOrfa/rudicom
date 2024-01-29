@@ -68,7 +68,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> crate::tools::Result<()>
+async fn main() -> tools::Result<()>
 {
     let args = Cli::parse();
     config::init(args.config)?;
@@ -104,10 +104,6 @@ async fn main() -> crate::tools::Result<()>
                 }
             }
         }
-        // Commands::Remove {id} => {
-        //     let id=thing(id.as_str()).context(format!("Failed to parse database id {id}"))?;
-        //     tools::remove::remove(id).await?;
-        // }
         Commands::WriteConfig { file } => {
             config::write(file)?
         }
