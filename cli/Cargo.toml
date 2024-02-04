@@ -13,6 +13,7 @@ embedded = ["surrealdb/kv-rocksdb"]
 # enable html interface
 html = ["dep:html"]
 dicom-json = ["dep:dicom-json"]
+dhat-heap = ["dhat"]
 
 [dependencies]
 dicom = {version = ">0.6.1", features = ["pixeldata"] }
@@ -36,3 +37,4 @@ axum-streams = {version = "0.12.0", default-features = false, features = ["text"
 html = { version = "0.6", optional = true}
 itertools = "0.12.0"
 thiserror = { version = "1.0" }
+dhat = { version = "0.3", optional = true }

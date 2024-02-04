@@ -73,6 +73,7 @@ async fn shutdown_signal() {
 		signal::ctrl_c()
 			.await
 			.expect("failed to install Ctrl+C handler");
+		eprintln!("Got CTRL+C trying graceful shutdown");
 	};
 
 	#[cfg(unix)]
@@ -81,6 +82,7 @@ async fn shutdown_signal() {
 			.expect("failed to install signal handler")
 			.recv()
 			.await;
+		eprintln!("Got CTRL+C trying graceful shutdown");
 	};
 
 	#[cfg(not(unix))]

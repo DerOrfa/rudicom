@@ -18,6 +18,10 @@ use crate::tools::Context;
 #[cfg(feature = "embedded")]
 use clap::ValueHint::DirPath;
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 #[derive(Args,Debug)]
 #[group(required = true, multiple = false)]
 struct Endpoint{
@@ -70,6 +74,9 @@ enum Commands {
 #[tokio::main]
 async fn main() -> tools::Result<()>
 {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let args = Cli::parse();
     config::init(args.config)?;
     if let Some(database) = args.endpoint.database{
