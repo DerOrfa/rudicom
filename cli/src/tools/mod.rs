@@ -39,11 +39,15 @@ pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 	}
 	PathBuf::new()
 }
-
+/// generate absolute path using "storage_path" from the config if given path isn't absolute yet
 pub fn complete_filepath<P>(path:&P) -> PathBuf where P:AsRef<Path>
 {
-	let root:PathBuf = crate::config::get("storage_path").expect(r#""storage_path" missing or invalid in config"#);
-	root.join(path)
+	if path.as_ref().is_absolute() {path.as_ref().into()}
+	else {
+		let root:PathBuf = crate::config::get("storage_path")
+			.expect(r#""storage_path" missing or invalid in config"#);
+		root.join(path)
+	}
 }
 pub async fn get_instance_dicom(id:&str) -> Result<Option<DefaultDicomObject>>
 {

@@ -49,9 +49,8 @@ async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<crate::db::F
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
 	let bytes = payload.map_err(|e|HttpError::BadRequest {message:format!("failed to receive data {e}")})?;
 	if bytes.is_empty(){return Err(HttpError::BadRequest {message:"Ignoring empty upload".into()}.into())}
-	let mut md5= md5::Context::new();
-	let obj= async_store::read(bytes,Some(&mut md5))?;
-	match store(obj,md5.compute()).await? {
+	let obj= async_store::read(bytes,None)?;
+	match store(obj).await? {
 		None => Ok((
 			StatusCode::CREATED,
 			Json(json!({"Status":"Success"}))
