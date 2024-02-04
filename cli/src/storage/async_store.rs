@@ -2,7 +2,7 @@ use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::path::Path;
 use dicom::object::{DefaultDicomObject, from_reader};
 use tokio::fs::File;
-use tokio::io::{AsyncWriteExt,AsyncReadExt};
+use tokio::io::AsyncReadExt;
 use crate::tools::Error::DicomError;
 use crate::tools::Result;
 
@@ -30,15 +30,6 @@ pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Res
 	}
 	out.seek(SeekFrom::Start(0))?;
 	Ok(out)
-}
-
-pub async fn write_file<T>(path:T, obj:&DefaultDicomObject,with_md5:Option<&mut md5::Context>)->Result<()> where T:AsRef<Path>
-{
-	let mut file = File::create(path).await?;
-	let data= write(obj,with_md5)?.into_inner();
-	file.write_all(data.as_slice()).await?;
-	file.flush().await?;
-	Ok(())
 }
 
 pub async fn read_file<T>(path:T,with_md5:Option<&mut md5::Context>) -> Result<DefaultDicomObject> where T:AsRef<Path>

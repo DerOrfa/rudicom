@@ -51,7 +51,7 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 	if bytes.is_empty(){return Err(HttpError::BadRequest {message:"Ignoring empty upload".into()}.into())}
 	let mut md5= md5::Context::new();
 	let obj= async_store::read(bytes,Some(&mut md5))?;
-	match store(obj,md5.compute()).await? {
+	match store(obj).await? {
 		None => Ok((
 			StatusCode::CREATED,
 			Json(json!({"Status":"Success"}))

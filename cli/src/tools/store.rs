@@ -4,8 +4,10 @@ use std::pin::Pin;
 use std::task::Poll;
 use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use crate::dcm::gen_filepath;
-use crate::storage::async_store::write_file;
+use crate::storage::async_store::write;
 use crate::tools::complete_filepath;
 use crate::db;
 use crate::db::RegistryGuard;
@@ -34,22 +36,30 @@ impl tokio::io::AsyncWrite for AsyncMd5{
 	}
 }
 
-pub(crate) async fn store(obj:DefaultDicomObject,checksum:md5::Digest) -> crate::tools::Result<Option<db::Entry>>
+pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::Entry>>
 {
 	let path = gen_filepath(&obj)?;
+
+	let mut guard= RegistryGuard::default();
+	let mut checksum = md5::Context::new();
+	let buffer=write(&obj,Some(&mut checksum))?.into_inner();
+
 	let fileinfo:BTreeMap<String,sql::Value>= BTreeMap::from([
 		("path".into(),path.clone().into()),
 		("owned".into(),true.into()),
-		("md5".into(),format!("{:x}", checksum).into())
+		("md5".into(),format!("{:x}", checksum.compute()).into())
 	]);
 
-	let mut guard= RegistryGuard::default();
 	let registered = db::register_instance(&obj,vec![("file".into(),fileinfo.into())],Some(&mut guard)).await?;
 	if registered.is_none() { //no previous data => normal register => store the file
 		let path = complete_filepath(&path);
 		let p = path.parent().unwrap();
 		tokio::fs::create_dir_all(p).await.context(format!("Failed creating storage path {:?}",p))?;
-		write_file(&path,&obj,None).await.context(format!("Failed to write file {}",path.display()))?;
+
+		let mut file = File::create(p).await?;
+		file.write_all(buffer.as_slice()).await?;
+		file.flush().await?;
+
 		guard.reset();//all good, file stored, we can drop the guard
 	}
 	Ok(registered)
