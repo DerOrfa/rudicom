@@ -51,12 +51,12 @@ pub enum Error
 	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
 	UnexpectedResult{
 		expected: String,
-		found: surrealdb::sql::Value,
+		found: sql::Value,
 	},
 	#[error("Entry {id} is not an {expected}")]
 	UnexpectedEntry{
 		expected: String,
-		id: surrealdb::sql::Thing,
+		id: sql::Thing,
 	},
 	#[error("Failed to parse {to_parse} ({source})")]
 	ParseError{
