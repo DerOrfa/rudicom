@@ -13,29 +13,7 @@ use crate::db;
 use crate::db::RegistryGuard;
 use crate::tools::Context;
 
-pub(crate) struct AsyncMd5(md5::Context);
-
-impl AsyncMd5
-{
-	pub fn new() -> Self
-	{Self(md5::Context::new())}
-	pub fn compute(self) -> String
-	{format!("{:x}", self.0.compute())}
-}
-impl tokio::io::AsyncWrite for AsyncMd5{
-	fn poll_write(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>, buf: &[u8]) -> Poll<std::result::Result<usize, Error>> {
-		Poll::Ready(self.get_mut().0.write(buf))
-	}
-
-	fn poll_flush(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), Error>> {
-		Poll::Ready(self.get_mut().0.flush())
-	}
-
-	fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), Error>> {
-		Poll::Ready(Ok(()))
-	}
-}
-
+/// stores given dicom object as file and registers it as owned (might change data)
 pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::Entry>>
 {
 	let path = gen_filepath(&obj)?;

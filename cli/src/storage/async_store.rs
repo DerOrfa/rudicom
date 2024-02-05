@@ -1,10 +1,34 @@
-use std::io::{Cursor, Seek, SeekFrom, Write};
+use std::io::{Cursor, Error, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::pin::Pin;
+use std::task::Poll;
 use dicom::object::{DefaultDicomObject, from_reader};
-use tokio::fs::{File,OpenOptions};
+use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use crate::tools::Error::DicomError;
-use crate::tools::Result;
+use crate::tools::{Context, Result};
+
+pub(crate) struct AsyncMd5(md5::Context);
+
+impl AsyncMd5
+{
+	pub fn new() -> Self
+	{Self(md5::Context::new())}
+	pub fn compute(self) -> md5::Digest	{self.0.compute()}
+}
+impl tokio::io::AsyncWrite for AsyncMd5{
+	fn poll_write(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>, buf: &[u8]) -> Poll<std::result::Result<usize, Error>> {
+		Poll::Ready(self.get_mut().0.write(buf))
+	}
+
+	fn poll_flush(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), Error>> {
+		Poll::Ready(self.get_mut().0.flush())
+	}
+
+	fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), Error>> {
+		Poll::Ready(Ok(()))
+	}
+}
 
 pub fn read<T>(input: T, with_md5:Option<&mut md5::Context>) -> Result<DefaultDicomObject> where T:AsRef<[u8]>
 {
@@ -38,4 +62,13 @@ pub async fn read_file<T>(path:T,with_md5:Option<&mut md5::Context>) -> Result<D
 	File::open(path.as_ref()).await?.read_to_end(&mut buffer).await?;
 	if buffer.len()==0 {return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())}
 	read(buffer, with_md5)
+}
+
+pub async fn compute_md5(filename:&Path) -> Result<md5::Digest>
+{
+	let mut md5_compute = AsyncMd5::new();
+	let mut fileob = File::open(&filename).await.context(format!("opening {}",filename.to_string_lossy()))?;
+	tokio::io::copy(&mut fileob,&mut md5_compute).await?;
+	Ok(md5_compute.compute())
+
 }
