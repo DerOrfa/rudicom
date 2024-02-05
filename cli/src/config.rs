@@ -1,8 +1,7 @@
 use std::path::PathBuf;
-use config::{Config, File, FileFormat::Toml};
+use config::{Config,ConfigError, File, FileFormat::Toml};
 use std::sync::OnceLock;
 use serde::Deserialize;
-use crate::tools::{Result,Context};
 
 static CONFIG:OnceLock<Config> = OnceLock::new();
 
@@ -20,25 +19,33 @@ filename_pattern = "{PatientID}/{StudyDate:>6}_{StudyTime:<6}/S{SeriesNumber}_{S
 storage_path = "/tmp/db/store" #will be used if filename_pattern does not result in an absolute path
 "#;
 
-pub fn init(config_file:Option<PathBuf>) -> Result<()>{
+pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	let mut builder = Config::builder()
 		.add_source(File::from_str(CONFIG_STR,Toml));
 	if let Some(filename) = config_file {
 		let filename = filename.to_str().expect("Failed to encode filename as UTF-8");
 		builder=builder.add_source(File::new(filename,Toml));
 	}
-	CONFIG.set(builder.build()?).expect("failed initializing config");
+	CONFIG.set(builder.build()?).ok();
+	let storage_path:PathBuf = get("storage_path")
+		.expect(r#""storage_path" is missing in the config"#);
+	if !storage_path.is_absolute(){
+		return Err(ConfigError::Foreign(r#""storage_path" must be an absolute path"#.into()))
+	}
+	if !storage_path.exists(){
+		return Err(ConfigError::Foreign(r#""storage_path" must exist"#.into()))
+	}
 	Ok(())
 }
 
-pub fn write(path:PathBuf) -> Result<()>
+pub fn write(path:PathBuf) -> Result<(),ConfigError>
 {
-	std::fs::write(path,CONFIG_STR).map_err(|e|e.into())
+	std::fs::write(path,CONFIG_STR).map_err(|e|ConfigError::Foreign(Box::new(e)))
 }
 
-pub(crate) fn get<'de, T: Deserialize<'de>>(key: &str) -> Result<T>
+pub(crate) fn get<'de, T: Deserialize<'de>>(key: &str) -> Result<T,ConfigError>
 {
 	CONFIG.get()
 		.expect("accessing uninitialized global config")
-		.get(key).context(format!("looking for {key} in configuration"))
+		.get(key)
 }
