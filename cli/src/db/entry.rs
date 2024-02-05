@@ -76,7 +76,7 @@ impl Entry
 	{
 		match self {
 			Instance(_) =>
-				self.get_file().map(|f|f.get_path()),
+				self.get_file().map(|f|f.get_path().to_path_buf()),
 			Series(_) => {todo!()}
 			Study(_) => {todo!()}
 		}

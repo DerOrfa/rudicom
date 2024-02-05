@@ -6,7 +6,7 @@ use glob::glob;
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
-use crate::db::Entry;
+use crate::db::{Entry, File};
 use crate::tools::Error;
 
 pub(crate) enum ImportResult {
@@ -129,20 +129,26 @@ pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:b
 pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:bool) -> crate::tools::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
 {
 	Ok(import_glob(pattern,report_registered,report_existing)?
-		.map_ok(|item|match item {
-			ImportResult::Registered { filename } => format!("{filename} stored"),
-			ImportResult::ExistedConflict { filename, existed, .. } => {
-				let existing_file=existed.get_file().unwrap().path;
-				format!("{filename} already existed as {existing_file} but checksum differs")
-			},
-			ImportResult::Existed { filename, existed } => {
-				let existing_file=existed.get_file().unwrap().path;
-				format!("{filename} already existed as {existing_file}")
-			},
-			ImportResult::Err { filename, error } => {
-				let sources = error.sources().map(|e|e.to_string()).join("\nE:>");
-				format!("E:Importing {filename} failed\nE:>{sources}")
-			}
+		.map_ok(|item| {
+			let register_msg = match item {
+				ImportResult::Registered { filename } => Ok(format!("{filename} stored")),
+				ImportResult::ExistedConflict { filename, existed, .. } => {
+					File::try_from(existed).map(File::into_path)
+						.map(|p| format!("{filename} already existed as {} but checksum differs", p.to_string_lossy()))
+						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
+				},
+				ImportResult::Existed { filename, existed } => {
+					File::try_from(existed).map(File::into_path)
+						.map(|p| format!("{filename} already existed as {}", p.to_string_lossy()))
+						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
+				},
+				ImportResult::Err { filename, error } => {
+					Err(error.context(format!("Importing {filename} failed")))
+				}
+			};
+			register_msg.unwrap_or_else(|e|
+				String::from("E:")+e.sources().join("\nE:>").as_str()
+			)
 		})
 	)
 }

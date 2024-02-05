@@ -39,22 +39,20 @@ pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 	}
 	PathBuf::new()
 }
-/// generate absolute path using "storage_path" from the config if given path isn't absolute yet
+/// generate absolute path using "storage_path" from the config if given path is relative
+/// as "storage_path" is guaranteed to be absolute already, the result is guaranteed to be absolute
 pub fn complete_filepath<P>(path:&P) -> PathBuf where P:AsRef<Path>
 {
-	if path.as_ref().is_absolute() {path.as_ref().into()}
-	else {
-		let root:PathBuf = crate::config::get("storage_path")
-			.expect(r#""storage_path" missing or invalid in config"#);
-		root.join(path)
-	}
+	crate::config::get::<PathBuf>("storage_path")
+		.expect(r#""storage_path" missing or invalid in config"#)
+		.join(path)
 }
 pub async fn get_instance_dicom(id:&str) -> Result<Option<DefaultDicomObject>>
 {
 	if let Some(file)=lookup_instance_file(id).await.map_err(|e|e.context(format!("looking up fileinfo for {id}")))?
 	{
 		let path = file.get_path();
-		let checksum=file.md5.as_str();
+		let checksum=file.get_md5();
 		let mut md5=md5::Context::new();
 		let obj=storage::async_store::read_file(&path,Some(&mut md5)).await?;
 		if format!("{:x}", md5.compute()) == checksum{Ok(Some(obj))}
@@ -79,7 +77,7 @@ pub async fn lookup_instance_filepath(id:&str) -> Result<Option<PathBuf>>
 {
 	lookup_instance_file(id).await
 		.map_err(|e|e.context(format!("looking up fileinfo for {id} failed")))
-		.map(|f|f.map(|f|f.get_path()))
+		.map(|f|f.map(db::File::into_path))
 }
 
 pub async fn instances_for_entry(id:sql::Thing) -> Result<Vec<sql::Thing>>

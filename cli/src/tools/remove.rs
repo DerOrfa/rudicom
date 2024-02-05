@@ -28,16 +28,19 @@ async fn remove_instance(id:Thing) -> Result<Option<db::Entry>>
 		let removed = db::Entry::try_from(res)?;
 		let file = removed.get_file()?;
 		if file.owned {
-			let storage_path = crate::config::get::<PathBuf>("storage_path").expect(r#""storage_path" missing or invalid in config"#);
-			let path = storage_path.join(file.path.as_str());
+			let mut path = file.into_path();
 			remove_file(&path).await?;
-			remove_path(path.parent().unwrap().to_path_buf(),storage_path.as_path()).await?;
+			if path.pop(){// if there is a parent path, try to delete it as far as possible
+				let storage_path:PathBuf = crate::config::get("storage_path").expect(r#"Failed to get "storage_path""#);
+				remove_path(path,storage_path.as_path()).await?;
+			}
 		}
 		Ok(Some(removed))
 	}
 }
 
-async fn remove_path(mut path:PathBuf, storage_path:&Path) -> std::io::Result<()>
+/// removes given directory and all parents until path is empty or stop_path is reached
+async fn remove_path(mut path:PathBuf, stop_path:&Path) -> std::io::Result<()>
 {
 	loop {
 		if let Err(e) = remove_dir(path.as_path()).await
@@ -48,7 +51,7 @@ async fn remove_path(mut path:PathBuf, storage_path:&Path) -> std::io::Result<()
 			}
 			return Err(e);
 		}
-		if !path.pop() || path == storage_path
+		if !path.pop() || path == stop_path
 		{
 			return Ok(());
 		}
