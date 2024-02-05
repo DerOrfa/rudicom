@@ -23,17 +23,19 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	let mut builder = Config::builder()
 		.add_source(File::from_str(CONFIG_STR,Toml));
 	if let Some(filename) = config_file {
-		let filename = filename.to_str().expect("Failed to encode filename as UTF-8");
+		let filename = filename.canonicalize().map_err(|e|ConfigError::Foreign(Box::new(e)))?;
+		let filename = filename.to_str()
+				.ok_or(ConfigError::Foreign(format!("Failed to encode filename {} as UTF-8",filename.to_string_lossy()).into()))?;
 		builder=builder.add_source(File::new(filename,Toml));
 	}
 	CONFIG.set(builder.build()?).ok();
 	let storage_path:PathBuf = get("storage_path")
 		.expect(r#""storage_path" is missing in the config"#);
 	if !storage_path.is_absolute(){
-		return Err(ConfigError::Foreign(r#""storage_path" must be an absolute path"#.into()))
+		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must be an absolute path"#,storage_path.to_string_lossy()).into()))
 	}
 	if !storage_path.exists(){
-		return Err(ConfigError::Foreign(r#""storage_path" must exist"#.into()))
+		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must exist"#,storage_path.to_string_lossy()).into()))
 	}
 	Ok(())
 }

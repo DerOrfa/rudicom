@@ -85,14 +85,16 @@ async fn main() -> tools::Result<()>
     } else {
         #[cfg(feature = "embedded")]
         if let Some(file) = args.endpoint.file {
+            let file = file.canonicalize()
+                .context(format!("Failed canonicalize database path {}", file.to_string_lossy()))?;
             db::init_local(file.as_path()).await
                 .context(format!("Failed opening {}", file.to_string_lossy()))?;
         } else {
-            println!("No data backend, go away..");
+            println!("No database backend, go away..");
             return Ok(());
         }
         #[cfg(not(feature = "embedded"))]
-        {println!("No data backend, go away..");return Ok(());}
+        {println!("No database backend, go away..");return Ok(());}
     }
 
     match args.command {
