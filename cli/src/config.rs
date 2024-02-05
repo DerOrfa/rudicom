@@ -26,8 +26,12 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 		let filename = filename.canonicalize().map_err(|e|ConfigError::Foreign(Box::new(e)))?;
 		let filename = filename.to_str()
 				.ok_or(ConfigError::Foreign(format!("Failed to encode filename {} as UTF-8",filename.to_string_lossy()).into()))?;
+		tracing::info!("loading config from {filename}");
 		builder=builder.add_source(File::new(filename,Toml));
+	} else {
+		tracing::info!(r#"no config file given loading defaults (use "write-config" subcommand to write it to a file)"#);
 	}
+
 	CONFIG.set(builder.build()?).ok();
 	let storage_path:PathBuf = get("storage_path")
 		.expect(r#""storage_path" is missing in the config"#);

@@ -4,7 +4,6 @@ use axum::routing::get;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::signal;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing;
 use crate::{config, db};
 use crate::tools::Result;
@@ -35,13 +34,6 @@ async fn server_info() -> Info
 pub async fn serve(listener:TcpListener) -> Result<()>
 {
 	let inf=server_info().await;
-	tracing_subscriber::registry()
-		.with(
-			tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "rudicom=debug".into()),
-		)
-		.with(tracing_subscriber::fmt::layer())
-		.init();
-
 	tracing::info!("listening on {}", listener.local_addr()?);
 	tracing::info!("database is {}",inf.db_version);
 	tracing::info!("storage path is {}",inf.storage_path);

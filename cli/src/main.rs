@@ -17,6 +17,7 @@ use crate::tools::Context;
 
 #[cfg(feature = "embedded")]
 use clap::ValueHint::DirPath;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -76,6 +77,13 @@ async fn main() -> tools::Result<()>
 {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "rudicom=debug".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     let args = Cli::parse();
     config::init(args.config)?;
