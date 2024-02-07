@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
 use tokio::fs::OpenOptions;
@@ -20,12 +20,12 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 	let mut checksum = md5::Context::new();
 	let buffer=write(&obj,Some(&mut checksum))?.into_inner();
 
-	let fileinfo = db::File::from_owned(path,checksum.compute());
-	assert_eq!(c_path, fileinfo.get_path());
+	let fileinfo:sql::Object = db::File::from_owned(path,checksum.compute()).try_into()?;
 
-	let registered = db::register_instance(&obj,vec![
-		("file".into(),sql::Object::try_from(fileinfo).unwrap().into())
-	],Some(&mut guard)).await?;
+	let registered = db::register_instance(&obj,
+	   vec![("file",fileinfo.into())],
+		Some(&mut guard)
+	).await?;
 	if registered.is_none() { //no previous data => normal register => store the file
 		let p = c_path.parent().unwrap();
 		tokio::fs::create_dir_all(p).await.context(format!("Failed creating storage path {:?}",p))?;
@@ -38,15 +38,17 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 	Ok(registered)
 }
 
-pub(crate) async fn import<T>(filename:T) -> crate::tools::Result<Option<db::Entry>> where T:Into<PathBuf>
+/// registers an existing file without storing (data won't be changed)
+pub(crate) async fn import<'a,T>(filename:T) -> crate::tools::Result<Option<db::Entry>> where T:Into<&'a Path>
 {
 	let mut checksum = md5::Context::new();
-	let filename:PathBuf = filename.into();
+	let filename:&Path = filename.into();
 	let context = format!("creating file info for {}",filename.to_string_lossy());
-	let obj = read_file(&filename,Some(&mut checksum)).await?;
-	let fileinfo = db::File::from_unowned(filename,checksum.compute()).context(context)?;
+	let obj = read_file(filename,Some(&mut checksum)).await?;
+	let fileinfo = db::File::from_unowned(filename,checksum.compute())
+		.map_err(crate::tools::Error::from)
+		.and_then(sql::Object::try_from)
+		.context(context)?;
 
-	db::register_instance(&obj,vec![
-		("file".into(),sql::Object::try_from(fileinfo).unwrap().into())
-	],None).await
+	db::register_instance(&obj,vec![("file",fileinfo.into())],None).await
 }

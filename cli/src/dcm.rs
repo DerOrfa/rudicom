@@ -36,10 +36,10 @@ pub fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
 		.collect()
 }
 
-pub fn extract(obj: &DefaultDicomObject, requested:Vec<(String, Tag)>) -> Vec<(String, sql::Value)>
+pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a Vec<(String, Tag)>) -> Vec<(&'a str, sql::Value)>
 {
-	requested.into_iter()
-		.map(|(name,tag)|(name,obj.element_opt(tag).unwrap()))
+	requested.iter()
+		.map(|(k,tag)|(k.as_str(),obj.element_opt(tag.clone()).unwrap()))
 		.map(|(k,v)|(k,v.cloned().into_db_value()))
 		.collect()
 }

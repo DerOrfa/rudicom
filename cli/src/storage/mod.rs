@@ -20,7 +20,7 @@ pub(crate) async fn register_file<T>(path:T) -> crate::tools::Result<Option<db::
 	let md5 = fileinfo.get_md5();
 	let fileinfo_obj = sql::Object::try_from(fileinfo).unwrap();
 
-	match db::register_instance(&file,vec![("file".into(), fileinfo_obj.into())],None).await// push in our own md5 in case it differs
+	match db::register_instance(&file,vec![("file", fileinfo_obj.into())],None).await// push in our own md5 in case it differs
 		.context(format!("registering {}",path.to_string_lossy()))?
 	{
 		None => Ok(None),

@@ -15,9 +15,9 @@ static INSERT_SERIES:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_INSTANCE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 
 pub async fn register(
-	instance_meta:BTreeMap<String, sql::Value>,
-	series_meta:BTreeMap<String, sql::Value>,
-	study_meta:BTreeMap<String, sql::Value>)
+	instance_meta:BTreeMap<&str, sql::Value>,
+	series_meta:BTreeMap<&str, sql::Value>,
+	study_meta:BTreeMap<&str, sql::Value>)
 -> Result<sql::Value>
 {
 	let ins_study= INSERT_STUDY.get_or_init(||"INSERT INTO studies $study_meta return before".into_query().unwrap());
@@ -58,10 +58,9 @@ impl Drop for RegistryGuard
 	}
 }
 
-
 pub async fn register_instance(
 	obj:&DefaultDicomObject,
-	add_meta:Vec<(String,db::Value)>,
+	add_meta:Vec<(&str,db::Value)>,
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>>
 {
@@ -84,14 +83,17 @@ pub async fn register_instance(
 	let series_tags = SERIES_TAGS.get_or_init(||dcm::get_attr_list("series_tags",vec!["SeriesDescription", "SeriesNumber"]));
 	let study_tags = STUDY_TAGS.get_or_init(||dcm::get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
 
-	let instance_meta:BTreeMap<_,_> = dcm::extract(&obj, instance_tags.clone()).into_iter()
-		.chain([("id".into(),instance_id),("series".into(),series_id.clone())])
-		.chain(add_meta).collect();
-	let series_meta:BTreeMap<_,_> = dcm::extract(&obj, series_tags.clone()).into_iter()
-		.chain([("id".into(),series_id),("study".into(),study_id.clone())])
+	let instance_meta = dcm::extract(&obj, instance_tags).into_iter()
+		.chain([("id",instance_id),("series",series_id.clone())])
+		.chain(add_meta)
 		.collect();
-	let study_meta:BTreeMap<_,_> = dcm::extract(&obj, study_tags.clone()).into_iter()
-		.chain([("id".into(),study_id)])
+
+	let series_meta= dcm::extract(&obj, series_tags).into_iter()
+		.chain([("id",series_id),("study",study_id.clone())])
+		.collect();
+
+	let study_meta = dcm::extract(&obj, study_tags).into_iter()
+		.chain([("id",study_id)])
 		.collect();
 
 	let res=register(instance_meta,series_meta,study_meta).await?;
