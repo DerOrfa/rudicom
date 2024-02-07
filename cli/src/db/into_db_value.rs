@@ -4,12 +4,13 @@ use dicom::core::chrono;
 use dicom::object::mem::InMemElement;
 use dicom::core::value::Value::{Primitive,Sequence};
 use dicom::object::{InMemDicomObject, StandardDataDictionary};
+use itertools::Itertools;
 use surrealdb::sql;
 
 fn flatten_iter<T,I>(iter:I) -> sql::Value
-	where I:Iterator<Item=T>, T:Into<sql::Value>, T:Clone
+	where I:Iterator<Item=T>, T:Into<sql::Value>
 {
-	let mut vec:Vec<sql::Value> = iter.map(|v|v.into()).collect();
+	let mut vec:Vec<sql::Value> = iter.map_into().collect();
 	match vec.len() {
 		0 => sql::Value::None,
 		1 => vec.pop().unwrap(),
@@ -83,14 +84,15 @@ impl IntoDbValue for InMemElement{
 		match self.into_value() {
 			Primitive(p) => p.into_db_value(),
 			Sequence (s)  =>
-				flatten_iter(s.into_items().iter().map(|o|o.clone().into_db_value())),
+				flatten_iter(s.into_items().into_iter().map(InMemDicomObject::into_db_value)),
 			_ => {todo!()}
 		}
 	}
 }
 
-impl<T> IntoDbValue for Option<T> where T:IntoDbValue{
+impl<T> IntoDbValue for Option<T> where T:IntoDbValue
+{
 	fn into_db_value(self) -> sql::Value {
-		self.map_or(sql::Value::None,|v|v.into_db_value())
+		self.map_or(sql::Value::None,T::into_db_value)
 	}
 }
