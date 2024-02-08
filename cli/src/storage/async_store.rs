@@ -56,10 +56,10 @@ pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Res
 	Ok(out)
 }
 
-pub async fn read_file<T>(path:T,with_md5:Option<&mut md5::Context>) -> Result<DefaultDicomObject> where T:AsRef<Path>
+pub async fn read_file<'a,T>(path:T,with_md5:Option<&mut md5::Context>) -> Result<DefaultDicomObject> where T:Into<&'a Path>
 {
 	let mut buffer = Vec::<u8>::new();
-	File::open(path.as_ref()).await?.read_to_end(&mut buffer).await?;
+	File::open(path.into()).await?.read_to_end(&mut buffer).await?;
 	if buffer.len()==0 {return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())}
 	read(buffer, with_md5)
 }

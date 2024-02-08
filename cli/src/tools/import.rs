@@ -1,6 +1,5 @@
 use std::path::Path;
 use tokio::task::JoinError;
-use crate::storage::register_file;
 use futures::{Stream, TryStreamExt, StreamExt};
 use glob::glob;
 use itertools::Itertools;
@@ -8,6 +7,7 @@ use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use crate::db::{Entry, File};
 use crate::tools::Error;
+use crate::tools::store::import;
 
 pub(crate) enum ImportResult {
 	Registered{filename:String},
@@ -57,7 +57,7 @@ impl Serialize for ImportResult
 async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
 {
 	let filename= path.as_ref().to_string_lossy().to_string();
-	match register_file(path.as_ref()).await
+	match import(path.as_ref()).await
 	{
 		Ok(v) => match v {
 			None => ImportResult::Registered{ filename },

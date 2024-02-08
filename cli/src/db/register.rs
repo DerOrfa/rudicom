@@ -14,6 +14,11 @@ static INSERT_STUDY:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_SERIES:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_INSTANCE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 
+/// register a new instance using values in instance_meta
+/// if the series an study referred to in instance_meta do not exist already
+/// they are created using series_meta and study_meta
+/// if the instance exists already no change is done and the existing instance data is returned
+/// None otherwise (on a successful register)
 pub async fn register(
 	instance_meta:BTreeMap<&str, sql::Value>,
 	series_meta:BTreeMap<&str, sql::Value>,
@@ -58,6 +63,10 @@ impl Drop for RegistryGuard
 	}
 }
 
+/// register dicom object of an instance
+/// if the instance already exists no change is done and
+/// the existing instance is returned as Entry
+/// None is returned on a successful register
 pub async fn register_instance(
 	obj:&DefaultDicomObject,
 	add_meta:Vec<(&str,db::Value)>,

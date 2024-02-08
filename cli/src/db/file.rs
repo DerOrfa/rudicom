@@ -43,7 +43,7 @@ impl File {
         if self.owned { tools::complete_filepath(&self.path) }
         else { self.path.to_path_buf() }
     }
-    pub(crate) fn get_md5(&self) -> String { self.md5.clone() }
+    pub(crate) fn get_md5(&self) -> &str { self.md5.as_str() }
 
     /// get the complete path of the file
     /// - attaches "storage_path" from the config if the file is owned and the path is relative

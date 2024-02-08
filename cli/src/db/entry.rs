@@ -30,7 +30,7 @@ impl Entry
 			Instance(data)| Series(data) | Study(data) => data
 		}
 	}
-	fn mut_data(&mut self) -> &mut (sql::Thing,sql::Object)
+	fn mut_data(&mut self) -> &mut (sql::Thing, sql::Object)
 	{
 		match self {
 			Instance(data)| Series(data) | Study(data) => data

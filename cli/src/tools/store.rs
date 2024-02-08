@@ -11,6 +11,8 @@ use crate::db::RegistryGuard;
 use crate::tools::Context;
 
 /// stores given dicom object as file and registers it as owned (might change data)
+/// if the object already exists, the store is aborted and the existing data is returned
+/// None otherwise
 pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::Entry>>
 {
 	let path = gen_filepath(&obj)?;
@@ -38,17 +40,39 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 	Ok(registered)
 }
 
+/// stores given dicom file as file (makes a copy) and registers it as owned (might change data)
+/// if the object already exists, the store is aborted and the existing data is returned
+/// None otherwise
+pub(crate) async fn store_file<'a,T>(filename:T) -> crate::tools::Result<Option<db::Entry>> where T:Into<&'a Path>
+{
+	store(read_file(filename,None).await?).await
+}
+
 /// registers an existing file without storing (data won't be changed)
+/// there is a chance the file is already registered if that's the case its information is returned
+/// as usual and no registration takes place.
+/// Additionally, if the existing data has a different md5, the new md5 is added as
+/// "conflicting_md5" to the returned data
+///
 pub(crate) async fn import<'a,T>(filename:T) -> crate::tools::Result<Option<db::Entry>> where T:Into<&'a Path>
 {
 	let mut checksum = md5::Context::new();
 	let filename:&Path = filename.into();
 	let context = format!("creating file info for {}",filename.to_string_lossy());
 	let obj = read_file(filename,Some(&mut checksum)).await?;
-	let fileinfo = db::File::from_unowned(filename,checksum.compute())
+	let checksum = checksum.compute();
+	let fileinfo = db::File::from_unowned(filename,checksum)
 		.map_err(crate::tools::Error::from)
 		.and_then(sql::Object::try_from)
 		.context(context)?;
 
-	db::register_instance(&obj,vec![("file",fileinfo.into())],None).await
+	let mut reg=db::register_instance(&obj,vec![("file",fileinfo.into())],None).await;
+	if let Ok(Some(existing)) = &mut reg
+	{
+		let my_md5 = format!("{:x}",checksum);
+		if existing.get_file().unwrap().get_md5() != my_md5.as_str(){
+			existing.insert("conflicting_md5",my_md5);
+		}
+	}
+	reg
 }
