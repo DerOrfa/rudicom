@@ -28,7 +28,7 @@ async fn remove_instance(id:Thing) -> Result<Option<db::Entry>>
 		let removed = db::Entry::try_from(res)?;
 		let file = removed.get_file()?;
 		if file.owned {
-			let mut path = file.into_path();
+			let mut path = file.get_path();
 			remove_file(&path).await?;
 			if path.pop(){// if there is a parent path, try to delete it as far as possible
 				let storage_path:PathBuf = crate::config::get("storage_path").expect(r#"Failed to get "storage_path""#);

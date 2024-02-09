@@ -1,10 +1,10 @@
 use std::path::Path;
 use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::dcm::gen_filepath;
-use crate::storage::async_store::{read_file, write};
+use crate::storage::async_store::{read, write};
 use crate::tools::complete_filepath;
 use crate::db;
 use crate::db::RegistryGuard;
@@ -45,7 +45,9 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 /// None otherwise
 pub(crate) async fn store_file<'a,T>(filename:T) -> crate::tools::Result<Option<db::Entry>> where T:Into<&'a Path>
 {
-	store(read_file(filename,None).await?).await
+	let mut buffer = Vec::<u8>::new();
+	File::open(filename.into()).await?.read_to_end(&mut buffer).await?;
+	store(read(buffer)?).await
 }
 
 /// registers an existing file without storing (data won't be changed)
@@ -53,20 +55,18 @@ pub(crate) async fn store_file<'a,T>(filename:T) -> crate::tools::Result<Option<
 /// as usual and no registration takes place.
 /// Additionally, if the existing data has a different md5, the new md5 is added as
 /// "conflicting_md5" to the returned data
-///
 pub(crate) async fn import<'a,T>(filename:T) -> crate::tools::Result<Option<db::Entry>> where T:Into<&'a Path>
 {
-	let mut checksum = md5::Context::new();
 	let filename:&Path = filename.into();
-	let context = format!("creating file info for {}",filename.to_string_lossy());
-	let obj = read_file(filename,Some(&mut checksum)).await?;
-	let checksum = checksum.compute();
+	let mut buffer = Vec::<u8>::new();
+	File::open(filename).await?.read_to_end(&mut buffer).await?;
+	let checksum= md5::compute(buffer);
 	let fileinfo = db::File::from_unowned(filename,checksum)
-		.map_err(crate::tools::Error::from)
-		.and_then(sql::Object::try_from)
-		.context(context)?;
-
-	let mut reg=db::register_instance(&obj,vec![("file",fileinfo.into())],None).await;
+		.context(format!("creating file info for {}",filename.to_string_lossy()))?;
+	let obj= fileinfo.read().await?;
+	let mut reg=db::register_instance(&obj,vec![
+		("file",sql::Object::try_from(fileinfo)?.into())
+	],None).await;
 	if let Ok(Some(existing)) = &mut reg
 	{
 		let my_md5 = format!("{:x}",checksum);

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
 pub use remove::remove;
-use crate::{db, storage};
+use crate::db;
 pub use error::{Error, Result, Context, Source};
 use crate::tools::Error::DicomError;
 
@@ -49,15 +49,12 @@ pub fn complete_filepath<P>(path:&P) -> PathBuf where P:AsRef<Path>
 }
 pub async fn get_instance_dicom(id:&str) -> Result<Option<DefaultDicomObject>>
 {
-	if let Some(file)=lookup_instance_file(id).await.map_err(|e|e.context(format!("looking up fileinfo for {id}")))?
+	match lookup_instance_file(id).await
 	{
-		let path = file.get_path();
-		let checksum=file.get_md5();
-		let mut md5=md5::Context::new();
-		let obj=storage::async_store::read_file(&path,Some(&mut md5)).await?;
-		if format!("{:x}", md5.compute()) == checksum{Ok(Some(obj))}
-		else {Err(Error::ChecksumErr{checksum:checksum.into(),file:path.to_string_lossy().into()})}
-	} else { Ok(None) }
+		Ok(Some(file)) => Some(file.read().await).transpose(),
+		Ok(None) => Ok(None),
+		Err(e) => Err(e.context(format!("looking up fileinfo for {id}")))
+	}
 }
 pub(crate) async fn lookup_instance_file(id:&str) -> Result<Option<db::File>>
 {
@@ -71,13 +68,6 @@ pub(crate) async fn lookup_instance_file(id:&str) -> Result<Option<db::File>>
 	} else {
 		Ok(None)
 	}
-}
-
-pub async fn lookup_instance_filepath(id:&str) -> Result<Option<PathBuf>>
-{
-	lookup_instance_file(id).await
-		.map_err(|e|e.context(format!("looking up fileinfo for {id} failed")))
-		.map(|f|f.map(db::File::into_path))
 }
 
 pub async fn instances_for_entry(id:sql::Thing) -> Result<Vec<sql::Thing>>

@@ -14,7 +14,7 @@ use dicom_pixeldata::PixelDecoder;
 use crate::db::File;
 use crate::server::http_error::{HttpError, JsonError, TextError};
 use crate::storage::async_store;
-use crate::tools::{get_instance_dicom, lookup_instance_filepath, remove};
+use crate::tools::{get_instance_dicom, lookup_instance_file, remove};
 use crate::tools::store::store;
 use crate::tools::verify::verify_entry;
 use crate::tools::{Context,Error::DicomError};
@@ -48,7 +48,7 @@ async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<File>>,JsonE
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
 	let bytes = payload.map_err(|e|HttpError::BadRequest {message:format!("failed to receive data {e}")})?;
 	if bytes.is_empty(){return Err(HttpError::BadRequest {message:"Ignoring empty upload".into()}.into())}
-	let obj= async_store::read(bytes,None)?;
+	let obj= async_store::read(bytes)?;
 	match store(obj).await? {
 		None => Ok((
 			StatusCode::CREATED,
@@ -70,9 +70,9 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 }
 
 async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> {
-	if let Some(path)=lookup_instance_filepath(id.as_str()).await.context("looking up filepath")?
+	if let Some(file)=lookup_instance_file(id.as_str()).await.context("looking up fileinfo")?
 	{
-		let file= tokio::fs::File::open(&path).await?;
+		let file= tokio::fs::File::open(file.get_path()).await?;
 		let filename_for_header = format!(r#"attachment; filename="MR.{}.ima""#, id);
 		Ok((
 			StatusCode::OK,

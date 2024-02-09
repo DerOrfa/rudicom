@@ -1,9 +1,12 @@
 use std::io;
-use std::path::PathBuf;
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use dicom::object::{DefaultDicomObject, from_reader};
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use crate::tools;
 use surrealdb::sql;
+use tokio::io::AsyncReadExt;
 use crate::db::Entry;
 use crate::storage::async_store::compute_md5;
 use crate::tools::{Context, Error};
@@ -29,7 +32,7 @@ impl File {
     /// create file info for a not owned file
     /// - the file must exist
     /// - the path will be canonicalized
-    pub(crate) fn from_unowned<T>(path:T, md5:md5::Digest) -> io::Result<File> where T:Into<PathBuf>
+    pub(crate) fn from_unowned<'a,T>(path:T, md5:md5::Digest) -> io::Result<File> where T:Into<&'a Path>
     {
         let path=Into::into(path).canonicalize()?;
         Ok(File{path,owned:true,md5:format!("{:x}", md5)})
@@ -45,13 +48,19 @@ impl File {
     }
     pub(crate) fn get_md5(&self) -> &str { self.md5.as_str() }
 
-    /// get the complete path of the file
-    /// - attaches "storage_path" from the config if the file is owned and the path is relative
-    /// - as non-owned files are guaranteed to be absolute already and "storage_path" is guaranteed to be absolute, the result is always guaranteed to be absolute
-    pub(crate) fn into_path(self) -> PathBuf
+    /// read the file stored at path, check its checksum and return it as dicom object
+    pub(crate) async fn read(&self) -> tools::Result<DefaultDicomObject>
     {
-        if self.owned { tools::complete_filepath(&self.path) }
-        else { self.path }
+        let mut buffer = Vec::<u8>::new();
+        tokio::fs::File::open(self.get_path().as_path()).await?.read_to_end(&mut buffer).await?;
+
+        let checksum = md5::compute(buffer.as_slice());
+        if format!("{:x}",checksum) != self.md5
+        {
+            let file = self.get_path().to_string_lossy().to_string();
+            return Err(Error::ChecksumErr {checksum:self.md5.clone(),file});
+        }
+        from_reader(Cursor::new(buffer)).map_err(|e|Error::DicomError(e.into()))
     }
 
     pub(crate) async fn verify(&self) -> crate::tools::Result<()>

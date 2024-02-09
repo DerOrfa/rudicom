@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::task::Poll;
 use dicom::object::{DefaultDicomObject, from_reader};
 use tokio::fs::File;
-use tokio::io::AsyncReadExt;
 use crate::tools::Error::DicomError;
 use crate::tools::{Context, Result};
 
@@ -30,14 +29,9 @@ impl tokio::io::AsyncWrite for AsyncMd5{
 	}
 }
 
-pub fn read<T>(input: T, with_md5:Option<&mut md5::Context>) -> Result<DefaultDicomObject> where T:AsRef<[u8]>
+pub fn read<T>(input: T) -> Result<DefaultDicomObject> where T:AsRef<[u8]>
 {
-	let mut buffer = Cursor::new(input);
-	if let Some( md5) = with_md5 {
-		std::io::copy(&mut buffer,md5).unwrap();
-		buffer.seek(SeekFrom::Start(0))?;
-	}
-	from_reader(buffer).map_err(|e|DicomError(e.into()))
+	from_reader(Cursor::new(input)).map_err(|e|DicomError(e.into()))
 }
 
 pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Result<Cursor<Vec<u8>>>{
@@ -54,14 +48,6 @@ pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Res
 	}
 	out.seek(SeekFrom::Start(0))?;
 	Ok(out)
-}
-
-pub async fn read_file<'a,T>(path:T,with_md5:Option<&mut md5::Context>) -> Result<DefaultDicomObject> where T:Into<&'a Path>
-{
-	let mut buffer = Vec::<u8>::new();
-	File::open(path.into()).await?.read_to_end(&mut buffer).await?;
-	if buffer.len()==0 {return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())}
-	read(buffer, with_md5)
 }
 
 pub async fn compute_md5(filename:&Path) -> Result<md5::Digest>

@@ -133,12 +133,12 @@ pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:
 			let register_msg = match item {
 				ImportResult::Registered { filename } => Ok(format!("{filename} stored")),
 				ImportResult::ExistedConflict { filename, existed, .. } => {
-					File::try_from(existed).map(File::into_path)
+					File::try_from(existed).map(|f|f.get_path())
 						.map(|p| format!("{filename} already existed as {} but checksum differs", p.to_string_lossy()))
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},
 				ImportResult::Existed { filename, existed } => {
-					File::try_from(existed).map(File::into_path)
+					File::try_from(existed).map(|f|f.get_path())
 						.map(|p| format!("{filename} already existed as {}", p.to_string_lossy()))
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},

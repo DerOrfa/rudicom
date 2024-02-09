@@ -136,7 +136,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             let files:Vec<_> = instances.iter_mut()
                 .filter_map(|v|v.remove("file"))
                 .filter_map(|f|db::File::try_from(f).ok())
-                .map(File::into_path)
+                .map(|f|f.get_path())
                 .collect();
 
             let path = reduce_path(files);
@@ -165,7 +165,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             // makes PathBuf of them
             let files:Vec<_>=files.into_iter()
             	.filter_map(|v|File::try_from(v).ok())
-                .map(File::into_path)
+                .map(|f|f.get_path())
             	.collect();
             // reduce them and print them @todo this is very expensive, maybe find a better way
             let common_path= reduce_path(files);
