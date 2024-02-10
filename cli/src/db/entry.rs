@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use surrealdb::sql;
 use crate::db;
-use crate::tools::transform;
+use crate::tools::{reduce_path, transform};
 use crate::tools::{Result,Context};
 use self::Entry::{Instance, Series, Study};
 
@@ -72,14 +72,26 @@ impl Entry
 	{
 		db::File::try_from(self.clone())
 	}
-	pub fn get_path(&self) -> Result<PathBuf>
+	pub async fn get_path(&self) -> Result<PathBuf>
 	{
-		match self {
-			Instance(_) =>
-				self.get_file().map(|f|f.get_path().to_path_buf()),
-			Series(_) => {todo!()}
-			Study(_) => {todo!()}
+		if let Instance(_) = self{
+			return self.get_file().map(|f|f.get_path().to_path_buf())
 		}
+		let files =match self {
+			Series((id,_)) => db::list_values(&id, "instances.file",true).await
+				.context(format!("listing files in series {id}")),
+
+			Study((id,_)) => db::list_values(&id, "series.instances.file",true).await
+				.context(format!("listing files in study {id}")),
+			_ => unreachable!("Instance variant should be handled above"),
+		};
+		// makes PathBuf of them
+		let files:Result<Vec<_>>=files?.into_iter()
+			.map(|v|db::File::try_from(v).map(|f|f.get_path()))
+			.map(|v|v.context(format!("collecting paths from {}",self.id())))
+			.collect();
+		files.map(reduce_path)
+
 	}
 }
 
