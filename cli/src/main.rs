@@ -5,72 +5,16 @@ mod dcm;
 mod tools;
 mod server;
 mod config;
+mod cli;
 
-use std::path::PathBuf;
 use futures::StreamExt;
-use clap::ValueHint::Hostname;
-
-use clap::{Args, Parser, Subcommand};
 use tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
 use crate::tools::Context;
 
-#[cfg(feature = "embedded")]
-use clap::ValueHint::DirPath;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
-
-#[derive(Args,Debug)]
-#[group(required = true, multiple = false)]
-struct Endpoint{
-    /// hostname of the database
-    #[arg(long, value_hint = Hostname)]
-    database: Option<String>,
-    /// filename for the local database
-    #[cfg(feature = "embedded")]
-    #[arg(long, value_hint = DirPath)]
-    file:Option<PathBuf>
-}
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-    /// config file
-    #[arg(long)]
-    config: Option<PathBuf>,
-    #[command(flatten)]
-    endpoint: Endpoint
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// writing the default config out into the given file
-    WriteConfig {
-        file:PathBuf
-    },
-    /// run the server
-    Server {
-        /// ip and port to listen on
-        #[arg(default_value = "127.0.0.1:3000")]
-        address: String,
-    },
-    /// import (big chunks of) data from the filesystem
-    Import {
-        /// report on already existing files
-        #[arg(short,long,default_value_t=false)]
-        existing:bool,
-        /// report on imported files
-        #[arg(short,long,default_value_t=false)]
-        imported:bool,
-        /// file or globbing to import
-        pattern: String,
-    },
-}
 
 #[tokio::main]
 async fn main() -> tools::Result<()>
@@ -78,14 +22,7 @@ async fn main() -> tools::Result<()>
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "rudicom=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
-    let args = Cli::parse();
+    let args = cli::parse();
     config::init(args.config)?;
     if let Some(database) = args.endpoint.database{
         db::init_remote(database.as_str()).await
@@ -106,11 +43,11 @@ async fn main() -> tools::Result<()>
     }
 
     match args.command {
-        Commands::Server{address} => {
+        cli::Commands::Server{address} => {
             let bound = TcpListener::bind(address).await?;
             server::serve(bound).await?;
         }
-        Commands::Import{ existing, imported, pattern } => {
+        cli::Commands::Import{ existing, imported, pattern } => {
             let stream=import_glob_as_text(pattern,imported,existing)?;
             //filter doesn't do unpin, so we have to nail it down here
             let mut stream=Box::pin(stream);
@@ -121,7 +58,7 @@ async fn main() -> tools::Result<()>
                 }
             }
         }
-        Commands::WriteConfig { file } => {
+        cli::Commands::WriteConfig { file } => {
             config::write(file)?
         }
     }

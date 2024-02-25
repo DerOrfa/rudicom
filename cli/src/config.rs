@@ -5,19 +5,7 @@ use serde::Deserialize;
 
 static CONFIG:OnceLock<Config> = OnceLock::new();
 
-static CONFIG_STR:&str = r#"
-study_tags = ["StudyDescription", "OperatorsName", "ManufacturerModelName"] #PatientID, StudyTime and StudyDate will always be there they are needed internally
-series_tags = ["SequenceName", "SeriesDate", "SeriesTime", "ProtocolName"] #SeriesDescription and SeriesNumber will always be there they are needed internally
-instance_tags = ["InstanceCreationDate", "InstanceCreationTime"] # InstanceNumber will always be there as its needed internally
-
-upload_sizelimit_mb = 10
-
-#use dicom tag names in "{}" to generate file names (obviously those should be unique)
-#tag names can be followed by ":<" or ":>" and a number where resulting string will be cropped to the given size by
-#removing caracters from the right or left respectively
-filename_pattern = "{PatientID}/{StudyDate:>6}_{StudyTime:<6}/S{SeriesNumber}_{SeriesDescription}/Mr.{SOPInstanceUID}.ima"
-storage_path = "/tmp/db/store" #will be used if filename_pattern does not result in an absolute path
-"#;
+static CONFIG_STR:&str = include_str!("config.rs");
 
 pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	let mut builder = Config::builder()

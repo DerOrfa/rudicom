@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::PathBuf;
 use tokio::task::JoinError;
 use futures::{Stream, TryStreamExt, StreamExt};
 use glob::glob;
@@ -54,10 +54,11 @@ impl Serialize for ImportResult
 	}
 }
 
-async fn import_file<T>(path:T) -> ImportResult where T:AsRef<Path>
+async fn import_file<T>(path:T) -> ImportResult where T:Into<PathBuf>
 {
-	let filename= path.as_ref().to_string_lossy().to_string();
-	match import(path.as_ref()).await
+	let path= path.into();
+	let filename = path.to_string_lossy().to_string();
+	match import(path.as_path()).await
 	{
 		Ok(v) => match v {
 			None => ImportResult::Registered{ filename },
