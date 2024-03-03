@@ -19,7 +19,7 @@ dhat-heap = ["dhat"]
 dicom = {version = ">0.6.1", features = ["pixeldata"] }
 dicom-pixeldata = { version = "0.2", features = ["image"] }
 dicom-json = { version = "0.1", optional = true }
-clap = { version = "4.5", features = ["derive","color","usage"] }
+clap = { version = "4.5", features = ["derive","color","usage","string"] }
 serde_json = "1.0"
 surrealdb = {version = "1.2", features = ["protocol-ws"]}
 serde = "1.0"

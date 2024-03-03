@@ -24,7 +24,8 @@ impl ValueEnum for LogLevel
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
-		Some(PossibleValue::new(self.0.as_str()))
+		let alias= self.0.to_string().to_lowercase();
+		Some(PossibleValue::new(self.0.as_str()).alias(alias))
 	}
 }
 
@@ -51,7 +52,7 @@ pub(super) struct Cli {
 	#[command(flatten)]
 	pub(super) endpoint: Endpoint,
 	/// logging level
-	#[arg(long, default_value="warning")]
+	#[arg(long, default_value = Level::WARN.as_str())]
 	pub(super) log_level:LogLevel
 }
 
@@ -70,13 +71,13 @@ pub(crate) enum Commands {
 	/// import (big chunks of) data from the filesystem
 	Import {
 		/// report on already existing files
-		#[arg(short,long,default_value_t=false)]
+		#[arg(long,default_value_t=false)]
 		echo_existing:bool,
 		/// report on imported files
-		#[arg(short,long,default_value_t=false)]
+		#[arg(long,default_value_t=false)]
 		echo_imported:bool,
 		/// instead of importing the files, copy them over (possibly with anonymization) 
-		#[arg(short,long,default_value_t=false)]
+		#[arg(long,default_value_t=false)]
 		store:bool,
 		/// file or globbing to import
 		pattern: String,
