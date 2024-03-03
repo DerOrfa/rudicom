@@ -135,7 +135,7 @@ pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
 pub async fn init_local(file:&std::path::Path) -> surrealdb::Result<()>
 {
 	let file = file.to_str().expect(format!(r#""{}" is an invalid filename"#,file.to_string_lossy()).as_str());
-	let file = format!("file://{file}");
+	let file = format!("speedb://{file}");
 	db().connect(file).await?;
 	init().await
 }
