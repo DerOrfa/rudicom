@@ -71,10 +71,13 @@ pub(crate) enum Commands {
 	Import {
 		/// report on already existing files
 		#[arg(short,long,default_value_t=false)]
-		existing:bool,
+		echo_existing:bool,
 		/// report on imported files
 		#[arg(short,long,default_value_t=false)]
-		imported:bool,
+		echo_imported:bool,
+		/// instead of importing the files, copy them over (possibly with anonymization) 
+		#[arg(short,long,default_value_t=false)]
+		store:bool,
 		/// file or globbing to import
 		pattern: String,
 	},

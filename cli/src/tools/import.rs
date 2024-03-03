@@ -3,18 +3,28 @@ use tokio::task::JoinError;
 use futures::{Stream, TryStreamExt, StreamExt};
 use glob::glob;
 use itertools::Itertools;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use crate::db::{Entry, File};
 use crate::tools::Error;
-use crate::tools::store::import;
 
 pub(crate) enum ImportResult {
 	Registered{filename:String},
 	Existed{filename:String,existed:Entry},
 	ExistedConflict {filename:String,my_md5:String,existed:Entry},
-	Err{filename:String,error:Error}
+	Err{filename:String,error:Error},
+	GlobError(glob::GlobError)
 }
+#[derive(Deserialize)]
+pub(crate) struct ImportConfig {
+	#[serde(default)]
+	pub(crate) echo_imported:bool,
+	#[serde(default)]
+	pub(crate) echo_existing:bool,
+	#[serde(default)]
+	pub(crate) store:bool
+}
+
 
 impl Serialize for ImportResult
 {
@@ -49,16 +59,25 @@ impl Serialize for ImportResult
 					s.serialize_field("causation",&chain)?;
 				}
 				s.end()
+			},
+			ImportResult::GlobError(error) => {
+				let mut s=s.serialize_struct("failed",2)?;
+				s.serialize_field("path",error.path())?;
+				s.serialize_field("error", error.to_string().as_str())?;
+				s.end()
 			}
 		}
 	}
 }
 
-async fn import_file<T>(path:T) -> ImportResult where T:Into<PathBuf>
+async fn import_file<T>(path:T, store:bool) -> ImportResult where T:Into<PathBuf>
 {
 	let path= path.into();
 	let filename = path.to_string_lossy().to_string();
-	match import(path.as_path()).await
+	let import = 
+		if store {crate::tools::store::store_file(path.as_path()).await} 
+		else {crate::tools::store::import_file(path.as_path()).await}; 
+	match import
 	{
 		Ok(v) => match v {
 			None => ImportResult::Registered{ filename },
@@ -73,7 +92,7 @@ async fn import_file<T>(path:T) -> ImportResult where T:Into<PathBuf>
 		},
 		Err(e) => {
 			ImportResult::Err{
-				error:e.context(format!("registering {} failed",path.as_ref().to_string_lossy())),
+				error:e.context(format!("registering {} failed",filename)),
 				filename
 			}
 		}
@@ -81,55 +100,50 @@ async fn import_file<T>(path:T) -> ImportResult where T:Into<PathBuf>
 }
 
 
-pub(crate) fn import_glob<T>(pattern:T, report_registered:bool,report_existing:bool) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
+pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
 {
 	let mut tasks=tokio::task::JoinSet::new();
-	let mut files= glob(pattern.as_ref())
-		.map_err(|e|Error::GlobbingError{pattern:pattern.as_ref().to_string(),err:e})?
-		.filter_map(|f|
-			if let Ok(f)=f{
-				if f.is_file(){Some(f)} else {None}
-			} else {None}
-		);
+	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
+		if p.is_file() {Some(p)} else {None}
+	);
 
 	//pre-fill first 10 register tasks so there will always be some tasks that can do stuff
 	//also if there is not at least one file, it's probably a good idea to return an error
-	if let Some(file)=files.next(){
-		tasks.spawn(import_file(file));
+	if let Some(file)=files.next().transpose()?{
+		tasks.spawn(import_file(file,config.store));
 	} else {
 		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
 	}
-	for _ in 1..9{
-		files.next().map(|nextfile|
-			tasks.spawn(import_file(nextfile)));
-	}
 	// make a stream that polls tasks and feeds new ones
 	let stream=futures::stream::poll_fn(move |c|{
-		let p=tasks.poll_join_next(c);
-		if p.is_ready() {//if a task finished
-			// spawn a new one, if there are still files in the globber
-			files.next().map(|nextfile|
-				tasks.spawn(import_file(nextfile)));
+		// re-fill tasks with up to 10 files
+		while let Some(nextfile) = files.next(){
+			tasks.spawn(async move {
+				match nextfile
+				{
+					Ok(p) => import_file(p,config.store).await,
+					Err(e) => ImportResult::GlobError(e.into())
+				}
+			});
+			if tasks.len() > 10 {break}		
 		}
-		p // then just send the Poll along for the stream to deal with
+		// pass on next finished import
+		tasks.poll_join_next(c)
 	});
 	let stream= stream.filter(move |item|{
-			let ret= if let Ok(stored) = item.to_owned() {
-				match stored {
-					ImportResult::Registered { .. } => report_registered,
-					ImportResult::ExistedConflict { .. } => true,
-					ImportResult::Existed { .. } => report_existing,
-					ImportResult::Err { .. } => true
-				}
-			} else {true};
+			let ret =	match item.to_owned() {
+				Ok(ImportResult::Registered { .. }) => config.echo_imported,
+				Ok(ImportResult::Existed { .. }) => config.echo_existing,
+				_ => true
+			};
 			async move {ret}
 		});
 	Ok(stream)
 }
 
-pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:bool) -> crate::tools::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
+pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig) -> crate::tools::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
 {
-	Ok(import_glob(pattern,report_registered,report_existing)?
+	Ok(import_glob(pattern,config)?
 		.map_ok(|item| {
 			let register_msg = match item {
 				ImportResult::Registered { filename } => Ok(format!("{filename} stored")),
@@ -146,6 +160,7 @@ pub fn import_glob_as_text<T>(pattern:T, report_registered:bool,report_existing:
 				ImportResult::Err { filename, error } => {
 					Err(error.context(format!("Importing {filename} failed")))
 				}
+				ImportResult::GlobError(e) => Err(e.into())
 			};
 			register_msg.unwrap_or_else(|e|
 				String::from("E:")+e.sources().join("\nE:>").as_str()

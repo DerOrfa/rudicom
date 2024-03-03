@@ -1,5 +1,6 @@
 use surrealdb::sql;
 use thiserror::Error;
+use glob::{GlobError,PatternError};
 
 #[derive(Error,Debug)]
 pub enum DicomError
@@ -73,9 +74,10 @@ pub enum Error
 	IdNotFound{id:sql::Thing},
 	#[error("checksum {checksum} for {file} doesn't fit")]
 	ChecksumErr{checksum:String,file:String},
-	#[error("Invalid globbing pattern {pattern}:({err})")]
-	GlobbingError{pattern:String,err:glob::PatternError}
-
+	#[error("Globbing pattern error {0}")]
+	GlobPatternError(#[from]PatternError),
+	#[error("Globbing error {0}")]
+	GlobbingError(#[from]GlobError),
 }
 
 impl Error {

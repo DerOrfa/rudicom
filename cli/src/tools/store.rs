@@ -55,7 +55,7 @@ pub(crate) async fn store_file<'a,T>(filename:T) -> crate::tools::Result<Option<
 /// as usual and no registration takes place.
 /// Additionally, if the existing data has a different md5, the new md5 is added as
 /// "conflicting_md5" to the returned data
-pub(crate) async fn import<'a,T>(filename:T) -> crate::tools::Result<Option<db::Entry>> where T:Into<&'a Path>
+pub(crate) async fn import_file<'a,T>(filename:T) -> crate::tools::Result<Option<db::Entry>> where T:Into<&'a Path>
 {
 	let filename:&Path = filename.into();
 	let mut buffer = Vec::<u8>::new();

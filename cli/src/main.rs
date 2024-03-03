@@ -11,6 +11,7 @@ use futures::StreamExt;
 use tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
 use crate::tools::Context;
+use crate::tools::import::ImportConfig;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -36,10 +37,13 @@ async fn main() -> tools::Result<()>
                 .context(format!("Failed opening {}", file.to_string_lossy()))?;
         } else {
             println!("No database backend, go away..");
-            return Ok(());
+            panic!("No database backend");
         }
         #[cfg(not(feature = "embedded"))]
-        {println!("No database backend, go away..");return Ok(());}
+        {
+            eprintln!("No database backend, go away..");
+            panic!("No database backend");
+        }
     }
 
     match args.command {
@@ -47,8 +51,10 @@ async fn main() -> tools::Result<()>
             let bound = TcpListener::bind(address).await?;
             server::serve(bound).await?;
         }
-        cli::Commands::Import{ existing, imported, pattern } => {
-            let stream=import_glob_as_text(pattern,imported,existing)?;
+        cli::Commands::Import{ echo_existing, echo_imported, store, pattern } => 
+        {
+            let config = ImportConfig{echo_imported, echo_existing, store };
+            let stream=import_glob_as_text(pattern,config)?;
             //filter doesn't do unpin, so we have to nail it down here
             let mut stream=Box::pin(stream);
             while let Some(result)=stream.next().await {
