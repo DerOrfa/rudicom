@@ -2,7 +2,7 @@
 name = "rudicom"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70.0"
+rust-version = "1.75.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -19,13 +19,13 @@ dhat-heap = ["dhat"]
 dicom = {version = ">0.6.1", features = ["pixeldata"] }
 dicom-pixeldata = { version = "0.2", features = ["image"] }
 dicom-json = { version = "0.1", optional = true }
-clap = { version = "4.4", features = ["derive","color","usage"] }
+clap = { version = "4.5", features = ["derive","color","usage"] }
 serde_json = "1.0"
-surrealdb = {version = "1.0", features = ["protocol-ws"]}
+surrealdb = {version = "1.2", features = ["protocol-ws"]}
 serde = "1.0"
 tokio = { version = "1.35", features = ["signal", "macros", "rt-multi-thread", "fs"] }
 glob = "0.3"
-config = {version = "0.13", default-features = false, features = ["toml"]}
+config = {version = "0.14", default-features = false, features = ["toml"]}
 md5 = "0.7"
 strfmt = "0.2.4"
 axum = {version = "0.7", features = ["tracing","query"]}
