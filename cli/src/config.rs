@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 static CONFIG:OnceLock<Config> = OnceLock::new();
 
-static CONFIG_STR:&str = include_str!("config.rs");
+static CONFIG_STR:&str = include_str!("config.toml");
 
 pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	let mut builder = Config::builder()

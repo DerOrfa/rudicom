@@ -74,7 +74,7 @@ pub(crate) enum Commands {
 		#[arg(long,default_value_t=false)]
 		echo_existing:bool,
 		/// report on imported files
-		#[arg(long,default_value_t=false)]
+		#[arg(long="echo",default_value_t=false)]
 		echo_imported:bool,
 		/// instead of importing the files, copy them over (possibly with anonymization) 
 		#[arg(long,default_value_t=false)]

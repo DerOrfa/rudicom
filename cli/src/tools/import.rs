@@ -90,12 +90,7 @@ async fn import_file<T>(path:T, store:bool) -> ImportResult where T:Into<PathBuf
 				} else {ImportResult::Existed { filename, existed }}
 			},
 		},
-		Err(e) => {
-			ImportResult::Err{
-				error:e.context(format!("registering {} failed",filename)),
-				filename
-			}
-		}
+		Err(e) => ImportResult::Err{error:e,filename}
 	}
 }
 
@@ -146,7 +141,7 @@ pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig) -> crate::tools::R
 	Ok(import_glob(pattern,config)?
 		.map_ok(|item| {
 			let register_msg = match item {
-				ImportResult::Registered { filename } => Ok(format!("{filename} stored")),
+				ImportResult::Registered { filename } => Ok(filename),
 				ImportResult::ExistedConflict { filename, existed, .. } => {
 					File::try_from(existed).map(|f|f.get_path())
 						.map(|p| format!("{filename} already existed as {} but checksum differs", p.to_string_lossy()))
@@ -158,7 +153,7 @@ pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig) -> crate::tools::R
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},
 				ImportResult::Err { filename, error } => {
-					Err(error.context(format!("Importing {filename} failed")))
+					Err(error.context(format!("importing {filename}")))
 				}
 				ImportResult::GlobError(e) => Err(e.into())
 			};

@@ -56,11 +56,11 @@ fn format_filepath(mut f:strfmt::Formatter, obj:&DefaultDicomObject) -> strfmt::
 	let key = find_tag(f.key).ok_or(FmtError::KeyError(format!(r#"Tag "{}" is not known"#,f.key)))?;
 	let val = obj.element_opt(key).unwrap();
 	if val.is_none(){
-		return f.write_str("<<none>>").map_err(|e|FmtError::Invalid(e.to_string()))
+		return f.write_str("__none__").map_err(|e|FmtError::Invalid(e.to_string()))
 	}
 	let val = val.unwrap();
 	if val.is_empty(){
-		return f.write_str("<<empty>>").map_err(|e|FmtError::Invalid(e.to_string()))
+		return f.write_str("__empty__").map_err(|e|FmtError::Invalid(e.to_string()))
 	}
 	let val=val.to_str().map_err(|e|FmtError::Invalid(e.to_string()))?;
 	let mut val=val.deref();
