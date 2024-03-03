@@ -101,9 +101,9 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
+	let max_threads = crate::config::get::<usize>("max_threads").unwrap_or(32);
 
-	//pre-fill first 10 register tasks so there will always be some tasks that can do stuff
-	//also if there is not at least one file, it's probably a good idea to return an error
+	//if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
 		tasks.spawn(import_file(file,config.store));
 	} else {
@@ -113,6 +113,7 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 	let stream=futures::stream::poll_fn(move |c|{
 		// re-fill tasks with up to 10 files
 		while let Some(nextfile) = files.next(){
+			if tasks.len() >= max_threads {break}
 			tasks.spawn(async move {
 				match nextfile
 				{
@@ -120,7 +121,6 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 					Err(e) => ImportResult::GlobError(e.into())
 				}
 			});
-			if tasks.len() > 10 {break}		
 		}
 		// pass on next finished import
 		tasks.poll_join_next(c)
