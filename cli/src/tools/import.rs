@@ -18,7 +18,7 @@ pub(crate) enum ImportResult {
 #[derive(Deserialize)]
 pub(crate) struct ImportConfig {
 	#[serde(default)]
-	pub(crate) echo_imported:bool,
+	pub(crate) echo:bool,
 	#[serde(default)]
 	pub(crate) echo_existing:bool,
 	#[serde(default)]
@@ -127,7 +127,7 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 	});
 	let stream= stream.filter(move |item|{
 			let ret =	match item.to_owned() {
-				Ok(ImportResult::Registered { .. }) => config.echo_imported,
+				Ok(ImportResult::Registered { .. }) => config.echo,
 				Ok(ImportResult::Existed { .. }) => config.echo_existing,
 				_ => true
 			};

@@ -3,12 +3,16 @@
     rudicom --database "ws://localhost:8000"  server
 or (only with feature `embedded`)
 
-    rudicom --database "file:///file.db"  server 
+    rudicom --file /tmp/db server 
 
 
-# rest interface
-## import
+# import
 
-    http post http://localhost:3000/tools/import/{text,json}?registered=true&existing=true <glob>
-- `registered` generate output for successfully registered files (default:false)
-- `existing` generate output for already existing (and thus ignored) files (default:false)
+## offline
+    rudicom --file /tmp/db import "<glob>"
+
+## REST
+    curl http://localhost:3000/tools/import/{text,json}[?<parameters>] -d"<glob>"
+- `echo` generate output for successfully registered or stored files (default:false)
+- `echo_existing` generate output for already existing (and thus ignored) files (default:false)
+- `store` store (aka copy files into storage) instead of just importing the existing files

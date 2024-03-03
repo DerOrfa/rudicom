@@ -53,7 +53,7 @@ async fn main() -> tools::Result<()>
         }
         cli::Commands::Import{ echo_existing, echo_imported, store, pattern } => 
         {
-            let config = ImportConfig{echo_imported, echo_existing, store };
+            let config = ImportConfig{ echo: echo_imported, echo_existing, store };
             let stream=import_glob_as_text(pattern,config)?;
             //filter doesn't do unpin, so we have to nail it down here
             let mut stream=Box::pin(stream);
