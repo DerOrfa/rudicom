@@ -49,6 +49,11 @@ pub enum Error
 		source:Box<Error>,
 		context:String
 	},
+	#[error("{error}")]
+	StringError{
+		source:Box<Error>,
+		error:String
+	},
 	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
 	UnexpectedResult{
 		expected: String,
@@ -83,7 +88,18 @@ pub enum Error
 impl Error {
 	pub(crate) fn context<T>(self, context:T) -> Error where String:From<T>
 	{
-		Error::Context {source:Box::new(self),context:context.into()}
+		let context= String::from(context);
+		let inner = match self { // if it is context already don't context the context
+			Error::Context { source, context:inner_context } => 
+			{
+				Error::StringError {
+					error: inner_context,
+					source
+				}
+			},
+			_ => self
+		};
+		Error::Context {source:Box::new(inner),context:context.into()}
 	}
 	pub(crate) fn context_from<E,T>(error:E,context:T) -> Error where String:From<T>, Error:From<E>
 	{
