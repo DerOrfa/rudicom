@@ -150,42 +150,7 @@ pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 async fn init() -> surrealdb::Result<()>{
 	// Select a specific namespace / database
 	db().use_ns("namespace").use_db("database").await?;
-
-	db().query(r#"
-	define event add_instance on table instances when $event = "CREATE"	then
-	(
-		update $after.series set instances += $after.id return none
-	)
-	"#).await?;
-	db().query(r#"
-	define event add_series on table series when $event = "CREATE" then
-	(
-		update $after.study set series += $after.id return none
-	)
-	"#).await?;
-
-	db().query(r#"
-	define event del_instance on table instances when $event = "DELETE" then
-	(
-		if array::len($before.series.instances)>1
-		then
-			update $before.series set instances -= $before.id return none
-		else
-			delete $before.series
-		end
-	)
-	"#).await?;
-	db().query(r#"
-	define event del_series on table series when $event = "DELETE" then
-	(
-		if array::len($before.study.series)>1
-		then
-			update $before.study set series -= $before.id return none
-		else
-			delete $before.study
-		end
-	)
-	"#).await?;
+	db().query(include_str!("init.surreal")).await?;
 	Ok(())
 }
 
