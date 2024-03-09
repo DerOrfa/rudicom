@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display, Formatter};
 use surrealdb::sql;
 use thiserror::Error;
 use glob::{GlobError,PatternError};
@@ -15,6 +16,61 @@ pub enum DicomError
 	DicomWriteError(#[from] dicom::object::WriteError),
 	#[error("error decoding pixel data ({0})")]
 	DicomPixelError(#[from] dicom_pixeldata::Error)
+}
+
+#[derive(Debug)]
+pub struct ErrorContext
+{
+	error:Box<Error>,
+	context:String
+}
+
+impl ErrorContext{
+	pub fn new<T>(error: Error,context:T) -> ErrorContext where String:From<T>
+	{
+		ErrorContext{ error:Box::new(error),context:String::from(context)}
+	}
+	fn inner_context(&self) -> Option<&ErrorContext>
+	{
+		match self.error.as_ref(){
+			Error::Context(c) => Some(c),
+			_ => None
+		}
+	}
+	/// get the first inner error that is no context
+	fn cause(&self) ->  &Error
+	{
+		let error = self.error.as_ref();
+		match error { 
+			Error::Context(c) => c.cause(),
+			_ => error
+		}
+	}
+}
+
+impl Display for ErrorContext {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		// cause() will make sure we actually grab a base error, not just another context
+		// if the inner error actually is a context it will show up as source (and its fmt() will have the same cause)
+		write!(f,"{} when {}",self.cause(),self.context)
+	}
+}
+
+impl std::error::Error for ErrorContext
+{
+	/// either get the inner error if it is a context or its source if it isn't
+	/// 
+	/// inner errors that are
+	/// - are not contexts themselves are not considered "sources" and thus should be reported on together with the context
+	/// - are context are considered full sources and thus returned 
+	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> 
+	{
+		match self.inner_context() // if the inner error is a context too, 
+		{
+			Some(c) => Some(c), //return that
+			None => self.error.source(), //otherwise the inner error's source
+		}
+	}
 }
 
 #[derive(Error,Debug)]
@@ -44,11 +100,9 @@ pub enum Error
 	#[error("{0}")]
 	DicomError(#[from] DicomError),
 
-	#[error("{source} when {context}")]
-	Context{
-		source:Box<Error>,
-		context:String
-	},
+	#[error(transparent)] // we use our own impl Display above
+	Context(#[from]ErrorContext),
+	
 	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
 	UnexpectedResult{
 		expected: String,
@@ -83,7 +137,7 @@ pub enum Error
 impl Error {
 	pub(crate) fn context<T>(self, context:T) -> Error where String:From<T>
 	{
-		Error::Context {source:Box::new(self),context:context.into()}
+		ErrorContext::new(self,context).into()
 	}
 	pub(crate) fn context_from<E,T>(error:E,context:T) -> Error where String:From<T>, Error:From<E>
 	{
