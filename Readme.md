@@ -5,6 +5,13 @@ or (only with feature `embedded`)
 
     rudicom --file /tmp/db server 
 
+# html
+
+## studies
+    http://localhost:3000/studies/html[?<parameters>]
+- `sort_by=<field>` where `<field>` can be any column in the table
+- `sort_reverse=true` reverse sorting
+- `filter` simple substring filter for study name (first column)
 
 # import
 

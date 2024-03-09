@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
@@ -15,11 +16,15 @@ use crate::server::html::generators;
 use crate::server::http_error::TextError;
 
 #[derive(Deserialize)]
-pub(crate) struct StudyFilter {
-    filter: String,
+pub(crate) struct ListingConfig {
+    filter:Option<String>,
+    sort_by:Option<String>,
+    #[serde(default)]
+    sort_reverse:bool
 }
 
-pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Result<axum::response::Html<String>,TextError>
+
+pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
 {
     let keys=["StudyDate", "StudyTime"].into_iter().map(|s|s.to_string())
         .chain(crate::config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
@@ -27,10 +32,22 @@ pub(crate) async fn get_studies_html(filter: Option<Query<StudyFilter>>) -> Resu
         .collect();
 
     let mut studies = db::list_table("studies").await?;
-    if let Some(filter) = filter
+    if let Some(filter) = config.filter
     {
-        studies.retain(|e|e.name().find(filter.filter.as_str()).is_some());
+        studies.retain(|e|e.name().find(filter.as_str()).is_some());
     }
+    
+    if let Some(sortby) = config.sort_by
+    {
+        let sortby= sortby.as_str();
+        studies.sort_by(|e1,e2| 
+            match (e1.get(sortby),e2.get(sortby)) {
+                (Some(v1),Some(v2)) => if config.sort_reverse {v1.cmp(v2)} else {v2.cmp(v1)},
+                _ => Ordering::Equal
+            }
+        )
+    }
+    
 
     // count instances before as db::list_children cant be used in a closure / also parallelization
     let mut counts=JoinSet::new();
