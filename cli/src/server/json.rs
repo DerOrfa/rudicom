@@ -34,6 +34,7 @@ async fn get_entry(Path((table,id)):Path<(String, String)>) -> Result<Response,J
 async fn query(Path((table,id,query)):Path<(String, String, String)>) -> Result<Response,JsonError>
 {
 	let id = sql::Thing::from((table, id));
+	// @todo that lookup is only needed to trigger the NotFound
 	let e = db::lookup(&id).await?
 		.ok_or(Error::IdNotFound {id:id.clone()}).context(format!("Looking for {query} in {id}",))?;
 
@@ -56,7 +57,7 @@ async fn get_entry_parents(Path((table,id)):Path<(String, String)>) -> Result<Re
 			.ok_or(Error::NotFound)
 			.and_then(|r|r.map(serde_json::Value::from))
 			.context(format!("looking up parent {p_id} of {id}"))?;
-		ret.push(e);
+		ret.push(e);//@todo this results in split up id. Maybe fix that
 	}
 	Ok(Json(ret).into_response())
 }
