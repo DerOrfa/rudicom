@@ -111,18 +111,20 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 	}
 	// make a stream that polls tasks and feeds new ones
 	let stream=futures::stream::poll_fn(move |c|{
-		// re-fill tasks with up to 10 files
-		while let Some(nextfile) = files.next(){
-			if tasks.len() >= max_threads {break}
-			tasks.spawn(async move {
-				match nextfile
-				{
-					Ok(p) => import_file(p,config.store).await,
-					Err(e) => ImportResult::GlobError(e.into())
-				}
-			});
+		// fill task list up to max_threads 
+		while tasks.len() < max_threads
+		{
+			if let Some(nextfile) = files.next() {
+				tasks.spawn(async move {
+					match nextfile
+					{
+						Ok(p) => import_file(p, config.store).await,
+						Err(e) => ImportResult::GlobError(e.into())
+					}
+				});
+			} else {break} //as long as there are files  
 		}
-		// pass on next finished import
+		// pass on next finished import and thus drain the task list
 		tasks.poll_join_next(c)
 	});
 	let stream= stream.filter(move |item|{
