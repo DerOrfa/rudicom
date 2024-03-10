@@ -65,14 +65,14 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         let (k,v) = res??;
         instance_count.insert(k,v);
     }
-    let countinstances = |obj:&Entry,cell:&mut TableCellBuilder| {
+    let countinstances = move |obj:&Entry,cell:&mut TableCellBuilder| {
         let inst_cnt=instance_count[obj.id()];
         cell.text(inst_cnt.to_string());
     };
 
     let table= generators::table_from_objects(
         studies, "Study".to_string(), keys,
-        vec![("Instances",countinstances)]
+        vec![("Instances",Box::new(countinstances))]
     ).await.map_err(|e|e.context("Failed generating the table"))?;
 
     let mut builder = Body::builder();

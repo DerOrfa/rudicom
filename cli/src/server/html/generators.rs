@@ -5,7 +5,6 @@ use html::root::{Body, Html};
 use html::tables::builders::TableCellBuilder;
 use html::tables::{Table, TableCell, TableRow};
 use surrealdb::sql;
-use surrealdb::sql::Value;
 use crate::db;
 use crate::db::{Entry, File, find_down_tree, list_values};
 use crate::tools::reduce_path;
@@ -51,7 +50,7 @@ fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
             .table_cell(|c|c.text(k))
             .table_cell(|c| {
                 match v {
-                    Value::Object(o) => c.push(table_from_map(o.0)),
+                    sql::Value::Object(o) => c.push(table_from_map(o.0)),
                     _ => c.text(v.as_raw_string())
                 }
 
@@ -61,12 +60,12 @@ fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
     table_builder.build()
 }
 
-pub(crate) async fn table_from_objects<F>(
+pub(crate) async fn table_from_objects(
     objs:Vec<Entry>,
     id_name:String,
     keys:Vec<String>,
-    additional: Vec<(&str,F)>
-) -> Result<Table> where F:Fn(&Entry,&mut TableCellBuilder)
+    additional: Vec<(&str,Box<dyn Fn(&Entry,&mut TableCellBuilder) + Send>)>
+) -> Result<Table>
 {
     let addkeys:Vec<_> = additional.iter().map(|(k,_)|k.to_string()).collect();
 
@@ -152,7 +151,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
                 ));
             };
             let instance_text = format!("{} Instances",instances.len());
-            let instance_table = table_from_objects(instances, "Name".into(), keys, vec![("thumbnail",makethumb)]).await?;
+            let instance_table = table_from_objects(instances, "Name".into(), keys, vec![("thumbnail",Box::new(makethumb))]).await?;
             builder.heading_2(|h|h.text(instance_text)).push(instance_table);
         }
         Entry::Study((id,mut study)) => {
