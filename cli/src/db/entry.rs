@@ -52,8 +52,10 @@ impl Entry
 			},
 			Study(_) => {
 				let id=self.get_string("PatientID").unwrap_or("<-->".to_string());
-				let date=self.get_string("StudyDate").unwrap_or("<-->".to_string());
-				let time=self.get_string("StudyTime").unwrap_or("<-->".to_string());
+				let mut date=self.get_string("StudyDate").unwrap_or("<-->".to_string());
+				let mut time=self.get_string("StudyTime").unwrap_or("<-->".to_string());
+				if date.len()>6 {date=date.split_off(2);}
+				time.truncate(6);
 				format!("{id}/{date}_{time}")
 			}
 		}
