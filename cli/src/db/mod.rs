@@ -93,12 +93,14 @@ pub(crate) async fn lookup(id:&Thing) -> Result<Option<Entry>>
 {
 	query("select * from $id", ("id", id)).await
 		.map_err(Error::from)
-		.and_then(|value|
-			if value.is_some() {
-				Some(Entry::try_from(value)).transpose()
-			} else {Ok(None)}
-		)
-		.context(format!("when looking up {id}"))
+		.and_then(|value| {
+			if let Value::Array(a) = &value {
+				if a.is_empty() { return Ok(None) }
+			};
+			if !value.is_some(){ return Ok(None) }
+			Some(Entry::try_from(value)).transpose()
+		})
+		.context(format!("looking up {id}"))
 }
 
 async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>

@@ -25,8 +25,8 @@ impl HttpError
     fn internal_status_code(error:&tools::Error) -> StatusCode
     {
         let root = error.root_cause();
-        let error_code = root.downcast_ref::<Box<tools::Error>>().map(
-            |e|match **e {
+        let error_code = root.downcast_ref::<tools::Error>().map(
+            |e|match *e {
                 tools::Error::NotFound | tools::Error::IdNotFound {..} => StatusCode::NOT_FOUND,
                 _ => StatusCode::INTERNAL_SERVER_ERROR
             });
@@ -42,12 +42,17 @@ impl HttpError
     pub(crate) fn do_trace(&self)
     {
         match self {
-            HttpError::Internal(e) => tracing::error!("internal error {} reported (root cause '{}')", e, e.root_cause()),
+            HttpError::Internal(e) => {
+                match e {
+                    tools::Error::IdNotFound {id} => tracing::debug!("{id} reported as not found"),
+                    _ => tracing::error!("internal error {} reported (root cause '{}')", e, e.root_cause()),
+                }
+            }
             _ => tracing::error!("http error {} reported", self),
         }
     }
-    pub(crate) fn sources(&self) -> crate::tools::Source<'_> {
-        crate::tools::Source { current: Some( self ) }
+    pub(crate) fn sources(&self) -> tools::Source<'_> {
+        tools::Source { current: Some( self ) }
     }
 }
 
