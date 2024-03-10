@@ -5,7 +5,6 @@ use html::root::{Body, Html};
 use html::tables::builders::TableCellBuilder;
 use html::tables::{Table, TableCell, TableRow};
 use surrealdb::sql;
-use surrealdb::sql::Value;
 use crate::db;
 use crate::db::{Entry, File, find_down_tree, list_values};
 use crate::tools::reduce_path;
@@ -51,7 +50,7 @@ fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
             .table_cell(|c|c.text(k))
             .table_cell(|c| {
                 match v {
-                    Value::Object(o) => c.push(table_from_map(o.0)),
+                    sql::Value::Object(o) => c.push(table_from_map(o.0)),
                     _ => c.text(v.as_raw_string())
                 }
 
