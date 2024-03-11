@@ -163,11 +163,9 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             let mut filepaths=Vec::new();
             for s in &series
             {
-                let l:Vec<_> = s.files().await?;
-                let l:Vec<_> = l.into_iter().filter_map(Result::ok).collect();
-                let mut paths:Vec<_>=l.iter().map(|f|f.get_path()).collect();
-                filepaths.append(&mut paths);
-                let size = l.iter().map(|f|f.size).reduce(|a,b|a+b);
+                let l:Vec<_> = s.files().await?.filter_map(Result::ok).collect();
+                filepaths.extend(l.iter().map(|f|f.get_path()));
+                let size = l.into_iter().map(|f|f.size).reduce(|a,b|a+b);
                 filesizes.insert(s.id().clone(),size.unwrap_or(0));
             }
             // reduce them and print them @todo this is very expensive, maybe find a better way

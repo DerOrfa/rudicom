@@ -11,7 +11,7 @@ use axum::extract::rejection::BytesRejection;
 use serde_json::json;
 use serde::Deserialize;
 use dicom_pixeldata::PixelDecoder;
-use crate::db::File;
+use crate::db;
 use crate::server::http_error::{HttpError, JsonError, TextError};
 use crate::storage::async_store;
 use crate::tools::{get_instance_dicom, lookup_instance_file, remove};
@@ -23,6 +23,7 @@ pub(super) fn router() -> axum::Router
 {
     let mut rtr= axum::Router::new();
 	rtr=rtr
+		.route("/statistics", get(get_statistics))
         .route("/instances",post(store_instance))
         .route("/:table/:id",delete(del_entry))
 		.route("/:table/:id/verify",get(verify))
@@ -35,12 +36,17 @@ pub(super) fn router() -> axum::Router
     rtr
 }
 
+async fn get_statistics() -> Result<Json<db::Stats>,JsonError>
+{
+	db::statistics().await.map(Json).map_err(|e|e.into())
+}
+
 async fn del_entry(Path(id):Path<(String, String)>) -> Result<(),JsonError>
 {
 	remove(id.into()).await.map_err(|e|e.into())
 }
 
-async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<File>>,JsonError>
+async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<db::File>>,JsonError>
 {
 	Ok(Json(verify_entry(id.into()).await?))
 }

@@ -62,8 +62,7 @@ impl Entry
 	}
 	
 	/// list all file objects in this entry
-	/// like with .collect B can be coerced into Vec<Result<_>> or Result<Vec<_>>
-	pub async fn files<B: FromIterator<Result<db::File>>>(&self) -> Result<B>
+	pub async fn files(&self) -> Result<impl Iterator<Item = Result<db::File>>>
 	{
 		let query = match self {
 			Instance(_) => "file",
@@ -71,16 +70,15 @@ impl Entry
 			Study(_) => "series.instances.file",
 		};
 		let values=db::list_values(self.id(),query,true).await?;
-		Ok(B::from_iter(values.into_iter().map(|v|db::File::try_from(v))))
+		Ok(values.into_iter().map(|v|db::File::try_from(v)))
 	}
 	
 	/// summarize size of all files in this entry
 	/// failures are ignored and count as 0
 	pub async fn size(&self) -> Result<u64>
 	{
-		let files:Vec<_>= self.files().await?;
-		let size=files.into_iter()
-			.filter_map(Result::ok)
+		let files= self.files().await?;
+		let size=files.filter_map(Result::ok)
 			.map(|f|f.size)
 			.reduce(|a,b|a+b).unwrap_or(0);
 		Ok(size)
