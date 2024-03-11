@@ -51,28 +51,36 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
 
     // count instances before as db::list_children cant be used in a closure / also parallelization
     let mut counts=JoinSet::new();
-    for id in studies.iter().map(|e|e.id().clone())
+    for stdy in studies.iter().map(Entry::clone)
     {
         counts.spawn(async move {
-            db::list_values(&id, "series.instances",true).await
-                .map(|l|(id,l.len()))
+            let id = stdy.id().clone();
+            let inst_cnt= db::list_values(&id, "series.instances",true).await
+                .map(|l|l.len())?;
+            let size = stdy.size().await?;
+            crate::tools::Result::Ok((id,inst_cnt,size))
         });
     }
     // collect results from above
     let mut instance_count : HashMap<_,_> = HashMap::new();
+    let mut filesizes : HashMap<_,_> = HashMap::new();
     while let Some(res) = counts.join_next().await
     {
-        let (k,v) = res??;
-        instance_count.insert(k,v);
+        let (k,v,s) = res??;
+        instance_count.insert(k.clone(),v);
+        filesizes.insert(k,s);
     }
     let countinstances = move |obj:&Entry,cell:&mut TableCellBuilder| {
         let inst_cnt=instance_count[obj.id()];
         cell.text(inst_cnt.to_string());
     };
+    let getsize = move |obj:&Entry,cell:&mut TableCellBuilder| {
+        cell.text(format!("{}M",filesizes[obj.id()]/(1<<20)));
+    };
 
     let table= generators::table_from_objects(
         studies, "Study".to_string(), keys,
-        vec![("Instances",Box::new(countinstances))]
+        vec![("Instances",Box::new(countinstances)),("Size",Box::new(getsize))]
     ).await.map_err(|e|e.context("Failed generating the table"))?;
 
     let mut builder = Body::builder();

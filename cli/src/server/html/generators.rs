@@ -6,7 +6,7 @@ use html::tables::builders::TableCellBuilder;
 use html::tables::{Table, TableCell, TableRow};
 use surrealdb::sql;
 use crate::db;
-use crate::db::{Entry, File, find_down_tree, list_values};
+use crate::db::{Entry, find_down_tree};
 use crate::tools::reduce_path;
 use crate::tools::{Result,Context};
 
@@ -159,15 +159,19 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.0));
 
             let mut series=db::list_children(&id, "series").await?;
-            // get flat list of file-attributes
-            let files=list_values(&id, "series.instances.file",true).await?;
-            // makes PathBuf of them
-            let files:Vec<_>=files.into_iter()
-            	.filter_map(|v|File::try_from(v).ok())
-                .map(|f|f.get_path())
-            	.collect();
+            let mut filesizes=BTreeMap::new();
+            let mut filepaths=Vec::new();
+            for s in &series
+            {
+                let l:Vec<_> = s.files().await?;
+                let l:Vec<_> = l.into_iter().filter_map(Result::ok).collect();
+                let mut paths:Vec<_>=l.iter().map(|f|f.get_path()).collect();
+                filepaths.append(&mut paths);
+                let size = l.iter().map(|f|f.size).reduce(|a,b|a+b);
+                filesizes.insert(s.id().clone(),size.unwrap_or(0));
+            }
             // reduce them and print them @todo this is very expensive, maybe find a better way
-            let common_path= reduce_path(files);
+            let common_path= reduce_path(filepaths);
             builder
                 .heading_2(|t|t.text("Path"))
                 .paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
@@ -185,10 +189,17 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
                     cell.text(format!("{len} instances"));
                 }
             };
+            let getfilesize = move |obj:&Entry,cell:&mut TableCellBuilder| 
+            {
+                cell.text(format!("{}M",filesizes[obj.id()]/(1<<20)));
+            };
 
             let keys= crate::config::get::<Vec<String>>("series_tags").expect("failed to get series_tags");
             let series_text = format!("{} Series",series.len());
-            let series_table = table_from_objects(series, "Name".into(), keys, vec![("Instances",countinstances)]).await?;
+            let series_table = table_from_objects(series, "Name".into(), keys, vec![
+                ("Instances",Box::new(countinstances)),
+                ("Size",Box::new(getfilesize))
+            ]).await?;
             builder.heading_2(|h|h.text(series_text)).push(series_table);
         }
     }
