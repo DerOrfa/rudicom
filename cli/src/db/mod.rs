@@ -64,7 +64,7 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 	}.context(query_context)
 }
 
-pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
+pub(crate) async fn list_refs<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
 	let mut result = query(format!("select * from $id.{}",col.as_ref()),("id",id)).await
@@ -83,7 +83,7 @@ pub(crate) async fn list_values<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec
 }
 pub(crate) async fn list_children<T>(id:&Thing, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
 {
-	let result:Result<Vec<_>>=list_values(id, col.as_ref(),true).await?.into_iter()
+	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), true).await?.into_iter()
 		.map(Entry::try_from)
 		.collect();
 	result.context(format!("listing children of {id} in column {}",col.as_ref()))
@@ -91,7 +91,7 @@ pub(crate) async fn list_children<T>(id:&Thing, col:T) -> Result<Vec<Entry>> whe
 
 pub(crate) async fn list_json<T>(id:&Thing, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
 {
-	let list=list_values(id, col,true).await?;
+	let list= list_refs(id, col, true).await?;
 	Ok(list.into_iter().map(Value::into_json).collect())
 }
 pub(crate) async fn lookup(id:&Thing) -> Result<Option<Entry>>

@@ -56,7 +56,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     {
         counts.spawn(async move {
             let id = stdy.id().clone();
-            let inst_cnt= db::list_values(&id, "series.instances",true).await
+            let inst_cnt= db::list_refs(&id, "series.instances", true).await
                 .map(|l|l.len())?;
             let size = stdy.size().await?;
             crate::tools::Result::Ok((id,inst_cnt,size))

@@ -70,7 +70,7 @@ impl Entry
 			Series(_) => "instances.file",
 			Study(_) => "series.instances.file",
 		};
-		let values=db::list_values(self.id(),query,true).await?;
+		let values=db::list_refs(self.id(), query, true).await?;
 		Ok(values.into_iter().map(|v|db::File::try_from(v)))
 	}
 	
@@ -104,10 +104,10 @@ impl Entry
 			return self.get_file().map(|f|f.get_path().to_path_buf())
 		}
 		let files =match self {
-			Series((id,_)) => db::list_values(&id, "instances.file",true).await
+			Series((id,_)) => db::list_refs(&id, "instances.file", true).await
 				.context(format!("listing files in series {id}")),
 
-			Study((id,_)) => db::list_values(&id, "series.instances.file",true).await
+			Study((id,_)) => db::list_refs(&id, "series.instances.file", true).await
 				.context(format!("listing files in study {id}")),
 			_ => unreachable!("Instance variant should be handled above"),
 		};
