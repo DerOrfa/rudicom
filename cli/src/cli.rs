@@ -80,7 +80,7 @@ pub(crate) enum Commands {
 		#[arg(long,default_value_t=false)]
 		store:bool,
 		/// file or globbing to import
-		pattern: String,
+		pattern: Vec<String>,
 	},
 }
 

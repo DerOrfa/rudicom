@@ -15,7 +15,7 @@ pub(crate) enum ImportResult {
 	Err{filename:String,error:Error},
 	GlobError(glob::GlobError)
 }
-#[derive(Deserialize)]
+#[derive(Clone,Deserialize)]
 pub(crate) struct ImportConfig {
 	#[serde(default)]
 	pub(crate) echo:bool,
