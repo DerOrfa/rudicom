@@ -4,6 +4,7 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
+use byte_unit::UnitType::Binary;
 use html::root::Body;
 use html::tables::builders::TableCellBuilder;
 use itertools::Itertools;
@@ -75,7 +76,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         cell.text(inst_cnt.to_string());
     };
     let getsize = move |obj:&Entry,cell:&mut TableCellBuilder| {
-        cell.text(format!("{}M",filesizes[obj.id()]/(1<<20)));
+        cell.text(format!("{:.2}",filesizes[obj.id()].get_appropriate_unit(Binary)));
     };
 
     let table= generators::table_from_objects(

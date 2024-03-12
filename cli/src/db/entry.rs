@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use byte_unit::Byte;
 use surrealdb::sql;
 use crate::db;
 use crate::tools::{reduce_path, transform};
@@ -75,12 +76,12 @@ impl Entry
 	
 	/// summarize size of all files in this entry
 	/// failures are ignored and count as 0
-	pub async fn size(&self) -> Result<u64>
+	pub async fn size(&self) -> Result<Byte>
 	{
 		let files= self.files().await?;
 		let size=files.filter_map(Result::ok)
 			.map(|f|f.size)
-			.reduce(|a,b|a+b).unwrap_or(0);
+			.reduce(|a,b|a.add(b).unwrap_or(Byte::MAX)).unwrap_or(Byte::MIN);
 		Ok(size)
 	}
 

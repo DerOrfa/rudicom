@@ -1,22 +1,26 @@
 use std::sync::OnceLock;
+
+use byte_unit::Byte;
+use byte_unit::UnitType::Binary;
 use serde::Serialize;
+use surrealdb::{Response, sql, Surreal};
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::{Surreal, sql, Response};
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql::{Value, Thing};
-use crate::tools::{Result,Context,Error};
+use surrealdb::sql::{Thing, Value};
+
+pub use entry::Entry;
+pub use file::File;
+pub use into_db_value::IntoDbValue;
+pub use register::{register_instance, RegistryGuard, unregister};
+
+use crate::db;
+use crate::tools::{Context, Error, Result};
 
 mod into_db_value;
 mod register;
 mod entry;
 mod file;
-
-pub use into_db_value::IntoDbValue;
-pub use register::{unregister, register_instance, RegistryGuard};
-pub use entry::Entry;
-pub use file::File;
-use crate::db;
 
 static DB: OnceLock<Surreal<Any>> = OnceLock::new();
 
@@ -166,7 +170,7 @@ pub async fn version() -> surrealdb::Result<String>
 pub struct Stats
 {
 	instances:u32,
-	size_mb:u64,
+	size_mb:String,
 	db_version:String,
 	health:String
 }
@@ -174,15 +178,26 @@ pub async fn statistics() -> Result<Stats>
 {
 	let instances_v=list_table("instances").await?;
 	let instances = instances_v.len() as u32;
-	let size_mb =	instances_v
+	let size =	instances_v
 		.into_iter().map(db::File::try_from)
-		.filter_map(Result::ok).map(|f|f.size).reduce(|a,b|a+b)
-		.unwrap_or(0) / (1<<20);
-	let version=db().version().await?;
+		.filter_map(Result::ok).map(|f|f.size).reduce(|a,b|a.add(b).unwrap_or(Byte::MAX))
+		.unwrap_or(Byte::MIN) ;
 	let health= match db().health().await{
 		Ok(_) => String::from("good"),
 		Err(e) => e.to_string()
 	};
 	
-	Ok(Stats{instances,size_mb,db_version:version.to_string(),health})
+	Ok(Stats{
+		instances,health,
+		size_mb:format!("{:.2}",size.get_appropriate_unit(Binary)),
+		db_version:db().version().await?.to_string()
+	})
+}
+
+pub fn get_from_object<Q>(obj: &sql::Object, key: Q) -> Result<&Value>
+	where String:From<Q>, 
+{
+	let element = String::from(key);
+	obj.0.get(&element)
+		.ok_or(Error::ElementMissing {element,parent:"file object".into()})
 }

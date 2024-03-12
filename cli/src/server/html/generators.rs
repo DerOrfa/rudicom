@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use byte_unit::Byte;
+use byte_unit::UnitType::Binary;
 use html::content::Navigation;
 use html::inline_text::Anchor;
 use html::root::{Body, Html};
@@ -165,8 +167,9 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             {
                 let l:Vec<_> = s.files().await?.filter_map(Result::ok).collect();
                 filepaths.extend(l.iter().map(|f|f.get_path()));
-                let size = l.into_iter().map(|f|f.size).reduce(|a,b|a+b);
-                filesizes.insert(s.id().clone(),size.unwrap_or(0));
+                let size = l.into_iter().map(|f|f.size)
+                    .reduce(|a,b|a.add(b).unwrap_or(Byte::MAX));
+                filesizes.insert(s.id().clone(),size.unwrap_or(Byte::MIN));
             }
             // reduce them and print them @todo this is very expensive, maybe find a better way
             let common_path= reduce_path(filepaths);
@@ -189,7 +192,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             };
             let getfilesize = move |obj:&Entry,cell:&mut TableCellBuilder| 
             {
-                cell.text(format!("{}M",filesizes[obj.id()]/(1<<20)));
+                cell.text(format!("{:.2}",filesizes[obj.id()].get_appropriate_unit(Binary)));
             };
 
             let keys= crate::config::get::<Vec<String>>("series_tags").expect("failed to get series_tags");

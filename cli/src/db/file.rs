@@ -6,8 +6,9 @@ use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use surrealdb::sql;
 use tokio::io::AsyncReadExt;
+use byte_unit::Byte;
 
-use crate::db::Entry;
+use crate::db::{Entry, get_from_object};
 use crate::storage::async_store::compute_md5;
 use crate::tools::{Result, Context, Error,complete_filepath};
 
@@ -16,21 +17,16 @@ pub struct File
     path:PathBuf,
     pub owned:bool,
     md5:String,
-    pub(crate) size:u64
+    pub size:Byte
 }
 
 impl File {
-    fn extract(obj:&mut sql::Object,key:&str) -> crate::tools::Result<sql::Value>
-    {
-        obj.0.remove(key)
-            .ok_or(Error::ElementMissing {element:key.into(),parent:"file object".into()})
-    }
     /// create file info for an owned file
     /// - the file does not need to exist
     pub(crate) fn from_owned<T>(path:T, md5:md5::Digest, size:u64) -> File where PathBuf:From<T>
     {
         let path = PathBuf::from(path);
-        File{path,size, owned:true, md5:format!("{:x}", md5)}
+        File{path,size:Byte::from(size), owned:true, md5:format!("{:x}", md5)}
     }
     /// create file info for a not owned file
     /// - the file must exist
@@ -38,7 +34,7 @@ impl File {
     pub(crate) fn from_unowned<T>(path:T, md5:md5::Digest) -> io::Result<File> where PathBuf:From<T>
     {
         let path = PathBuf::from(path).canonicalize()?;
-        let size = path.as_path().metadata()?.len();
+        let size = path.as_path().metadata()?.len().into();
         Ok(File{path,size,owned:true,md5:format!("{:x}", md5)})
     }
 
@@ -104,7 +100,7 @@ impl TryFrom<File> for sql::Object
         ret.insert("path".into(),file_path.into());
         ret.insert("owned".into(),file.owned.into());
         ret.insert("md5".into(),file.md5.into());
-        ret.insert("size".into(),file.size.into());
+        ret.insert("size".into(),file.size.as_u64().into());
         Ok(ret)
     }
 }
@@ -119,7 +115,7 @@ impl Serialize for File
         ser.serialize_field("path",file_path)?;
         ser.serialize_field("owned",&self.owned)?;
         ser.serialize_field("md5",self.md5.as_str())?;
-        ser.serialize_field("size",&self.size)?;
+        ser.serialize_field("size",&self.size.as_u64())?;
         ser.end()
     }
 }
@@ -128,13 +124,13 @@ impl TryFrom<sql::Object> for File
 {
     type Error = Error;
 
-    fn try_from(mut obj: sql::Object) -> std::result::Result<Self, Self::Error> {
-        let path = Self::extract(&mut obj,"path").map(|v| v.as_raw_string())?;
-        let owned = Self::extract(&mut obj,"owned").map(|v|v.is_true())?;
-        let md5 = Self::extract(&mut obj,"md5").map(|v|v.as_raw_string())?;
-        let size = Self::extract(&mut obj,"size")
-            .map(|v|if let sql::Value::Number(num) = v { num.as_int() as u64} else {0})?;
-        Ok(File{path:path.into(),owned,md5,size})
+    fn try_from(obj: sql::Object) -> std::result::Result<Self, Self::Error> {
+        let path = get_from_object(&obj,"path").map(|v| v.clone().as_raw_string())?;
+        let owned = get_from_object(&obj,"owned").map(|v|v.is_true())?;
+        let md5 = get_from_object(&obj,"md5").map(|v|v.clone().as_raw_string())?;
+        let size = get_from_object(&obj,"size")
+            .map(|v|if let sql::Value::Number(num) = v { num.to_int()} else {0})?;
+        Ok(File{path:path.into(),owned,md5,size:Byte::try_from(size).unwrap_or(Byte::MIN)})
     }
 }
 
