@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::task::JoinSet;
 use crate::db;
-use crate::db::Entry;
+use crate::db::{Entry, Selector};
 use crate::server::html::generators;
 use crate::server::http_error::TextError;
 
@@ -32,7 +32,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         .unique()//make sure there are no duplicates
         .collect();
 
-    let mut studies = db::list_table("studies").await?;
+    let mut studies = db::list_entries("studies").await?;
     if let Some(filter) = config.filter
     {
         studies.retain(|e|e.name().find(filter.as_str()).is_some());
@@ -56,7 +56,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     {
         counts.spawn(async move {
             let id = stdy.id().clone();
-            let inst_cnt= db::list_refs(&id, "series.instances", true).await
+            let inst_cnt= db::list_refs(&id, "series.instances", Selector::All, true).await
                 .map(|l|l.len())?;
             let size = stdy.size().await?;
             crate::tools::Result::Ok((id,inst_cnt,size))

@@ -4,6 +4,7 @@ use axum::extract::Path;
 use axum::response::{IntoResponse, Response};
 use surrealdb::sql;
 use crate::db;
+use crate::db::Selector;
 use crate::server::http_error::JsonError;
 use crate::tools::{Context, Error};
 
@@ -18,7 +19,7 @@ pub(super) fn router() -> axum::Router
 
 async fn get_studies() -> Result<Json<Vec<serde_json::Value>>,JsonError>
 {
-	let studies:Vec<_> = db::list_table("studies").await?.into_iter()
+	let studies:Vec<_> = db::list_entries("studies").await?.into_iter()
 		.map(serde_json::Value::from).collect();
 	Ok(Json(studies))
 }
@@ -39,7 +40,7 @@ async fn query(Path((table,id,query)):Path<(String, String, String)>) -> Result<
 		.ok_or(Error::IdNotFound {id:id.clone()}).context(format!("Looking for {query} in {id}",))?;
 
 	let query=query.replace("/",".");
-	db::list_json(e.id(),query).await
+	db::list_json(e.id(),Selector::All,query).await
 		.map(|v|Json(v).into_response())
 		.map_err(Error::into)
 }

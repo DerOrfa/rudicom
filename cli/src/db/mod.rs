@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use std::sync::OnceLock;
 
 use byte_unit::Byte;
@@ -22,6 +23,27 @@ mod register;
 mod entry;
 mod file;
 
+pub enum Selector<'a>{
+	Select(&'a str),
+	All
+}
+
+impl<'a> AsRef<str> for Selector<'a>
+{
+	fn as_ref(&self) -> &str {
+		match *self {
+			Selector::Select(s) => s,
+			Selector::All => "*"
+		}
+	}
+}
+impl<'a> Display for Selector<'a>
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		f.write_str(self.as_ref())
+	}
+}
+
 static DB: OnceLock<Surreal<Any>> = OnceLock::new();
 
 fn db() -> &'static Surreal<Any>
@@ -37,18 +59,18 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> surrealdb::Resul
 		.await?.take::<Value>(0)
 }
 
-pub async fn query_for_list(id: &Thing, target:&str) -> Result<Vec<Thing>>
+pub async fn list_child_id(id: &Thing, child:&str) -> Result<Vec<Thing>>
 {
 	let res:Option<Vec<Thing>>=db()
-		.query(format!("select array::flatten({target}) as id from $id"))
+		.query(format!("select array::flatten({child}) as id from $id"))
 		.bind(("id",id)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take("id"))
-		.context(format!("querying for {target} from {id}"))?;
+		.context(format!("querying for {child} from {id}"))?;
 	Ok(res.unwrap_or(Vec::new()))
 }
 
-pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Table:From<T>
+pub(crate) async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where sql::Table:From<T>
 {
 	let table:sql::Table = table.into();
 	let query_context = format!("querying for contents of table {table}");
@@ -64,10 +86,10 @@ pub(crate) async fn list_table<T>(table:T) -> Result<Vec<Entry>> where sql::Tabl
 	}.context(query_context)
 }
 
-pub(crate) async fn list_refs<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
+pub(crate) async fn list_refs<'a,T>(id:&Thing, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
-	let mut result = query(format!("select * from $id.{}",col.as_ref()),("id",id)).await
+	let mut result = query(format!("select {selector} from $id.{}",col.as_ref()),("id",id)).await
 		.context(&query_context)?;
 	if flatten {result=Value::flatten(result)}
 	match result
@@ -83,15 +105,15 @@ pub(crate) async fn list_refs<T>(id:&Thing, col:T, flatten:bool) -> Result<Vec<V
 }
 pub(crate) async fn list_children<T>(id:&Thing, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
 {
-	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), true).await?.into_iter()
+	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), Selector::All, true).await?.into_iter()
 		.map(Entry::try_from)
 		.collect();
 	result.context(format!("listing children of {id} in column {}",col.as_ref()))
 }
 
-pub(crate) async fn list_json<T>(id:&Thing, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
+pub(crate) async fn list_json<'a,T>(id:&Thing, selector: Selector<'a>, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
 {
-	let list= list_refs(id, col, true).await?;
+	let list= list_refs(id, col, selector, true).await?;
 	Ok(list.into_iter().map(Value::into_json).collect())
 }
 pub(crate) async fn lookup(id:&Thing) -> Result<Option<Entry>>
@@ -176,7 +198,7 @@ pub struct Stats
 }
 pub async fn statistics() -> Result<Stats>
 {
-	let instances_v=list_table("instances").await?;
+	let instances_v= list_entries("instances").await?;
 	let instances = instances_v.len() as u32;
 	let size =	instances_v
 		.into_iter().map(db::File::try_from)
