@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use surrealdb::{Response, sql, Surreal};
 use surrealdb::engine::any::Any;
@@ -59,15 +60,15 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> surrealdb::Resul
 		.await?.take::<Value>(0)
 }
 
-pub async fn list_child_id(id: &Thing, child:&str) -> Result<Vec<Thing>>
+pub async fn list_child<T>(id: &Thing, child:&str) -> Result<T> where T:DeserializeOwned,T:Default
 {
-	let res:Option<Vec<Thing>>=db()
-		.query(format!("select array::flatten({child}) as id from $id"))
+	let res:Option<T>=db()
+		.query(format!("select array::flatten({child}) as val from $id"))
 		.bind(("id",id)).await
 		.and_then(Response::check)
-		.and_then(|mut r|r.take("id"))
+		.and_then(|mut r|r.take("val"))
 		.context(format!("querying for {child} from {id}"))?;
-	Ok(res.unwrap_or(Vec::new()))
+	Ok(res.unwrap_or(T::default()))
 }
 
 pub(crate) async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where sql::Table:From<T>
