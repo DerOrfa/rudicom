@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use byte_unit::Byte;
 use surrealdb::sql;
 use crate::db;
-use crate::db::Selector;
 use crate::tools::{reduce_path, transform};
 use crate::tools::{Result,Context};
 use self::Entry::{Instance, Series, Study};
@@ -71,7 +70,7 @@ impl Entry
 			Series(_) => "instances.file",
 			Study(_) => "series.instances.file",
 		};
-		let values=db::list_refs(self.id(), query, Selector::All, true).await?;
+		let values=db::list_refs(self.id(), query, db::Selector::All, true).await?;
 		Ok(values.into_iter().map(|v|db::File::try_from(v)))
 	}
 	
@@ -104,21 +103,17 @@ impl Entry
 		if let Instance(_) = self{
 			return self.get_file().map(|f|f.get_path().to_path_buf())
 		}
-		let files =match self {
-			Series((id,_)) => db::list_refs(&id, "instances.file", Selector::All, true).await
-				.context(format!("listing files in series {id}")),
+		// get all files in the entry
+		let files:Vec<db::File> =match self {
+			Series((id,_)) => db::list_child(&id, "instances.file").await
+				.context(format!("listing file paths in series {id}")),
 
-			Study((id,_)) => db::list_refs(&id, "series.instances.file", Selector::All, true).await
-				.context(format!("listing files in study {id}")),
+			Study((id,_)) => db::list_child(&id, "series.instances.file").await
+				.context(format!("listing file paths in study {id}")),
 			_ => unreachable!("Instance variant should be handled above"),
-		};
+		}?;
 		// makes PathBuf of them
-		let files:Result<Vec<_>>=files?.into_iter()
-			.map(|v|db::File::try_from(v).map(|f|f.get_path()))
-			.map(|v|v.context(format!("collecting paths from {}",self.id())))
-			.collect();
-		files.map(reduce_path)
-
+		Ok(reduce_path(files.iter().map(db::File::get_path).collect()))
 	}
 }
 

@@ -2,7 +2,7 @@ use std::io;
 use std::io::Cursor;
 use std::path::PathBuf;
 use dicom::object::{DefaultDicomObject, from_reader};
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use surrealdb::sql;
 use tokio::io::AsyncReadExt;
@@ -12,6 +12,7 @@ use crate::db::{Entry, get_from_object};
 use crate::storage::async_store::compute_md5;
 use crate::tools::{Result, Context, Error,complete_filepath};
 
+#[derive(Deserialize)]
 pub struct File
 {
     path:PathBuf,
