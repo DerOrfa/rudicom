@@ -10,9 +10,10 @@ use html::tables::builders::TableCellBuilder;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
+use surrealdb::sql;
 use tokio::task::JoinSet;
 use crate::db;
-use crate::db::{Entry, Selector};
+use crate::db::Entry;
 use crate::server::html::generators;
 use crate::server::http_error::TextError;
 
@@ -56,10 +57,9 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     {
         counts.spawn(async move {
             let id = stdy.id().clone();
-            let inst_cnt= db::list_refs(&id, "series.instances", Selector::All, true).await
-                .map(|l|l.len())?;
+            let instances:Vec<sql::Thing>= db::list_child(&id, "series.instances").await?;
             let size = stdy.size().await?;
-            crate::tools::Result::Ok((id,inst_cnt,size))
+            crate::tools::Result::Ok((id,instances.len(),size))
         });
     }
     // collect results from above

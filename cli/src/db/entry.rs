@@ -52,26 +52,33 @@ impl Entry
 	}
 	
 	/// list all file objects in this entry
-	pub async fn files(&self) -> Result<impl Iterator<Item = Result<db::File>>>
+	pub async fn get_files(&self) -> Result<Vec<db::File>>
 	{
-		let query = match self {
-			Instance(_) => "file",
-			Series(_) => "instances.file",
-			Study(_) => "series.instances.file",
-		};
-		let values=db::list_refs(self.id(), query, db::Selector::All, true).await?;
-		Ok(values.into_iter().map(|v|db::File::try_from(v)))
+		match self {
+			Instance(_) => {self.get_file().map(|f|vec![f])},
+			Series((id,_)) => db::list_child(&id, "instances.file").await
+				.context(format!("listing files in series {id}")),
+
+			Study((id,_)) => db::list_child(&id, "series.instances.file").await
+				.context(format!("listing files in study {id}")),
+		}
 	}
 	
 	/// summarize size of all files in this entry
 	/// failures are ignored and count as 0
 	pub async fn size(&self) -> Result<Byte>
 	{
-		let files= self.files().await?;
-		let size=files.filter_map(Result::ok)
-			.map(|f|f.size)
-			.reduce(|a,b|a.add(b).unwrap_or(Byte::MAX)).unwrap_or(Byte::MIN);
-		Ok(size)
+		let sizes:Vec<u64>=match self {
+			Instance(_) => self.get_file().map(|f|vec![f.size.as_u64()]),
+			Series((id,_)) => db::list_child(&id, "instances.file.size").await
+				.context(format!("listing file sizes in series {id}")),
+
+			Study((id,_)) => db::list_child(&id, "series.instances.file.size").await
+				.context(format!("listing file sizes in study {id}")),
+		}?;
+		Ok(sizes.into_iter()
+			.reduce(|a,b|a+b)
+			.unwrap_or_default().into())
 	}
 
 	pub fn remove(&mut self,key:&str) -> Option<sql::Value>
@@ -89,18 +96,8 @@ impl Entry
 	}
 	pub async fn get_path(&self) -> Result<PathBuf>
 	{
-		if let Instance(_) = self{
-			return self.get_file().map(|f|f.get_path().to_path_buf())
-		}
 		// get all files in the entry
-		let files:Vec<db::File> =match self {
-			Series((id,_)) => db::list_child(&id, "instances.file").await
-				.context(format!("listing file paths in series {id}")),
-
-			Study((id,_)) => db::list_child(&id, "series.instances.file").await
-				.context(format!("listing file paths in study {id}")),
-			_ => unreachable!("Instance variant should be handled above"),
-		}?;
+		let files=self.get_files().await?;
 		// makes PathBuf of them
 		Ok(reduce_path(files.iter().map(db::File::get_path).collect()))
 	}

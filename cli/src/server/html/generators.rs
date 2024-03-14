@@ -112,6 +112,8 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
     let mut builder = Body::builder();
     builder.push(entry.make_nav().await?);
     let name = entry.name();
+    // @todo this may be very expensive, maybe find a better way
+    let common_path= entry.get_path().await?;
     builder.heading_1(|h|h.text(name.to_owned()));
     match entry {
         Entry::Instance((id,mut instance)) => {
@@ -162,17 +164,10 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 
             let mut series=db::list_children(&id, "series").await?;
             let mut filesizes=BTreeMap::new();
-            let mut filepaths=Vec::new();
             for s in &series
             {
-                let l:Vec<_> = s.files().await?.filter_map(Result::ok).collect();
-                filepaths.extend(l.iter().map(|f|f.get_path()));
-                let size = l.into_iter().map(|f|f.size)
-                    .reduce(|a,b|a.add(b).unwrap_or(Byte::MAX));
-                filesizes.insert(s.id().clone(),size.unwrap_or(Byte::MIN));
+                filesizes.insert(s.id().clone(),s.size().await.unwrap_or(Byte::MIN));
             }
-            // reduce them and print them @todo this is very expensive, maybe find a better way
-            let common_path= reduce_path(filepaths);
             builder
                 .heading_2(|t|t.text("Path"))
                 .paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
@@ -190,8 +185,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
                     cell.text(format!("{len} instances"));
                 }
             };
-            let getfilesize = move |obj:&Entry,cell:&mut TableCellBuilder| 
-            {
+            let getfilesize = move |obj:&Entry,cell:&mut TableCellBuilder|{
                 cell.text(format!("{:.2}",filesizes[obj.id()].get_appropriate_unit(Binary)));
             };
 
