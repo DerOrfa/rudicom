@@ -19,25 +19,14 @@ impl Entry
 {
 	pub fn get(&self, key:&str) -> Option<&sql::Value>
 	{
-		self.data().1.get(key)
+		let obj:&sql::Object = self.as_ref();
+		obj.get(key)
 	}
 	pub fn get_string(&self, key:&str) -> Option<String>
 	{
 		self.get(key).map(|v|v.to_raw_string())
 	}
-	fn data(&self) -> &(sql::Thing,sql::Object)
-	{
-		match self {
-			Instance(data)| Series(data) | Study(data) => data
-		}
-	}
-	fn mut_data(&mut self) -> &mut (sql::Thing, sql::Object)
-	{
-		match self {
-			Instance(data)| Series(data) | Study(data) => data
-		}
-	}
-	pub fn id(&self) -> &sql::Thing	{&self.data().0}
+	pub fn id(&self) -> &sql::Thing	{&self.as_ref()}
 
 	pub fn name(&self) -> String
 	{
@@ -87,11 +76,11 @@ impl Entry
 
 	pub fn remove(&mut self,key:&str) -> Option<sql::Value>
 	{
-		self.mut_data().1.remove(key)
+		self.as_mut().remove(key)
 	}
 	pub fn insert<T,K>(&mut self,key:K,value:T) -> Option<sql::Value> where T:Into<sql::Value>,K:Into<String>
 	{
-		self.mut_data().1.insert(key.into(),value.into())
+		self.as_mut().insert(key.into(),value.into())
 	}
 
 	pub fn get_file(&self) -> Result<db::File>
@@ -114,6 +103,32 @@ impl Entry
 		}?;
 		// makes PathBuf of them
 		Ok(reduce_path(files.iter().map(db::File::get_path).collect()))
+	}
+}
+
+impl AsRef<sql::Thing> for Entry
+{
+	fn as_ref(&self) -> &sql::Thing {
+		match self {
+			Instance(data)| Series(data) | Study(data) => &data.0
+		}
+	}
+}
+
+impl AsRef<sql::Object> for Entry
+{
+	fn as_ref(&self) -> &sql::Object {
+		match self {
+			Instance(data)| Series(data) | Study(data) => &data.1
+		}
+	}
+}
+impl AsMut<sql::Object> for Entry
+{
+	fn as_mut(&mut self) -> &mut sql::Object {
+		match self {
+			Instance(data)| Series(data) | Study(data) => &mut data.1
+		}
 	}
 }
 
