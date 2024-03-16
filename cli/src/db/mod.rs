@@ -16,7 +16,6 @@ pub use file::File;
 pub use into_db_value::IntoDbValue;
 pub use register::{register_instance, RegistryGuard, unregister};
 
-use crate::db;
 use crate::tools::{Context, Error, Result};
 
 mod into_db_value;
@@ -60,7 +59,7 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> surrealdb::Resul
 		.await?.take::<Value>(0)
 }
 
-pub async fn list_child<T>(id: &Thing, child:&str) -> Result<T> where T:DeserializeOwned,T:Default
+pub async fn list_fields<T>(id: &Thing, child:&str) -> Result<T> where T:DeserializeOwned, T:Default
 {
 	let res:Option<T>=db()
 		.query(format!("select array::flatten({child}) as val from $id"))
@@ -71,22 +70,17 @@ pub async fn list_child<T>(id: &Thing, child:&str) -> Result<T> where T:Deserial
 	Ok(res.unwrap_or(T::default()))
 }
 
-pub(crate) async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where sql::Table:From<T>
+pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<Value>> where sql::Table:From<T>
 {
 	let table:sql::Table = table.into();
-	let query_context = format!("querying for contents of table {table}");
-	let value=query("select * from $table", ("table", table)).await.context(&query_context)?;
+	let query_context = format!("querying for {selector} in table {table}");
+	let value=query(format!("select {selector} from $table"), ("table", table)).await.context(&query_context)?;
 	match value {
-		Value::Array(rows) => {
-			rows.0.into_iter()
-				.map(Entry::try_from)
-				.collect()
-		},
+		Value::Array(rows) => Ok(rows.0),
 		Value::None => Err(Error::NotFound),
 		_ => Err(Error::UnexpectedResult {expected:"list of entries".into(),found:value})
 	}.context(query_context)
 }
-
 pub(crate) async fn list_refs<'a,T>(id:&Thing, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
@@ -192,19 +186,20 @@ pub async fn version() -> surrealdb::Result<String>
 #[derive(Serialize)]
 pub struct Stats
 {
-	instances:u32,
+	instances:usize,
 	size_mb:String,
 	db_version:String,
 	health:String
 }
 pub async fn statistics() -> Result<Stats>
 {
-	let instances_v= list_entries("instances").await?;
-	let instances = instances_v.len() as u32;
-	let size =	instances_v
-		.into_iter().map(db::File::try_from)
-		.filter_map(Result::ok).map(|f|f.size).reduce(|a,b|a.add(b).unwrap_or(Byte::MAX))
-		.unwrap_or(Byte::MIN) ;
+	let picker=sql::idiom("size").map_err(|e|Error::SurrealError(e.into()))?;
+	let instances_v= list("instances",Selector::Select("file.size as size")).await?;
+	let instances = instances_v.len();
+	let size =	instances_v.into_iter().map(|v|v.pick(&picker))
+		.filter_map(|v|if let Value::Number(n)=v{Some(n.as_int() as u64)} else {None})
+		.map(Byte::from)
+		.reduce(|a,b|a.add(b).unwrap_or(Byte::MAX)).unwrap_or(Byte::MIN);
 	let health= match db().health().await{
 		Ok(_) => String::from("good"),
 		Err(e) => e.to_string()

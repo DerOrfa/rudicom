@@ -13,7 +13,7 @@ use serde_json::json;
 use surrealdb::sql;
 use tokio::task::JoinSet;
 use crate::db;
-use crate::db::Entry;
+use crate::db::{Entry, Selector};
 use crate::server::html::generators;
 use crate::server::http_error::TextError;
 
@@ -33,7 +33,9 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         .unique()//make sure there are no duplicates
         .collect();
 
-    let mut studies = db::list_entries("studies").await?;
+    let mut studies = db::list("studies",Selector::All).await?.into_iter()
+        .map(Entry::try_from).collect::<crate::tools::Result<Vec<_>>>()?;
+
     if let Some(filter) = config.filter
     {
         studies.retain(|e|e.name().find(filter.as_str()).is_some());
@@ -49,7 +51,6 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
             }
         )
     }
-    
 
     // count instances before as db::list_children cant be used in a closure / also parallelization
     let mut counts=JoinSet::new();
@@ -57,7 +58,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     {
         counts.spawn(async move {
             let id = stdy.id().clone();
-            let instances:Vec<sql::Thing>= db::list_child(&id, "series.instances").await?;
+            let instances:Vec<sql::Thing>= db::list_fields(&id, "series.instances").await?;
             let size = stdy.size().await?;
             crate::tools::Result::Ok((id,instances.len(),size))
         });

@@ -74,8 +74,8 @@ pub async fn instances_for_entry(id:sql::Thing) -> Result<Vec<sql::Thing>>
 {
 	let context = format!("listing instances in {}",id);
 	match id.tb.as_str() {
-		"studies" => db::list_child(&id, "series.instances").await,
-		"series" => db::list_child(&id, "instances").await,
+		"studies" => db::list_fields(&id, "series.instances").await,
+		"series" => db::list_fields(&id, "instances").await,
 		"instances" => Ok(vec![id]),
 		_ => Err(Error::InvalidTable {table:id.tb})
 	}.map_err(|e|e.context(context))

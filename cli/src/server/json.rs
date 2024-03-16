@@ -19,8 +19,8 @@ pub(super) fn router() -> axum::Router
 
 async fn get_studies() -> Result<Json<Vec<serde_json::Value>>,JsonError>
 {
-	let studies:Vec<_> = db::list_entries("studies").await?.into_iter()
-		.map(serde_json::Value::from).collect();
+	let studies:Vec<_> = db::list("studies",Selector::All).await?
+		.into_iter().map(|v|v.into_json()).collect();
 	Ok(Json(studies))
 }
 

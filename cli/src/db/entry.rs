@@ -56,10 +56,10 @@ impl Entry
 	{
 		match self {
 			Instance(_) => {self.get_file().map(|f|vec![f])},
-			Series((id,_)) => db::list_child(&id, "instances.file").await
+			Series((id,_)) => db::list_fields(&id, "instances.file").await
 				.context(format!("listing files in series {id}")),
 
-			Study((id,_)) => db::list_child(&id, "series.instances.file").await
+			Study((id,_)) => db::list_fields(&id, "series.instances.file").await
 				.context(format!("listing files in study {id}")),
 		}
 	}
@@ -69,11 +69,11 @@ impl Entry
 	pub async fn size(&self) -> Result<Byte>
 	{
 		let sizes:Vec<u64>=match self {
-			Instance(_) => self.get_file().map(|f|vec![f.size.as_u64()]),
-			Series((id,_)) => db::list_child(&id, "instances.file.size").await
+			Instance(_) => self.get_file().map(|f|vec![f.size]),
+			Series((id,_)) => db::list_fields(&id, "instances.file.size").await
 				.context(format!("listing file sizes in series {id}")),
 
-			Study((id,_)) => db::list_child(&id, "series.instances.file.size").await
+			Study((id,_)) => db::list_fields(&id, "series.instances.file.size").await
 				.context(format!("listing file sizes in study {id}")),
 		}?;
 		Ok(sizes.into_iter()

@@ -1,16 +1,16 @@
 use std::io;
 use std::io::Cursor;
 use std::path::PathBuf;
+
 use dicom::object::{DefaultDicomObject, from_reader};
 use serde::{Deserialize, Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use surrealdb::sql;
 use tokio::io::AsyncReadExt;
-use byte_unit::Byte;
 
 use crate::db::{Entry, get_from_object};
 use crate::storage::async_store::compute_md5;
-use crate::tools::{Result, Context, Error,complete_filepath};
+use crate::tools::{complete_filepath, Context, Error, Result};
 
 #[derive(Deserialize)]
 pub struct File
@@ -18,7 +18,7 @@ pub struct File
     path:PathBuf,
     pub owned:bool,
     md5:String,
-    pub size:Byte
+    pub size:u64
 }
 
 impl File {
@@ -27,7 +27,7 @@ impl File {
     pub(crate) fn from_owned<T>(path:T, md5:md5::Digest, size:u64) -> File where PathBuf:From<T>
     {
         let path = PathBuf::from(path);
-        File{path,size:Byte::from(size), owned:true, md5:format!("{:x}", md5)}
+        File{path,size:size, owned:true, md5:format!("{:x}", md5)}
     }
     /// create file info for a not owned file
     /// - the file must exist
@@ -101,7 +101,7 @@ impl TryFrom<File> for sql::Object
         ret.insert("path".into(),file_path.into());
         ret.insert("owned".into(),file.owned.into());
         ret.insert("md5".into(),file.md5.into());
-        ret.insert("size".into(),file.size.as_u64().into());
+        ret.insert("size".into(),file.size.into());
         Ok(ret)
     }
 }
@@ -116,7 +116,7 @@ impl Serialize for File
         ser.serialize_field("path",file_path)?;
         ser.serialize_field("owned",&self.owned)?;
         ser.serialize_field("md5",self.md5.as_str())?;
-        ser.serialize_field("size",&self.size.as_u64())?;
+        ser.serialize_field("size",&self.size)?;
         ser.end()
     }
 }
@@ -131,7 +131,7 @@ impl TryFrom<sql::Object> for File
         let md5 = get_from_object(&obj,"md5").map(|v|v.clone().as_raw_string())?;
         let size = get_from_object(&obj,"size")
             .map(|v|if let sql::Value::Number(num) = v { num.to_int()} else {0})?;
-        Ok(File{path:path.into(),owned,md5,size:Byte::try_from(size).unwrap_or(Byte::MIN)})
+        Ok(File{path:path.into(),owned,md5,size:size as u64})
     }
 }
 

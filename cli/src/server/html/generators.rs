@@ -1,16 +1,17 @@
 use std::collections::BTreeMap;
+
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
 use html::content::Navigation;
 use html::inline_text::Anchor;
 use html::root::{Body, Html};
-use html::tables::builders::TableCellBuilder;
 use html::tables::{Table, TableCell, TableRow};
+use html::tables::builders::TableCellBuilder;
 use surrealdb::sql;
+
 use crate::db;
 use crate::db::{Entry, find_down_tree};
-use crate::tools::reduce_path;
-use crate::tools::{Result,Context};
+use crate::tools::{Context, Result};
 
 impl Entry {
     pub async fn make_nav(&self) -> Result<Navigation>
@@ -136,16 +137,10 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
                     .parse::<u64>().unwrap_or(0)
                 )
             );
-            let files:Vec<_> = instances.iter_mut()
-                .filter_map(|v|v.remove("file"))
-                .filter_map(|f|db::File::try_from(f).ok())
-                .map(|f|f.get_path())
-                .collect();
-
-            let path = reduce_path(files);
+            
             builder
                 .heading_2(|t|t.text("Path"))
-                .paragraph(|p|p.text(path.to_string_lossy().to_string()));
+                .paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
 
 
             let keys=crate::config::get::<Vec<String>>("instance_tags").expect("failed to get instance_tags");
@@ -166,7 +161,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             let mut filesizes=BTreeMap::new();
             for s in &series
             {
-                filesizes.insert(s.id().clone(),s.size().await.unwrap_or(Byte::MIN));
+                filesizes.insert(s.id().clone(),s.size().await?);
             }
             builder
                 .heading_2(|t|t.text("Path"))
