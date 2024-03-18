@@ -1,9 +1,9 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
+use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
 use html::root::Body;
 use html::tables::builders::TableCellBuilder;
@@ -11,7 +11,6 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
 use surrealdb::sql;
-use tokio::task::JoinSet;
 use crate::db;
 use crate::db::{Entry, Selector};
 use crate::server::html::generators;
@@ -28,12 +27,16 @@ pub(crate) struct ListingConfig {
 
 pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
 {
-    let keys=["StudyDate", "StudyTime"].into_iter().map(|s|s.to_string())
+    let keys=["StudyDate", "StudyTime"].into_iter().map(str::to_string)
         .chain(crate::config::get::<Vec<String>>("study_tags").unwrap().into_iter())//get the rest from the config
+        .chain(["instances".to_string()])
         .unique()//make sure there are no duplicates
         .collect();
 
-    let mut studies = db::list("studies",Selector::All).await?.into_iter()
+    let mut studies = db::list(
+        "studies",
+        Selector::Select("*, math::sum(array::flatten(series.instances.file.size)) as size, count(array::flatten(series.instances)) as instances, id")
+    ).await?.into_iter()
         .map(Entry::try_from).collect::<crate::tools::Result<Vec<_>>>()?;
 
     if let Some(filter) = config.filter
@@ -51,38 +54,16 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
             }
         )
     }
-
-    // count instances before as db::list_children cant be used in a closure / also parallelization
-    let mut counts=JoinSet::new();
-    for stdy in studies.iter().map(Entry::clone)
+    let getsize = |obj:&Entry,cell:&mut TableCellBuilder| 
     {
-        counts.spawn(async move {
-            let id = stdy.id().clone();
-            let instances:Vec<sql::Thing>= db::list_fields(&id, "series.instances").await?;
-            let size = stdy.size().await?;
-            crate::tools::Result::Ok((id,instances.len(),size))
-        });
-    }
-    // collect results from above
-    let mut instance_count : HashMap<_,_> = HashMap::new();
-    let mut filesizes : HashMap<_,_> = HashMap::new();
-    while let Some(res) = counts.join_next().await
-    {
-        let (k,v,s) = res??;
-        instance_count.insert(k.clone(),v);
-        filesizes.insert(k,s);
-    }
-    let countinstances = move |obj:&Entry,cell:&mut TableCellBuilder| {
-        let inst_cnt=instance_count[obj.id()];
-        cell.text(inst_cnt.to_string());
-    };
-    let getsize = move |obj:&Entry,cell:&mut TableCellBuilder| {
-        cell.text(format!("{:.2}",filesizes[obj.id()].get_appropriate_unit(Binary)));
+        let size:sql::Number=obj.get("size")
+            .and_then(|v|v.try_into().ok())
+            .unwrap_or_default();
+        cell.text(format!("{:.2}",Byte::from(size.as_usize()).get_appropriate_unit(Binary)));
     };
 
     let table= generators::table_from_objects(
-        studies, "Study".to_string(), keys,
-        vec![("Instances",Box::new(countinstances)),("Size",Box::new(getsize))]
+        studies, "Study".to_string(), keys,vec![("size",Box::new(getsize))]
     ).await.map_err(|e|e.context("Failed generating the table"))?;
 
     let mut builder = Body::builder();

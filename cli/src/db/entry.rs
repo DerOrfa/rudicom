@@ -59,26 +59,22 @@ impl Entry
 			Series((id,_)) => db::list_fields(&id, "instances.file").await
 				.context(format!("listing files in series {id}")),
 
-			Study((id,_)) => db::list_fields(&id, "series.instances.file").await
+			Study((id,_)) => db::list_fields(&id, "array::flatten(series.instances.file)").await
 				.context(format!("listing files in study {id}")),
 		}
 	}
 	
 	/// summarize size of all files in this entry
-	/// failures are ignored and count as 0
 	pub async fn size(&self) -> Result<Byte>
 	{
-		let sizes:Vec<u64>=match self {
-			Instance(_) => self.get_file().map(|f|vec![f.size]),
-			Series((id,_)) => db::list_fields(&id, "instances.file.size").await
-				.context(format!("listing file sizes in series {id}")),
-
-			Study((id,_)) => db::list_fields(&id, "series.instances.file.size").await
-				.context(format!("listing file sizes in study {id}")),
+		let size:u64=match self {
+			Instance(_) => self.get_file().map(|f|f.size),
+			Series((id,_)) => 
+				db::list_fields(&id, "math::sum(instances.file.size)").await,
+			Study((id,_)) => 
+				db::list_fields(&id, "math::sum(array::flatten(series.instances.file.size))").await,
 		}?;
-		Ok(sizes.into_iter()
-			.reduce(|a,b|a+b)
-			.unwrap_or_default().into())
+		Ok(Byte::from(size))
 	}
 
 	pub fn remove(&mut self,key:&str) -> Option<sql::Value>

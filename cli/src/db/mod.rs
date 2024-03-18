@@ -59,10 +59,11 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> surrealdb::Resul
 		.await?.take::<Value>(0)
 }
 
+/// Executes `select {child} as val from $id`
 pub async fn list_fields<T>(id: &Thing, child:&str) -> Result<T> where T:DeserializeOwned, T:Default
 {
 	let res:Option<T>=db()
-		.query(format!("select array::flatten({child}) as val from $id"))
+		.query(format!("select {child} as val from $id"))
 		.bind(("id",id)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take("val"))
@@ -189,7 +190,8 @@ pub struct Stats
 	instances:usize,
 	size_mb:String,
 	db_version:String,
-	health:String
+	health:String,
+	version:String
 }
 pub async fn statistics() -> Result<Stats>
 {
@@ -206,7 +208,7 @@ pub async fn statistics() -> Result<Stats>
 	};
 	
 	Ok(Stats{
-		instances,health,
+		instances,health,version:env!("CARGO_PKG_VERSION").to_string(),
 		size_mb:format!("{:.2}",size.get_appropriate_unit(Binary)),
 		db_version:db().version().await?.to_string()
 	})

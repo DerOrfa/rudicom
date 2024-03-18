@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
 use html::content::Navigation;
 use html::inline_text::Anchor;
