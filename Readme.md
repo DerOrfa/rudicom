@@ -20,6 +20,6 @@ or (only with feature `embedded`)
 
 ## REST
     curl http://localhost:3000/tools/import/{text,json}[?<parameters>] -d"<glob>"
-- `echo` generate output for successfully registered or stored files (default:false)
-- `echo_existing` generate output for already existing (and thus ignored) files (default:false)
-- `store` store (aka copy files into storage) instead of just importing the existing files
+- `echo=true` generate output for successfully registered or stored files (default:false)
+- `echo_existing=true` generate output for already existing (and thus ignored) files (default:false)
+- `store=true` store (aka copy files into storage) instead of just importing the existing files
