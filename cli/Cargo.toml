@@ -9,7 +9,7 @@ rust-version = "1.75.0"
 [features]
 default = ["html"]
 # embedded surrealdb (enables direct use of database vs. connecting to a server)
-embedded = ["surrealdb/kv-speedb"]
+embedded = ["surrealdb/kv-rocksdb"]
 # enable html interface
 html = ["dep:html"]
 dicom-json = ["dep:dicom-json"]
