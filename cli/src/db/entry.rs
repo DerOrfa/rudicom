@@ -1,10 +1,13 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+
 use byte_unit::Byte;
 use surrealdb::sql;
+
 use crate::db;
 use crate::tools::{reduce_path, transform};
-use crate::tools::{Result,Context};
+use crate::tools::{Context, Result};
+
 use self::Entry::{Instance, Series, Study};
 
 #[derive(Clone,Debug)]
@@ -24,7 +27,7 @@ impl Entry
 	}
 	pub fn get_string(&self, key:&str) -> Option<String>
 	{
-		self.get(key).map(|v|v.to_raw_string())
+		self.get(key).map(sql::Value::to_raw_string)
 	}
 	pub fn id(&self) -> &sql::Thing	{&self.as_ref()}
 
@@ -65,16 +68,14 @@ impl Entry
 	}
 	
 	/// summarize size of all files in this entry
-	pub async fn size(&self) -> Result<Byte>
+	pub fn size(&self) -> Option<Byte>
 	{
-		let size:u64=match self {
-			Instance(_) => self.get_file().map(|f|f.size),
-			Series((id,_)) => 
-				db::list_fields(&id, "math::sum(instances.file.size)").await,
-			Study((id,_)) => 
-				db::list_fields(&id, "math::sum(array::flatten(series.instances.file.size))").await,
-		}?;
-		Ok(Byte::from(size))
+		if let Instance(_)=self {
+			return self.get_file().map(|f|Byte::from(f.size)).ok()
+		}
+		self.get("size")
+			.map(|v|sql::Number::try_from(v).unwrap_or_default())
+			.map(|n|Byte::from(n.as_usize()))
 	}
 
 	pub fn remove(&mut self,key:&str) -> Option<sql::Value>

@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use byte_unit::UnitType::Binary;
 use html::content::Navigation;
 use html::inline_text::Anchor;
 use html::root::{Body, Html};
@@ -10,6 +9,7 @@ use surrealdb::sql;
 
 use crate::db;
 use crate::db::{Entry, find_down_tree};
+use crate::server::html::handler::getfilesize;
 use crate::tools::{Context, Result};
 
 impl Entry {
@@ -157,11 +157,6 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.0));
 
             let mut series=db::list_children(&id, "series").await?;
-            let mut filesizes=BTreeMap::new();
-            for s in &series
-            {
-                filesizes.insert(s.id().clone(),s.size().await?);
-            }
             builder
                 .heading_2(|t|t.text("Path"))
                 .paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
@@ -178,9 +173,6 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
                 {
                     cell.text(format!("{len} instances"));
                 }
-            };
-            let getfilesize = move |obj:&Entry,cell:&mut TableCellBuilder|{
-                cell.text(format!("{:.2}",filesizes[obj.id()].get_appropriate_unit(Binary)));
             };
 
             let keys= crate::config::get::<Vec<String>>("series_tags").expect("failed to get series_tags");

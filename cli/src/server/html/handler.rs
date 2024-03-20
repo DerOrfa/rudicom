@@ -4,6 +4,7 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
+use byte_unit::UnitType::Binary;
 
 
 use html::root::Body;
@@ -26,6 +27,10 @@ pub(crate) struct ListingConfig {
     sort_reverse:bool
 }
 
+pub(super) fn getfilesize(obj: &Entry, cell: &mut TableCellBuilder) {
+    let size = obj.size().unwrap_or_default();
+    cell.text(format!("{:.2}", size.get_appropriate_unit(Binary)));
+}
 
 pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
 {
@@ -74,10 +79,9 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         let inst_cnt=instance_count[obj.id()];
         cell.text(inst_cnt.to_string());
     };
-
     let table= generators::table_from_objects(
         studies, "Study".to_string(), keys,
-        vec![("Instances",Box::new(countinstances))]
+        vec![("Instances",Box::new(countinstances)),("size",Box::new(getfilesize))]
     ).await.map_err(|e|e.context("Failed generating the table"))?;
 
     let mut builder = Body::builder();
