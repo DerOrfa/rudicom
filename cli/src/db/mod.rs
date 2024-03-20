@@ -63,7 +63,7 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> surrealdb::Resul
 pub async fn list_fields<T>(id: &Thing, child:&str) -> Result<T> where T:DeserializeOwned, T:Default
 {
 	let res:Option<T>=db()
-		.query(format!("select {child} as val from $id"))
+		.query(format!("select {child} as val from $id PARALLEL"))
 		.bind(("id",id)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take("val"))
@@ -75,7 +75,7 @@ pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<Val
 {
 	let table:sql::Table = table.into();
 	let query_context = format!("querying for {selector} in table {table}");
-	let value=query(format!("select {selector} from $table"), ("table", table)).await.context(&query_context)?;
+	let value=query(format!("select {selector} from $table  PARALLEL"), ("table", table)).await.context(&query_context)?;
 	match value {
 		Value::Array(rows) => Ok(rows.0),
 		Value::None => Err(Error::NotFound),
@@ -85,7 +85,7 @@ pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<Val
 pub(crate) async fn list_refs<'a,T>(id:&Thing, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
-	let mut result = query(format!("select {selector} from $id.{}",col.as_ref()),("id",id)).await
+	let mut result = query(format!("select {selector} from $id.{} PARALLEL",col.as_ref()),("id",id)).await
 		.context(&query_context)?;
 	if flatten {result=Value::flatten(result)}
 	match result
