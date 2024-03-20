@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use byte_unit::Byte;
 use surrealdb::sql;
+use tokio::task::JoinSet;
 
 use crate::db;
 use crate::tools::{reduce_path, transform};
@@ -62,8 +63,22 @@ impl Entry
 			Series((id,_)) => db::list_fields(&id, "instances.file").await
 				.context(format!("listing files in series {id}")),
 
-			Study((id,_)) => db::list_fields(&id, "array::flatten(series.instances.file)").await
-				.context(format!("listing files in study {id}")),
+			Study((id,_)) =>
+			{
+				let series=db::list_children(id,"series").await?;
+				let mut files:Vec<db::File>=Default::default();
+				let mut tasks:JoinSet<Result<Vec<db::File>>>=JoinSet::new();
+				for ser_id in series.into_iter().map(|s|s.id().clone())
+				{
+					tasks.spawn(async move {
+						db::list_fields(&ser_id, "instances.file").await
+					});
+				}
+				while let Some(res) = tasks.join_next().await.transpose()? {
+					files.extend(res?.into_iter())
+				}
+				Ok(files)
+			},
 		}
 	}
 	
