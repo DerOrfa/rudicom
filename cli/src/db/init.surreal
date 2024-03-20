@@ -1,24 +1,20 @@
 define event add_instance on table instances when $event = "CREATE"	then
-{
-    update $after.series set instances += $after.id return none;
-    update $after.series set size += $after.file.size return none;
-    update $after.series.study set size += $after.file.size return none;
-};
+(
+    update $after.series set instances += $after.id return none
+);
 define event add_series on table series when $event = "CREATE" then
 (
     update $after.study set series += $after.id return none
 );
 define event del_instance on table instances when $event = "DELETE" then
-{
-    update $before.series.study set size -= $before.file.size return none;
-    update $before.series set size -= $before.file.size return none;
+(
     if array::len($before.series.instances)>1
     then
         update $before.series set instances -= $before.id return none
     else
         delete $before.series
     end
-};
+);
 define event del_series on table series when $event = "DELETE" then
 (
     if array::len($before.study.series)>1

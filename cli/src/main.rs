@@ -1,6 +1,4 @@
 #![recursion_limit = "512"]
-extern crate core;
-
 mod storage;
 mod db;
 mod dcm;
