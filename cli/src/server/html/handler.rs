@@ -4,6 +4,8 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
+use byte_unit::Byte;
+use byte_unit::UnitType::Binary;
 
 
 use html::root::Body;
@@ -55,29 +57,32 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
 
     // count instances before as db::list_children cant be used in a closure / also parallelization
     let mut counts=JoinSet::new();
-    for stdy in studies.iter().map(Entry::clone)
+    for stdy in &studies
     {
-        counts.spawn(async move {
-            let id = stdy.id().clone();
-            let instances:Vec<sql::Thing>= db::list_fields(&id, "array::flatten(series.instances)").await?;
-            crate::tools::Result::Ok((id,instances.len()))
-        });
+        let id = sql::Thing::try_from(format!("instances_per_studies:[{}]",stdy.id()).as_str()).unwrap();
+        counts.spawn(db::InstancesPer::select(id));
     }
     // collect results from above
     let mut instance_count : HashMap<_,_> = HashMap::new();
+    let mut filesizes : HashMap<_,_> = HashMap::new();
     while let Some(res) = counts.join_next().await
     {
-        let (k,i) = res??;
-        instance_count.insert(k,i);
+        let info = res??;
+        instance_count.insert(info.me.clone(),info.count);
+        filesizes.insert(info.me,Byte::from(info.size));
     }
     let countinstances = move |obj:&Entry,cell:&mut TableCellBuilder| {
         let inst_cnt=instance_count[obj.id()];
         cell.text(inst_cnt.to_string());
     };
 
+    let getfilesize = move |obj:&Entry,cell:&mut TableCellBuilder|{
+        cell.text(format!("{:.2}",filesizes[obj.id()].get_appropriate_unit(Binary)));
+    };
+
     let table= generators::table_from_objects(
         studies, "Study".to_string(), keys,
-        vec![("Instances",Box::new(countinstances))]
+        vec![("Instances",Box::new(countinstances)),("Size",Box::new(getfilesize))]
     ).await.map_err(|e|e.context("Failed generating the table"))?;
 
     let mut builder = Body::builder();

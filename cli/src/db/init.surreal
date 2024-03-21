@@ -1,3 +1,6 @@
+if $initialized then [] else
+{
+DEFINE PARAM $initialized VALUE true;
 define event add_instance on table instances when $event = "CREATE"	then
 (
     update $after.series set instances += $after.id return none
@@ -24,3 +27,8 @@ define event del_series on table series when $event = "DELETE" then
         delete $before.study
     end
 );
+
+define table instances_per_studies as select count(), math::sum(file.size) as size, series.study as me from instances group by series.study;
+define table instances_per_series as select count(), math::sum(file.size) as size, series as me from instances group by series;
+}
+end

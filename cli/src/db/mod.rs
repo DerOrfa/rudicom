@@ -3,8 +3,8 @@ use std::sync::OnceLock;
 
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
+use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 use surrealdb::{Response, sql, Surreal};
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
@@ -41,6 +41,25 @@ impl<'a> Display for Selector<'a>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		f.write_str(self.as_ref())
+	}
+}
+
+#[derive(Deserialize,Debug)]
+pub struct InstancesPer
+{
+	pub count:usize,
+	pub size:u64, 
+	pub me:Thing
+}
+
+impl InstancesPer 
+{
+	pub async fn select(id:Thing) -> Result<Self>
+	{
+		let res:Option<Self>=db().select(&id).await?;
+		res.ok_or(Error::ElementMissing {
+			element:id.to_raw(),parent:id.tb.clone()
+		})
 	}
 }
 
