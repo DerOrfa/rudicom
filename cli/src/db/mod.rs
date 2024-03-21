@@ -3,13 +3,15 @@ use std::sync::OnceLock;
 
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
+use chrono::{SecondsFormat, TimeDelta};
+use chrono::offset::Utc;
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 use surrealdb::{Response, sql, Surreal};
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql::{Thing, Value};
+use surrealdb::sql::{Datetime, Idiom, Thing, Value};
 
 pub use entry::Entry;
 pub use file::File;
@@ -68,6 +70,11 @@ static DB: OnceLock<Surreal<Any>> = OnceLock::new();
 fn db() -> &'static Surreal<Any>
 {
 	DB.get_or_init(Surreal::init)
+}
+
+fn make_pick_from_valid(pick:&str) -> Idiom
+{
+	sql::idiom(pick).expect("should be a valid idiom")
 }
 
 async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> surrealdb::Result<Value>
@@ -203,22 +210,42 @@ pub async fn version() -> surrealdb::Result<String>
 	Ok(format!("{}",db().version().await?))
 }
 
+pub async fn changes(since:Datetime) -> Result<Vec<Entry>>
+{
+	let since = since.to_rfc3339_opts(SecondsFormat::Secs, true); 
+	let res:Value=db().query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE "{since}" LIMIT 1000"#))
+		.await?.take(0)?;
+	match res.pick(&sql::idiom("changes.update").expect("should be a valid idiom")).flatten()
+	{
+		Value::Array(a) => a.into_iter().map(Entry::try_from).collect(),
+		_ => return Err(Error::UnexpectedResult {expected:"array of changes".into(),found:res})
+	}
+}
+
 #[derive(Serialize)]
 pub struct Stats
 {
+	studies:usize,
 	instances:usize,
 	size_mb:String,
 	db_version:String,
 	health:String,
-	version:String
+	version:String,
+	activity:String
 }
 pub async fn statistics() -> Result<Stats>
 {
-	let picker=sql::idiom("size").map_err(|e|Error::SurrealError(e.into()))?;
-	let instances_v= list("instances",Selector::Select("file.size as size")).await?;
-	let instances = instances_v.len();
-	let size =	instances_v.into_iter().map(|v|v.pick(&picker))
-		.filter_map(|v|if let Value::Number(n)=v{Some(n.as_int() as u64)} else {None})
+	let size_picker=make_pick_from_valid("size");
+	let count_picker=make_pick_from_valid("count");
+	let studies_v= list("instances_per_studies",Selector::Select("size")).await?;
+	let instances= list("instances_per_studies",Selector::Select("count")).await?
+		.into_iter().map(move|v|v.pick(&count_picker)).filter_map(|v|sql::Number::try_from(v).ok())
+		.map(|n|n.as_usize()).reduce(|a,b|a+b).unwrap_or_default();
+	let studies = studies_v.len();
+	
+	// let instances = instances_v.len();
+	let size = studies_v.into_iter().map(|v|v.pick(&size_picker))
+		.filter_map(|v|sql::Number::try_from(v).ok()).map(|n|n.as_usize())
 		.map(Byte::from)
 		.reduce(|a,b|a.add(b).unwrap_or(Byte::MAX)).unwrap_or(Byte::MIN);
 	let health= match db().health().await{
@@ -226,10 +253,14 @@ pub async fn statistics() -> Result<Stats>
 		Err(e) => e.to_string()
 	};
 	
+	let timestamp = Utc::now()-TimeDelta::try_seconds(10).unwrap();
+	let changes=changes(timestamp.into()).await?.len();
+	
 	Ok(Stats{
-		instances,health,version:env!("CARGO_PKG_VERSION").to_string(),
+		studies,instances,health,version:env!("CARGO_PKG_VERSION").to_string(),
 		size_mb:format!("{:.2}",size.get_appropriate_unit(Binary)),
-		db_version:db().version().await?.to_string()
+		db_version:db().version().await?.to_string(),
+		activity:format!("{changes} updates within the last 10 seconds")
 	})
 }
 

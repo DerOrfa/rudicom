@@ -1,6 +1,7 @@
 if $initialized then [] else
 {
-DEFINE PARAM $initialized VALUE true;
+define param $initialized value true;
+define table instances changefeed 1d;
 define event add_instance on table instances when $event = "CREATE"	then
 (
     update $after.series set instances += $after.id return none
