@@ -36,7 +36,7 @@ impl File {
     {
         let path = PathBuf::from(path).canonicalize()?;
         let size = path.as_path().metadata()?.len().into();
-        Ok(File{path,size,owned:true,md5:format!("{:x}", md5)})
+        Ok(File{path,size,owned:false,md5:format!("{:x}", md5)})
     }
 
     /// get the complete path of the file
