@@ -13,6 +13,7 @@ use surrealdb::Result;
 static INSERT_STUDY:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_SERIES:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_INSTANCE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
+static DELETE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 
 /// register a new instance using values in instance_meta
 /// if the series an study referred to in instance_meta do not exist already
@@ -42,7 +43,9 @@ pub async fn register(
 
 pub async fn unregister(id:sql::Thing) -> Result<sql::Value>
 {
-	Ok(super::db().delete(id).await?.unwrap_or(sql::Value::None))
+	let del = DELETE.get_or_init(||"DELETE ONLY $id return $before".into_query().unwrap());
+	super::db().query(del.clone()).bind(("id",id)).await?
+		.check()?.take("before")
 }
 
 #[derive(Default)]

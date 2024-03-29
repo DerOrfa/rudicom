@@ -13,8 +13,8 @@ pub async fn remove(id:Thing) -> Result<()>
 	{
 		jobs.spawn(job);
 	}
-	while let Some(result) = jobs.join_next().await {
-		result??;
+	while let Some(result) = jobs.join_next().await.transpose()? {
+		result?;
 	}
 	Ok(())
 }
