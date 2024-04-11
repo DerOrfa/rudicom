@@ -4,5 +4,5 @@ resolver = "2"
 
 [profile.release]
 strip = "symbols"
-lto = "fat"
+#lto = "fat"
 #debug = 1
