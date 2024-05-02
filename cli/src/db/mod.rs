@@ -201,7 +201,7 @@ pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 async fn init() -> surrealdb::Result<()>{
 	// Select a specific namespace / database
 	db().use_ns("namespace").use_db("database").await?;
-	db().query(include_str!("init.surreal")).await?;
+	db().query(include_str!("init.surql")).await?;
 	Ok(())
 }
 
