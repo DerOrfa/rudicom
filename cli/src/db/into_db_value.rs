@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
+use chrono::{Local, TimeZone};
 use dicom::core::{DataDictionary, PrimitiveValue};
 use dicom::core::chrono;
+use dicom::core::value::PreciseDateTime;
 use dicom::object::mem::InMemElement;
 use dicom::core::value::Value::{Primitive,Sequence};
 use dicom::object::{InMemDicomObject, StandardDataDictionary};
@@ -59,7 +61,11 @@ impl IntoDbValue for PrimitiveValue {
 			),
 			DateTime(datetimes) => flatten_iter(datetimes.into_iter()
 				.map(|datetime|
-					datetime.to_chrono_datetime().unwrap().with_timezone(&chrono::Utc)
+					match datetime.to_precise_datetime().expect("Invalid DICOM timestamp") {
+						PreciseDateTime::Naive(dt) => 
+							Local.from_local_datetime(&dt).unwrap().to_utc(),
+						PreciseDateTime::TimeZone(dt) => dt.to_utc()
+					}
 				)
 			),
 			Str(s) => s.trim().into(),

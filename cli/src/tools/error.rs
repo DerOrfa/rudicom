@@ -15,7 +15,7 @@ pub enum DicomError
 	#[error("dicom io error {0}")]
 	DicomWriteError(#[from] dicom::object::WriteError),
 	#[error("error decoding pixel data ({0})")]
-	DicomPixelError(#[from] dicom_pixeldata::Error)
+	DicomPixelError(#[from] dicom::pixeldata::Error)
 }
 
 #[derive(Debug)]

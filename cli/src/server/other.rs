@@ -2,7 +2,7 @@ use axum::routing::{delete, get, post};
 use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Response};
 use std::io::Cursor;
-use dicom_pixeldata::image::ImageOutputFormat;
+use dicom::pixeldata::image::ImageFormat;
 use axum::http::{header, StatusCode};
 use axum::Json;
 use axum_extra::body::AsyncReadBody;
@@ -10,7 +10,7 @@ use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use serde_json::json;
 use serde::Deserialize;
-use dicom_pixeldata::PixelDecoder;
+use dicom::pixeldata::PixelDecoder;
 use crate::db;
 use crate::server::http_error::{HttpError, JsonError, TextError};
 use crate::storage::async_store;
@@ -128,7 +128,7 @@ async fn get_instance_png(Path(id):Path<String>, size: Option<Query<ImageSize>>)
 		if let Some(size) = size{
 			image=image.thumbnail(size.width,size.height);
 		}
-		image.write_to(&mut buffer, ImageOutputFormat::Png).expect("Unexpectedly failed to write png data to memory buffer");
+		image.write_to(&mut buffer, ImageFormat::Png).expect("Unexpectedly failed to write png data to memory buffer");
 
 		Ok((
 			[(header::CONTENT_TYPE, "image/png")],
