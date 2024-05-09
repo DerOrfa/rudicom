@@ -16,7 +16,7 @@ static INSERT_INSTANCE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static DELETE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 
 /// register a new instance using values in instance_meta
-/// if the series an study referred to in instance_meta do not exist already
+/// if the series and study referred to in instance_meta do not exist already
 /// they are created using series_meta and study_meta
 /// if the instance exists already no change is done and the existing instance data is returned
 /// None otherwise (on a successful register)
@@ -117,5 +117,4 @@ pub async fn register_instance(
 		}
 		Ok(None) //and return None existing entry
 	}
-
 }

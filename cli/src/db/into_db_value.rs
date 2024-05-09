@@ -47,7 +47,7 @@ impl IntoDbValue for PrimitiveValue {
 			Empty => sql::Value::None, // no-op
 			Date(dates) => flatten_iter(dates.into_iter().
 				map(|date|
-					date.to_naive_date().unwrap()
+					date.to_naive_date().expect("Invalid DICOM timestamp")
 						.and_time(chrono::NaiveTime::default())
 						.and_utc()
 				)
@@ -55,7 +55,7 @@ impl IntoDbValue for PrimitiveValue {
 			Time(times) => flatten_iter(times.into_iter()
 				.map(|time|
 					chrono::NaiveDate::default()
-						.and_time(time.to_naive_time().unwrap())
+						.and_time(time.to_naive_time().expect("Invalid DICOM timestamp"))
 						.and_utc()
 				)
 			),

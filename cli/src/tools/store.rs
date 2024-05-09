@@ -24,7 +24,7 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 {
 	let mut guard= RegistryGuard::default();
 	let mut checksum = md5::Context::new();
-	let buffer=write(&obj,Some(&mut checksum))?.into_inner();
+	let buffer= write(&obj,Some(&mut checksum))?;
 
 	let fileinfo = db::File::from_owned(gen_filepath(&obj)?, checksum.compute(), buffer.len() as u64);
 	let c_path = fileinfo.get_path();
