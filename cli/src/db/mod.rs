@@ -7,7 +7,7 @@ use chrono::{SecondsFormat, TimeDelta};
 use chrono::offset::Utc;
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
-use surrealdb::{Response, sql, Surreal};
+use surrealdb::{Response, sql, Surreal, RecordId};
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::IntoQuery;
@@ -56,11 +56,11 @@ pub struct InstancesPer
 
 impl InstancesPer 
 {
-	pub async fn select(id:Thing) -> Result<Self>
+	pub async fn select(id:RecordId) -> Result<Self>
 	{
 		let res:Option<Self>=db().select(&id).await?;
 		res.ok_or(Error::ElementMissing {
-			element:id.to_raw(),parent:id.tb.clone()
+			element:id.key().to_string(),parent:id.table().to_string()
 		})
 	}
 }
@@ -77,38 +77,40 @@ fn make_pick_from_valid(pick:&str) -> Idiom
 	sql::idiom(pick).expect("should be a valid idiom")
 }
 
-async fn query(qry:impl IntoQuery, bindings: impl Serialize) -> surrealdb::Result<Value>
+async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surrealdb::Result<Value>
 {
-	db()
+	let mut result= db()
 		.query(qry)
 		.bind(bindings)
-		.await?.take::<Value>(0)
+		.await?;
+	result.take::<surrealdb::Value>(0usize).map(|v|v.into_inner())
 }
 
 /// Executes `select {child} as val from $id`
-pub async fn list_fields<T>(id: &Thing, child:&str) -> Result<T> where T:DeserializeOwned, T:Default
+pub async fn list_fields<T>(id: RecordId, child:&str) -> Result<T> where T:DeserializeOwned, T:Default
 {
+	let ctx = format!("querying for {child} from {id}");
 	let res:Option<T>=db()
 		.query(format!("select {child} as val from $id PARALLEL"))
 		.bind(("id",id)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take("val"))
-		.context(format!("querying for {child} from {id}"))?;
+		.context(ctx)?;
 	Ok(res.unwrap_or(T::default()))
 }
 
-pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<Value>> where sql::Table:From<T>
+pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<sql::Value>> where sql::Table:From<T>
 {
 	let table:sql::Table = table.into();
 	let query_context = format!("querying for {selector} in table {table}");
-	let value=query(format!("select {selector} from $table  PARALLEL"), ("table", table)).await.context(&query_context)?;
+	let value= query(format!("select {selector} from $table  PARALLEL"), ("table", table)).await.context(&query_context)?;
 	match value {
 		Value::Array(rows) => Ok(rows.0),
 		Value::None => Err(Error::NotFound),
 		_ => Err(Error::UnexpectedResult {expected:"list of entries".into(),found:value})
 	}.context(query_context)
 }
-pub(crate) async fn list_refs<'a,T>(id:&Thing, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
+pub(crate) async fn list_refs<'a,T>(id:&'static RecordId, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
 	let mut result = query(format!("select {selector} from $id.{} PARALLEL",col.as_ref()),("id",id)).await
@@ -125,7 +127,7 @@ pub(crate) async fn list_refs<'a,T>(id:&Thing, col:T, selector: Selector<'a>, fl
 		)
 	}
 }
-pub(crate) async fn list_children<T>(id:&Thing, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
+pub(crate) async fn list_children<T>(id:&'static RecordId, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
 {
 	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), Selector::All, true).await?.into_iter()
 		.map(Entry::try_from)
@@ -133,12 +135,12 @@ pub(crate) async fn list_children<T>(id:&Thing, col:T) -> Result<Vec<Entry>> whe
 	result.context(format!("listing children of {id} in column {}",col.as_ref()))
 }
 
-pub(crate) async fn list_json<'a,T>(id:&Thing, selector: Selector<'a>, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
+pub(crate) async fn list_json<'a,T>(id:&'static RecordId, selector: Selector<'a>, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
 {
 	let list= list_refs(id, col, selector, true).await?;
 	Ok(list.into_iter().map(Value::into_json).collect())
 }
-pub(crate) async fn lookup(id:&Thing) -> Result<Option<Entry>>
+pub(crate) async fn lookup(id:&'static RecordId) -> Result<Option<Entry>>
 {
 	query("select * from $id", ("id", id)).await
 		.map_err(Error::from)
@@ -213,8 +215,8 @@ pub async fn version() -> surrealdb::Result<String>
 pub async fn changes(since:Datetime) -> Result<Vec<Entry>>
 {
 	let since = since.to_rfc3339_opts(SecondsFormat::Secs, true); 
-	let res:Value=db().query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE "{since}" LIMIT 1000"#))
-		.await?.take(0)?;
+	let res=db().query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE "{since}" LIMIT 1000"#))
+		.await?.take::<surrealdb::Value>(0)?.into_inner();
 	match res.pick(&sql::idiom("changes.update").expect("should be a valid idiom")).flatten()
 	{
 		Value::Array(a) => a.into_iter().map(Entry::try_from).collect(),

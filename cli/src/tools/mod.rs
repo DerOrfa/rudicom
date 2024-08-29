@@ -22,7 +22,7 @@ pub fn transform(root:sql::Value, transformer:fn(sql::Value)->sql::Value) -> sql
 		}
 		sql::Value::Object(o) => {
 			let o:BTreeMap<_,_>=o.into_iter().map(|(k,v)|(k,transform(v,transformer))).collect();
-			sql::Object(o).into()
+			sql::Object::from(o).into()
 		}
 		_ => transformer(root)
 	}

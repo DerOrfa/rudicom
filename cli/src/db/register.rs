@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql;
+use surrealdb::{sql, RecordId};
 
 use dicom::object::{DefaultDicomObject, Tag};
 use dicom::dictionary_std::tags;
@@ -38,10 +38,10 @@ pub async fn register(
 		.bind(("study_meta",study_meta))
 		.await?.check()?;
 
-	res.take::<sql::Value>(2).map(|r|r.first())
+	res.take::<surrealdb::Value>(2).map(|r|r.into_inner().first())
 }
 
-pub async fn unregister(id:sql::Thing) -> Result<sql::Value>
+pub async fn unregister(id:RecordId) -> Result<sql::Value>
 {
 	let del = DELETE.get_or_init(||"DELETE ONLY $id return $before".into_query().unwrap());
 	super::db().query(del.clone()).bind(("id",id)).await?

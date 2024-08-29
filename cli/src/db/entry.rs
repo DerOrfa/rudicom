@@ -186,9 +186,9 @@ impl From<Entry> for serde_json::Value
 	fn from(entry: Entry) -> Self {
 		// transform all Thing-objects into generic Objects to make them more useful in json
 		let transformer = |v|if let sql::Value::Thing(id)=v{
-			sql::Object(BTreeMap::from([
-				("tb".into(), id.tb.into()),
-				("id".into(), id.id.to_raw().into()),
+			sql::Object::from(BTreeMap::from([
+				("tb", id.tb.into()),
+				("id", id.id.to_raw().into()),
 			])).into()
 		} else {v};
 		let value = transform(entry.into(),transformer);
