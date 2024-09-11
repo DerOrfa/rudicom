@@ -4,7 +4,6 @@ use clap::builder::PossibleValue;
 use clap::ValueHint::{Hostname,FilePath};
 use tracing::Level;
 
-#[cfg(feature = "embedded")]
 use clap::ValueHint::DirPath;
 
 #[derive(Clone)]
@@ -36,7 +35,6 @@ pub(super) struct Endpoint{
 	#[arg(long, value_hint = Hostname)]
 	pub(super) database: Option<String>,
 	/// filename for the local database
-	#[cfg(feature = "embedded")]
 	#[arg(long, value_hint = DirPath)]
 	pub(super) file:Option<PathBuf>
 }

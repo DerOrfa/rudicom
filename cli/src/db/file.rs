@@ -144,7 +144,7 @@ impl TryFrom<Entry> for File
         let result = if let Entry::Instance((id,mut inst)) = entry
         {
             inst.remove("file")
-                .ok_or(Error::ElementMissing{element:"file".into(), parent:id.to_raw()})?
+                .ok_or(Error::ElementMissing{element:"file".into(), parent:id.to_string()})?
                 .try_into()
         } else {Err(Error::UnexpectedEntry {expected:"instance".into(),id:entry.id().clone()})};
         result.context(context)

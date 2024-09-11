@@ -1,11 +1,12 @@
-use std::path::{Path, PathBuf};
-use surrealdb::sql::Thing;
-use tokio::fs::{remove_file,remove_dir};
 use crate::db;
 use crate::tools::instances_for_entry;
 use crate::tools::Result;
+use std::path::{Path, PathBuf};
+use surrealdb::RecordIdKey;
+use tokio::fs::{remove_dir, remove_file};
+use crate::db::RecordId;
 
-pub async fn remove(id:Thing) -> Result<()>
+pub async fn remove(id:db::RecordId) -> Result<()>
 {
 	let mut jobs=tokio::task::JoinSet::new();
 	for job in instances_for_entry(id).await?
@@ -19,10 +20,10 @@ pub async fn remove(id:Thing) -> Result<()>
 	Ok(())
 }
 
-async fn remove_instance(id:Thing) -> Result<Option<db::Entry>>
+async fn remove_instance<I>(id:I) -> Result<Option<db::Entry>>  where RecordIdKey: From<I>
 {
-	let res= db::unregister(id).await?;
-	if res.is_none(){
+	let res= db::unregister(RecordId::instance(id)).await?;
+	if res.is_none() {
 		Ok(None)
 	} else {
 		let removed = db::Entry::try_from(res)?;

@@ -1,22 +1,24 @@
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
+use std::ops::Deref;
 use std::sync::OnceLock;
 
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
-use chrono::{SecondsFormat, TimeDelta};
 use chrono::offset::Utc;
-use serde::{Deserialize, Serialize};
+use chrono::{SecondsFormat, TimeDelta};
 use serde::de::DeserializeOwned;
-use surrealdb::{Response, sql, Surreal, RecordId};
+use serde::{Deserialize, Serialize};
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql::{Datetime, Idiom, Thing, Value};
+use surrealdb::sql::{Datetime, Idiom, Value};
+use surrealdb::{sql, RecordIdKey, Response, Surreal};
 
 pub use entry::Entry;
 pub use file::File;
 pub use into_db_value::IntoDbValue;
-pub use register::{register_instance, RegistryGuard, unregister};
+pub use register::{register_instance, unregister, RegistryGuard};
 
 use crate::tools::{Context, Error, Result};
 
@@ -24,6 +26,61 @@ mod into_db_value;
 mod register;
 mod entry;
 mod file;
+
+
+#[derive(Deserialize, Debug, PartialEq, PartialOrd, Clone)]
+pub struct RecordId(surrealdb::RecordId);
+
+impl RecordId {
+	pub(crate) fn instance<I>(id: I) -> RecordId where RecordIdKey: From<I> 
+	{
+		RecordId(surrealdb::RecordId::from(("instances",id)))
+	}
+	pub(crate) fn series<I>(id: I) -> RecordId where RecordIdKey: From<I>
+	{
+		RecordId(surrealdb::RecordId::from(("series",id)))
+	}
+	pub(crate) fn study<I>(id: I) -> RecordId where RecordIdKey: From<I>
+	{
+		RecordId(surrealdb::RecordId::from(("studies",id)))
+	}
+}
+
+impl Eq for RecordId {}
+impl Display for RecordId {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		self.0.fmt(f)
+	}
+}
+
+impl Into<Value> for RecordId
+{
+	fn into(self) -> Value {
+		self.0.into_inner().into()
+	}
+}
+
+impl Deref for RecordId {
+	type Target = surrealdb::RecordId;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+impl Ord for RecordId {
+	fn cmp(&self, other: &Self) -> Ordering {
+		let tb=self.0.table().cmp(&other.0.table());
+		match tb {
+			Ordering::Equal => self.0.key().partial_cmp(&other.0.key()).expect("Failed to compare record keys"),
+			_ => return tb,
+		}
+	}
+}
+
+impl<R> From<R> for RecordId where surrealdb::RecordId: From<R> 
+{
+	fn from(value: R) -> Self {RecordId(value.into())}
+}
 
 pub enum Selector<'a>{
 	Select(&'a str),
@@ -51,16 +108,16 @@ pub struct InstancesPer
 {
 	pub count:usize,
 	pub size:u64, 
-	pub me:Thing
+	pub me:RecordId
 }
 
 impl InstancesPer 
 {
 	pub async fn select(id:RecordId) -> Result<Self>
 	{
-		let res:Option<Self>=db().select(&id).await?;
+		let res:Option<Self>=db().select(&id.0).await?;
 		res.ok_or(Error::ElementMissing {
-			element:id.key().to_string(),parent:id.table().to_string()
+			element:id.0.key().to_string(),parent:id.0.table().to_string()
 		})
 	}
 }
@@ -92,7 +149,7 @@ pub async fn list_fields<T>(id: RecordId, child:&str) -> Result<T> where T:Deser
 	let ctx = format!("querying for {child} from {id}");
 	let res:Option<T>=db()
 		.query(format!("select {child} as val from $id PARALLEL"))
-		.bind(("id",id)).await
+		.bind(("id", id.0)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take("val"))
 		.context(ctx)?;
@@ -110,10 +167,13 @@ pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<sql
 		_ => Err(Error::UnexpectedResult {expected:"list of entries".into(),found:value})
 	}.context(query_context)
 }
-pub(crate) async fn list_refs<'a,T>(id:&'static RecordId, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
+pub(crate) async fn list_refs<'a,T>(id:RecordId, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
-	let mut result = query(format!("select {selector} from $id.{} PARALLEL",col.as_ref()),("id",id)).await
+	let mut result = query(
+		format!("select {selector} from $id.{} PARALLEL",col.as_ref()),
+		("id",id.0)
+	).await
 		.context(&query_context)?;
 	if flatten {result=Value::flatten(result)}
 	match result
@@ -127,22 +187,24 @@ pub(crate) async fn list_refs<'a,T>(id:&'static RecordId, col:T, selector: Selec
 		)
 	}
 }
-pub(crate) async fn list_children<T>(id:&'static RecordId, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
+pub(crate) async fn list_children<T>(id:RecordId, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
 {
+	let ctx = format!("listing children of {id} in column {}",col.as_ref());
 	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), Selector::All, true).await?.into_iter()
 		.map(Entry::try_from)
 		.collect();
-	result.context(format!("listing children of {id} in column {}",col.as_ref()))
+	result.context(ctx)
 }
 
-pub(crate) async fn list_json<'a,T>(id:&'static RecordId, selector: Selector<'a>, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
+pub(crate) async fn list_json<'a,T>(id:RecordId, selector: Selector<'a>, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
 {
 	let list= list_refs(id, col, selector, true).await?;
 	Ok(list.into_iter().map(Value::into_json).collect())
 }
-pub(crate) async fn lookup(id:&'static RecordId) -> Result<Option<Entry>>
+pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
 {
-	query("select * from $id", ("id", id)).await
+	let ctx = format!("looking up {id}");
+	query("select * from $id", ("id", id.0)).await
 		.map_err(Error::from)
 		.and_then(|value| {
 			if let Value::Array(a) = &value {
@@ -151,44 +213,43 @@ pub(crate) async fn lookup(id:&'static RecordId) -> Result<Option<Entry>>
 			if !value.is_some(){ return Ok(None) }
 			Some(Entry::try_from(value)).transpose()
 		})
-		.context(format!("looking up {id}"))
+		.context(ctx)
 }
 
-async fn query_for_thing<T>(id:&Thing, col:T) -> Result<Thing> where T:AsRef<str>
+async fn query_for_record<T>(id:RecordId, col:T) -> Result<RecordId> where T:AsRef<str>
 {
 	let query_context=format!("querying for {} in {id}",col.as_ref());
-	let res:Option<Thing> = db()
+	let res:Option<RecordId> = db()
 		.query(format!("select {} from $id",col.as_ref()))
-		.bind(("id",id.to_owned())).await
+		.bind(("id",id.0)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take(col.as_ref()))
 		.context(&query_context)?;
 	res.ok_or(Error::NotFound.context(query_context))
 }
 
-pub async fn find_down_tree(id:&Thing) -> Result<Vec<Thing>>
+pub async fn find_down_tree(id:RecordId) -> Result<Vec<RecordId>>
 {
 	let query_context = format!("looking for parents of {id}");
-	match id.tb.as_str() {
+	match id.table() {
 		"instances" => {
-			let series = query_for_thing(id, "series").await.map_err(|e|e.context(&query_context))?;
-			let study = query_for_thing(&series, "study").await.map_err(|e|e.context(&query_context))?;
-			Ok(vec![id.to_owned(),series,study])
+			let series = query_for_record(id.clone(), "series").await.map_err(|e|e.context(&query_context))?;
+			let study = query_for_record(series.clone(), "study").await.map_err(|e|e.context(&query_context))?;
+			Ok(vec![id,series,study])
 		},
 		"series" => {
-			let study = query_for_thing(id, "study").await.map_err(|e|e.context(&query_context))?;
-			Ok(vec![id.to_owned(), study])
+			let study = query_for_record(id.clone(), "study").await.map_err(|e|e.context(&query_context))?;
+			Ok(vec![id, study])
 		},
 		"studies" => Ok(vec![id.to_owned()]),
-		_ => {Err(Error::InvalidTable {table:id.tb.to_string()}.context(query_context))}
+		_ => {Err(Error::InvalidTable {table:id.table().to_string()}.context(query_context))}
 	}
 }
 
-#[cfg(feature = "embedded")]
 pub async fn init_local(file:&std::path::Path) -> surrealdb::Result<()>
 {
 	let file = file.to_str().expect(format!(r#""{}" is an invalid filename"#,file.to_string_lossy()).as_str());
-	let file = format!("rocksdb://{file}");
+	let file = format!("surrealkv://{file}");
 	db().connect(file).await?;
 	init().await
 }

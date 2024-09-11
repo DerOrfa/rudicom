@@ -10,9 +10,9 @@ use self::Entry::{Instance, Series, Study};
 #[derive(Clone,Debug)]
 pub enum Entry
 {
-	Instance((sql::Thing,sql::Object)),
-	Series((sql::Thing,sql::Object)),
-	Study((sql::Thing,sql::Object))
+	Instance((db::RecordId,sql::Object)),
+	Series((db::RecordId,sql::Object)),
+	Study((db::RecordId,sql::Object))
 }
 
 impl Entry
@@ -26,7 +26,7 @@ impl Entry
 	{
 		self.get(key).map(|v|v.to_raw_string())
 	}
-	pub fn id(&self) -> &sql::Thing	{&self.as_ref()}
+	pub fn id(&self) -> &db::RecordId {&self.as_ref()}
 
 	pub fn name(&self) -> String
 	{
@@ -56,10 +56,10 @@ impl Entry
 	{
 		match self {
 			Instance(_) => {self.get_file().map(|f|vec![f])},
-			Series((id,_)) => db::list_fields(&id, "instances.file").await
+			Series((id,_)) => db::list_fields(id.clone(), "instances.file").await
 				.context(format!("listing files in series {id}")),
 
-			Study((id,_)) => db::list_fields(&id, "array::flatten(series.instances.file)").await
+			Study((id,_)) => db::list_fields(id.clone(), "array::flatten(series.instances.file)").await
 				.context(format!("listing files in study {id}")),
 		}
 	}
@@ -70,9 +70,9 @@ impl Entry
 		let size:u64=match self {
 			Instance(_) => self.get_file().map(|f|f.size),
 			Series((id,_)) => 
-				db::list_fields(&id, "math::sum(instances.file.size)").await,
+				db::list_fields(id.clone(), "math::sum(instances.file.size)").await,
 			Study((id,_)) => 
-				db::list_fields(&id, "math::sum(array::flatten(series.instances.file.size))").await,
+				db::list_fields(id.clone(), "math::sum(array::flatten(series.instances.file.size))").await,
 		}?;
 		Ok(Byte::from(size))
 	}
@@ -99,11 +99,11 @@ impl Entry
 	}
 }
 
-impl AsRef<sql::Thing> for Entry
+impl AsRef<db::RecordId> for Entry
 {
-	fn as_ref(&self) -> &sql::Thing {
+	fn as_ref(&self) -> &db::RecordId {
 		match self {
-			Instance(data)| Series(data) | Study(data) => &data.0
+			Instance((id,_))| Series((id,_)) | Study((id,_)) => id
 		}
 	}
 }
@@ -167,11 +167,12 @@ impl TryFrom<sql::Object> for Entry
 			.and_then(|id_val|
 				match id_val
 				{
-					sql::Value::Thing(id) => {
+					sql::Value::Thing(id) => 
+					{
 						match id.tb.as_str() {
-							"instances" => Ok(Instance((id, obj))),
-							"series" => Ok(Series((id, obj))),
-							"studies" => Ok(Study((id, obj))),
+							"instances" => Ok(Instance((db::RecordId::instance(id.id.to_raw()), obj))),
+							"series" => Ok(Series((db::RecordId::series(id.id.to_raw()), obj))),
+							"studies" => Ok(Study((db::RecordId::study(id.id.to_raw()), obj))),
 							_ => Err(Self::Error::InvalidTable{table:id.tb})
 						}
 					}

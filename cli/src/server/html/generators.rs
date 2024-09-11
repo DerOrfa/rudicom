@@ -4,22 +4,22 @@ use byte_unit::UnitType::Binary;
 use html::content::Navigation;
 use html::inline_text::Anchor;
 use html::root::{Body, Html};
-use html::tables::{Table, TableCell, TableRow};
 use html::tables::builders::TableCellBuilder;
+use html::tables::{Table, TableCell, TableRow};
 use surrealdb::sql;
 
 use crate::db;
-use crate::db::{Entry, find_down_tree};
+use crate::db::{find_down_tree, Entry};
 use crate::tools::{Context, Result};
 
 impl Entry {
     pub async fn make_nav(&self) -> Result<Navigation>
     {
         let mut anchors = Vec::<Anchor>::new();
-        let path= find_down_tree(self.id()).await
+        let path= find_down_tree(self.id().clone()).await
             .context(format!("Failed finding parents for {}", self.id()))?;
         for id in path {
-            anchors.push(db::lookup(&id).await?.unwrap().get_link());
+            anchors.push(db::lookup(id).await?.unwrap().get_link());
         }
 
         Ok(Navigation::builder().class("crumbs")
@@ -38,7 +38,7 @@ impl Entry {
     {
         let id = self.id();
         Anchor::builder()
-            .href(format!("/{}/{}/html",id.tb,id.id.to_raw()))
+            .href(format!("/{}/{}/html",id.table(),id.key()))
             .text(self.name())
             .build()
     }
@@ -122,14 +122,14 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
                 .push(table_from_map(instance.0));
             builder.heading_2(|h|h.text("Image"))
                 .paragraph(|p|
-                    p.image(|i|i.src(format!("/instances/{}/png",id.id.to_raw())))
+                    p.image(|i|i.src(format!("/instances/{}/png",id.key())))
                 );
         }
         Entry::Series((id,mut series)) => {
             series.remove("instances");
             series.remove("study");
             builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.0));
-            let mut instances=db::list_children(&id, "instances").await?;
+            let mut instances=db::list_children(id, "instances").await?;
             instances.sort_by_key(|s|s
                 .get_string("InstanceNumber")
                 .map_or(0,|s|s
@@ -145,7 +145,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             let keys=crate::config::get::<Vec<String>>("instance_tags").expect("failed to get instance_tags");
             let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
                 cell.image(|i|i.src(
-                    format!("/instances/{}/png?width=64&height=64",obj.id().id.to_raw())
+                    format!("/instances/{}/png?width=64&height=64",obj.id().key().to_string())
                 ));
             };
             let instance_text = format!("{} Instances",instances.len());
@@ -156,7 +156,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             study.remove("series");
             builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.0));
 
-            let mut series=db::list_children(&id, "series").await?;
+            let mut series=db::list_children(id, "series").await?;
             let mut filesizes=BTreeMap::new();
             for s in &series
             {

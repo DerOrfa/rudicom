@@ -1,23 +1,24 @@
-use axum::routing::{delete, get, post};
-use axum::extract::{Path, Query};
-use axum::response::{IntoResponse, Response};
-use std::io::Cursor;
-use dicom::pixeldata::image::ImageFormat;
-use axum::http::{header, StatusCode};
-use axum::Json;
-use axum_extra::body::AsyncReadBody;
-use axum::body::Bytes;
-use axum::extract::rejection::BytesRejection;
-use serde_json::json;
-use serde::Deserialize;
-use dicom::pixeldata::PixelDecoder;
 use crate::db;
 use crate::server::http_error::{HttpError, JsonError, TextError};
 use crate::storage::async_store;
-use crate::tools::{get_instance_dicom, lookup_instance_file, remove};
+use crate::tools::remove::remove;
 use crate::tools::store::store;
 use crate::tools::verify::verify_entry;
-use crate::tools::{Context,Error::DicomError};
+use crate::tools::{get_instance_dicom, lookup_instance_file};
+use crate::tools::{Context, Error::DicomError};
+use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{Path, Query};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, post};
+use axum::Json;
+use axum_extra::body::AsyncReadBody;
+use dicom::pixeldata::image::ImageFormat;
+use dicom::pixeldata::PixelDecoder;
+use serde::Deserialize;
+use serde_json::json;
+use std::io::Cursor;
 
 pub(super) fn router() -> axum::Router
 {
@@ -61,7 +62,7 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 			Json(json!({"Status":"Success"}))
 		).into_response()),
 		Some(ob) => {
-			let path = format!("/{}/{}",ob.id().tb,ob.id().id.to_raw());
+			let path = format!("/{}/{}",ob.id().table(),ob.id().key());
 			let ob = serde_json::Value::from(ob);
 			Ok((
 				StatusCode::FOUND,

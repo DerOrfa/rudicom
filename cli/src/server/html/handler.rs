@@ -1,24 +1,23 @@
-use std::cmp::Ordering;
-use std::collections::HashMap;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
-use axum::Json;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 
+use crate::db;
+use crate::db::{Entry, Selector};
+use crate::server::html::generators;
+use crate::server::http_error::TextError;
 use html::root::Body;
 use html::tables::builders::TableCellBuilder;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
-use surrealdb::sql;
 use tokio::task::JoinSet;
-use crate::db;
-use crate::db::{Entry, Selector};
-use crate::server::html::generators;
-use crate::server::http_error::TextError;
 
 #[derive(Deserialize)]
 pub(crate) struct ListingConfig {
@@ -59,12 +58,12 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     let mut counts=JoinSet::new();
     for stdy in &studies
     {
-        let id = sql::Thing::try_from(format!("instances_per_studies:[{}]",stdy.id()).as_str()).unwrap();
+        let id = db::RecordId::from(("instances_per_studies", format!("[{}]",stdy.id())));
         counts.spawn(db::InstancesPer::select(id));
     }
     // collect results from above
-    let mut instance_count : HashMap<_,_> = HashMap::new();
-    let mut filesizes : HashMap<_,_> = HashMap::new();
+    let mut instance_count = BTreeMap::new();
+    let mut filesizes = BTreeMap::new();
     while let Some(res) = counts.join_next().await
     {
         let info = res??;
@@ -93,7 +92,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
 
 pub(crate) async fn get_entry_html(Path(id):Path<(String,String)>) -> Result<Response,TextError>
 {
-    if let Some(entry) = db::lookup(&id.into()).await?
+    if let Some(entry) = db::lookup(id.into()).await?
     {
         let page = generators::entry_page(entry).await?;
         Ok(axum::response::Html(page.to_string()).into_response())

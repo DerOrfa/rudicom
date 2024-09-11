@@ -2,9 +2,8 @@ use axum::routing::get;
 use axum::Json;
 use axum::extract::Path;
 use axum::response::{IntoResponse, Response};
-use surrealdb::sql;
 use crate::db;
-use crate::db::Selector;
+use crate::db::{RecordId, Selector};
 use crate::server::http_error::JsonError;
 use crate::tools::{Context, Error};
 
@@ -24,37 +23,37 @@ async fn get_studies() -> Result<Json<Vec<serde_json::Value>>,JsonError>
 	Ok(Json(studies))
 }
 
-async fn get_entry(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
+async fn get_entry(Path(id):Path<(String, String)>) -> Result<Response,JsonError>
 {
-	let id = sql::Thing::from((table, id));
-	db::lookup(&id).await?
+	let id:RecordId = id.into();
+	db::lookup(id.clone()).await?
 		.ok_or(Error::IdNotFound {id}.into())
 		.map(|e|Json(serde_json::Value::from(e)).into_response())
 }
 
 async fn query(Path((table,id,query)):Path<(String, String, String)>) -> Result<Response,JsonError>
 {
-	let id = sql::Thing::from((table, id));
+	let id:RecordId = (table, id).into();
 	// @todo that lookup is only needed to trigger the NotFound
-	let e = db::lookup(&id).await?
+	let e = db::lookup(id.clone()).await?
 		.ok_or(Error::IdNotFound {id:id.clone()}).context(format!("Looking for {query} in {id}",))?;
 
 	let query=query.replace("/",".");
-	db::list_json(e.id(),Selector::All,query).await
+	db::list_json(e.id().clone(),Selector::All,query).await
 		.map(|v|Json(v).into_response())
 		.map_err(Error::into)
 }
 
-async fn get_entry_parents(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
+async fn get_entry_parents(Path(id):Path<(String, String)>) -> Result<Response,JsonError>
 {
-	let id = sql::Thing::from((table, id));
+	let id:RecordId = id.into();
 	let mut ret:Vec<serde_json::Value>=Vec::new();
-	let parents = db::find_down_tree(&id).await?;
+	let parents = db::find_down_tree(id.clone()).await?;
 
 	if parents.is_empty() {	return Err(Error::NotFound.context(format!("no parents for {id} found")).into()) }
 	for p_id in parents
 	{
-		let e=db::lookup(&p_id).await.transpose()
+		let e=db::lookup(p_id.clone()).await.transpose()
 			.ok_or(Error::NotFound)
 			.and_then(|r|r.map(serde_json::Value::from))
 			.context(format!("looking up parent {p_id} of {id}"))?;

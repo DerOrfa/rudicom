@@ -1,7 +1,8 @@
+use glob::{GlobError, PatternError};
 use std::fmt::{Debug, Display, Formatter};
 use surrealdb::sql;
 use thiserror::Error;
-use glob::{GlobError,PatternError};
+use crate::db::RecordId;
 
 #[derive(Error,Debug)]
 pub enum DicomError
@@ -109,9 +110,9 @@ pub enum Error
 		found: sql::Value,
 	},
 	#[error("Entry {id} is not an {expected}")]
-	UnexpectedEntry{
+	UnexpectedEntry {
 		expected: String,
-		id: sql::Thing,
+		id: RecordId,
 	},
 	#[error("Failed to parse {to_parse} ({source})")]
 	ParseError{
@@ -125,7 +126,7 @@ pub enum Error
 	#[error("No data found")]
 	NotFound,
 	#[error("{id} not found")]
-	IdNotFound{id:sql::Thing},
+	IdNotFound{id:RecordId},
 	#[error("checksum {checksum} for {file} doesn't fit")]
 	ChecksumErr{checksum:String,file:String},
 	#[error("Globbing pattern error {0}")]
