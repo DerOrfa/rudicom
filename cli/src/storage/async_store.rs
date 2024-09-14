@@ -34,7 +34,7 @@ pub fn read<T>(input: T) -> Result<DefaultDicomObject> where T:AsRef<[u8]>
 	from_reader(Cursor::new(input)).map_err(|e|DicomError(e.into()))
 }
 
-pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Result<Cursor<Vec<u8>>>{
+pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Result<Vec<u8>>{
 	let mut out = Cursor::new(Vec::new());
 	out.seek(SeekFrom::Start(128))?;
 	Write::write_all(&mut out, b"DICM")?;
@@ -46,8 +46,7 @@ pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Res
 		out.seek(SeekFrom::Start(0))?;
 		std::io::copy(&mut out,md5).unwrap();
 	}
-	out.seek(SeekFrom::Start(0))?;
-	Ok(out)
+	Ok(out.into_inner())
 }
 
 pub async fn compute_md5(filename:&Path) -> Result<md5::Digest>

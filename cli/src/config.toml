@@ -3,7 +3,7 @@ series_tags = ["SequenceName", "SeriesDate", "SeriesTime", "ProtocolName"] #Seri
 instance_tags = ["InstanceCreationDate", "InstanceCreationTime"] # InstanceNumber will always be there as its needed internally
 
 upload_sizelimit_mb = 10
-max_threads = 32
+max_files = 32 # max amount of concurrently processed files 
 
 #use dicom tag names in "{}" to generate file names (obviously those should be unique)
 #tag names can be followed by ":<" or ":>" and a number where resulting string will be cropped to the given size by
