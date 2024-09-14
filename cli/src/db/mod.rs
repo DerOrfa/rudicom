@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql::{Datetime, Idiom, Value};
+use surrealdb::sql::{Datetime, Id, Idiom, Value};
 use surrealdb::{sql, RecordIdKey, Response, Surreal};
 
 pub use entry::Entry;
@@ -43,6 +43,10 @@ impl RecordId {
 	pub(crate) fn study<I>(id: I) -> RecordId where RecordIdKey: From<I>
 	{
 		RecordId(surrealdb::RecordId::from(("studies",id)))
+	}
+	pub(crate) fn raw_key(&self) -> String {
+		if let Id::String(key) = self.key().clone().into_inner() {key} 
+		else  {panic!("Only string IDs are allowed")}
 	}
 }
 
@@ -116,9 +120,7 @@ impl InstancesPer
 	pub async fn select(id:RecordId) -> Result<Self>
 	{
 		let res:Option<Self>=db().select(&id.0).await?;
-		res.ok_or(Error::ElementMissing {
-			element:id.0.key().to_string(),parent:id.0.table().to_string()
-		})
+		res.ok_or(Error::ElementMissing {element:id.0.key().to_string(),parent:id.0.table().to_string()})
 	}
 }
 

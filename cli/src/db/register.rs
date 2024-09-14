@@ -14,7 +14,6 @@ use crate::db::{db, RecordId};
 static INSERT_STUDY:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_SERIES:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 static INSERT_INSTANCE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
-static DELETE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
 
 /// register a new instance using values in instance_meta
 /// if the series and study referred to in instance_meta do not exist already
@@ -44,7 +43,8 @@ pub async fn register(
 
 pub async fn unregister(id:RecordId) -> Result<sql::Value>
 {
-	let _:Option<surrealdb::Value> = db().delete(id.0).await?;
+	let r:Option<surrealdb::Value> = db().delete(id.0).await?;
+	dbg!(r);
 	todo!()
 }
 
@@ -88,7 +88,7 @@ pub async fn register_instance<'a>(
 	let study_tags = STUDY_TAGS.get_or_init(|| dcm::get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
 
 	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, instance_tags).into_iter()
-		.chain([("id", instance_id.clone().into()), ("series", instance_id.clone().into())])
+		.chain([("id", instance_id.clone().into()), ("series", series_id.clone().into())])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();

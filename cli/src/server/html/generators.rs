@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-
 use byte_unit::UnitType::Binary;
 use html::content::Navigation;
 use html::inline_text::Anchor;
@@ -38,7 +37,7 @@ impl Entry {
     {
         let id = self.id();
         Anchor::builder()
-            .href(format!("/{}/{}/html",id.table(),id.key()))
+            .href(format!("/{}/{}/html",id.table(),id.raw_key()))
             .text(self.name())
             .build()
     }
@@ -122,7 +121,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
                 .push(table_from_map(instance.0));
             builder.heading_2(|h|h.text("Image"))
                 .paragraph(|p|
-                    p.image(|i|i.src(format!("/instances/{}/png",id.key())))
+                    p.image(|i|i.src(format!("/instances/{}/png",id.raw_key())))
                 );
         }
         Entry::Series((id,mut series)) => {
@@ -145,7 +144,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             let keys=crate::config::get::<Vec<String>>("instance_tags").expect("failed to get instance_tags");
             let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
                 cell.image(|i|i.src(
-                    format!("/instances/{}/png?width=64&height=64",obj.id().key().to_string())
+                    format!("/instances/{}/png?width=64&height=64",obj.id().raw_key())
                 ));
             };
             let instance_text = format!("{} Instances",instances.len());

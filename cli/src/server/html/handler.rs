@@ -6,8 +6,7 @@ use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-
-
+use std::ops::Deref;
 use crate::db;
 use crate::db::{Entry, Selector};
 use crate::server::html::generators;
@@ -58,7 +57,8 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     let mut counts=JoinSet::new();
     for stdy in &studies
     {
-        let id = db::RecordId::from(("instances_per_studies", format!("[{}]",stdy.id())));
+        let stdy_id = surrealdb::Value::from(stdy.id().deref().clone());
+        let id = db::RecordId::from(("instances_per_studies", vec![stdy_id] ));
         counts.spawn(db::InstancesPer::select(id));
     }
     // collect results from above

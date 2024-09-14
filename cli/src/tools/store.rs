@@ -71,7 +71,7 @@ pub(crate) async fn import_file(filename:&Path) -> crate::tools::Result<Option<d
 		.context(format!("creating file info for {}",filename.to_string_lossy()))?;
 	let obj= fileinfo.read().await?;
 	let mut reg=db::register_instance(&obj,vec![
-		("file",sql::Object::try_from(fileinfo)?.into())
+		("file", sql::Object::try_from(fileinfo)?.into())
 	],None).await;
 	if let Ok(Some(existing)) = &mut reg
 	{
