@@ -11,35 +11,31 @@ define field created ON table instances value time::now() readonly;
 -- also update last_update on the series
 define event add_instance on table instances when $event = "CREATE"	then
 (
-    update $after.series set instances += $after.id, last_update = time::now() return none
+    relate ($after.series)->parent->($after.id) return none
 );
 -- when a series is added, add it to the series list of its parent study
 define event add_series on table series when $event = "CREATE" then
 (
-    update $after.study set series += $after.id return none
+    relate ($after.study)->parent->($after.id) return none
 );
 
 -- when an instance is removed, remove it from the instances list of its parent series and update last_update on the series
 -- remove the whole series if it would be empty after that
 define event del_instance on table instances when $event = "DELETE" then
 (
-    if array::len($before.series.instances)>1
-    then
-        update $before.series set instances -= $before.id, last_update = time::now() return none
-    else
+	if (select count from only instances_per_series:[$before.series]).count<1
+	then
         delete $before.series
-    end
+	end
 );
 -- when a series is removed, remove it from the series list of its parent study
 -- remove the whole study if it would be empty after that
 define event del_series on table series when $event = "DELETE" then
 (
-    if array::len($before.study.series)>1
-    then
-        update $before.study set series -= $before.id return none
-    else
+	if (select count from only instances_per_studies:[$before.study]).count<1
+	then
         delete $before.study
-    end
+	end
 );
 
 -- set up aggregates for fast lookup of overall size an count of instances per series/study

@@ -27,7 +27,7 @@ impl File {
     pub(crate) fn from_owned<T>(path:T, md5:md5::Digest, size:u64) -> File where PathBuf:From<T>
     {
         let path = PathBuf::from(path);
-        File{path,size:size, owned:true, md5:format!("{:x}", md5)}
+        File{path,size, owned:true, md5:format!("{:x}", md5)}
     }
     /// create file info for a not owned file
     /// - the file must exist

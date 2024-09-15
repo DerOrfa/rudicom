@@ -76,7 +76,7 @@ impl Ord for RecordId {
 		let tb=self.0.table().cmp(&other.0.table());
 		match tb {
 			Ordering::Equal => self.0.key().partial_cmp(&other.0.key()).expect("Failed to compare record keys"),
-			_ => return tb,
+			_ => tb,
 		}
 	}
 }
@@ -169,6 +169,7 @@ pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<sql
 		_ => Err(Error::UnexpectedResult {expected:"list of entries".into(),found:value})
 	}.context(query_context)
 }
+
 pub(crate) async fn list_refs<'a,T>(id:RecordId, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
 {
 	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
@@ -283,7 +284,7 @@ pub async fn changes(since:Datetime) -> Result<Vec<Entry>>
 	match res.pick(&sql::idiom("changes.update").expect("should be a valid idiom")).flatten()
 	{
 		Value::Array(a) => a.into_iter().map(Entry::try_from).collect(),
-		_ => return Err(Error::UnexpectedResult {expected:"array of changes".into(),found:res})
+		_ => Err(Error::UnexpectedResult {expected:"array of changes".into(),found:res})
 	}
 }
 
