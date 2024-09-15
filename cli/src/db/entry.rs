@@ -56,25 +56,40 @@ impl Entry
 	{
 		match self {
 			Instance(_) => {self.get_file().map(|f|vec![f])},
-			Series((id,_)) => db::list_fields(id.clone(), "instances.file").await
-				.context(format!("listing files in series {id}")),
+			Series((id,_)) => {
+				db::list_values(id.clone(), "->parent->instances.file").await
+					.context(format!("listing files in series {id}"))?
+					.into_iter().map(|v|db::File::try_from(v))
+					.collect()
+			},
 
-			Study((id,_)) => db::list_fields(id.clone(), "array::flatten(series.instances.file)").await
-				.context(format!("listing files in study {id}")),
+			Study((id,_)) => {
+				db::list_values(id.clone(), "->parent->series->parent->instances.file").await
+					.context(format!("listing files in study {id}"))?
+					.into_iter().map(|v|db::File::try_from(v))
+						.collect()
+			},
 		}
 	}
 	
 	/// summarize size of all files in this entry
 	pub async fn size(&self) -> Result<Byte>
 	{
-		let size:u64=match self {
-			Instance(_) => self.get_file().map(|f|f.size),
-			Series((id,_)) => 
-				db::list_fields(id.clone(), "math::sum(instances.file.size)").await,
-			Study((id,_)) => 
-				db::list_fields(id.clone(), "math::sum(array::flatten(series.instances.file.size))").await,
-		}?;
-		Ok(Byte::from(size))
+		if let Instance(_) = self {
+			self.get_file().map(|f|Byte::from(f.size))
+		} else {
+			let upper= match self {
+				Series((id,_)) => 
+					surrealdb::RecordId::from_table_key("instances_per_series",vec![surrealdb::Value::from(id.0.clone())]),
+				Study((id,_)) => 
+					surrealdb::RecordId::from_table_key("instances_per_studies",vec![surrealdb::Value::from(id.0.clone())]),
+				_ => panic!("invalid entry")
+			};
+			let res= db::list_values(upper.into(), "size").await?.into_iter().last()
+				.and_then(|v|v.coerce_to_i64().ok())
+				.map(|v|Byte::from(v as u64));
+			Ok(res.unwrap_or_default())
+		}
 	}
 
 	pub fn remove(&mut self,key:&str) -> Option<sql::Value>

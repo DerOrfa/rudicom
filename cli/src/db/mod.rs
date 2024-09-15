@@ -142,7 +142,30 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surreald
 		.query(qry)
 		.bind(bindings)
 		.await?;
-	result.take::<surrealdb::Value>(0usize).map(|v|v.into_inner())
+	result.take::<surrealdb::Value>(0usize)
+		.map(|v|v.into_inner())
+		.map(flatten_value)
+}
+
+fn flatten_value(v:Value) -> Value
+{
+	match v {
+		Value::Array(a) => {
+			match a.len() { 
+				0 => Value::Null,
+				1 => flatten_value(a.into_iter().last().unwrap()),
+				_ => Value::Array(a)
+			}
+		}
+		Value::Object(o) => {
+			match o.len() {
+				0 => Value::Null,
+				1 => flatten_value(o.into_iter().map(|(_,v)|v).last().unwrap()),
+				_ => Value::Object(o)
+			} 
+		}
+		_ => v
+	}
 }
 
 /// Executes `select {child} as val from $id`
@@ -150,7 +173,7 @@ pub async fn list_fields<T>(id: RecordId, child:&str) -> Result<T> where T:Deser
 {
 	let ctx = format!("querying for {child} from {id}");
 	let res:Option<T>=db()
-		.query(format!("select {child} as val from $id PARALLEL"))
+		.query(format!("select {child} as val from $id parallel"))
 		.bind(("id", id.0)).await
 		.and_then(Response::check)
 		.and_then(|mut r|r.take("val"))
@@ -162,7 +185,7 @@ pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<sql
 {
 	let table:sql::Table = table.into();
 	let query_context = format!("querying for {selector} in table {table}");
-	let value= query(format!("select {selector} from $table  PARALLEL"), ("table", table)).await.context(&query_context)?;
+	let value= query(format!("select {selector} from $table parallel"), ("table", table)).await.context(&query_context)?;
 	match value {
 		Value::Array(rows) => Ok(rows.0),
 		Value::None => Err(Error::NotFound),
@@ -170,38 +193,25 @@ pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<sql
 	}.context(query_context)
 }
 
-pub(crate) async fn list_refs<'a,T>(id:RecordId, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
+pub(crate) async fn list_values<T>(id:RecordId, q:T) -> Result<Vec<Value>> where T:Display
 {
-	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
-	let mut result = query(
-		format!("select {selector} from $id.{} PARALLEL",col.as_ref()),
-		("id",id.0)
-	).await
-		.context(&query_context)?;
-	if flatten {result=Value::flatten(result)}
-	match result
-	{
-		Value::Array(values) => Ok(values.0),
-		_ => Err(
-				Error::UnexpectedResult	{
-					expected: String::from("Array"),
-					found: result
-				}.context(query_context)
-		)
-	}
+	let res= query(format!("select {q} from only $id parallel"),("id",id.0)).await?;
+	if let Value::Array(a) = res {Ok(a.0)}
+	else {Ok(vec![res])}
 }
-pub(crate) async fn list_children<T>(id:RecordId, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
+
+pub(crate) async fn list_children(id:RecordId, q:&'static str) -> Result<Vec<Entry>>
 {
-	let ctx = format!("listing children of {id} in column {}",col.as_ref());
-	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), Selector::All, true).await?.into_iter()
+	let ctx = format!("listing children of {id}");
+	let result:Result<Vec<_>>= list_values(id,q).await?.into_iter()
 		.map(Entry::try_from)
 		.collect();
 	result.context(ctx)
 }
 
-pub(crate) async fn list_json<'a,T>(id:RecordId, selector: Selector<'a>, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
+pub(crate) async fn list_json(id:RecordId, q: &str) -> Result<Vec<serde_json::Value>>
 {
-	let list= list_refs(id, col, selector, true).await?;
+	let list= list_values(id, q).await?;
 	Ok(list.into_iter().map(Value::into_json).collect())
 }
 pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
@@ -210,9 +220,6 @@ pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
 	query("select * from $id", ("id", id.0)).await
 		.map_err(Error::from)
 		.and_then(|value| {
-			if let Value::Array(a) = &value {
-				if a.is_empty() { return Ok(None) }
-			};
 			if !value.is_some(){ return Ok(None) }
 			Some(Entry::try_from(value)).transpose()
 		})

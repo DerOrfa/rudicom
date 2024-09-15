@@ -128,7 +128,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             series.remove("instances");
             series.remove("study");
             builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.0));
-            let mut instances=db::list_children(id, "instances").await?;
+            let mut instances=db::list_children(id, "->parent->instances.*").await?;
             instances.sort_by_key(|s|s
                 .get_string("InstanceNumber")
                 .map_or(0,|s|s
@@ -155,7 +155,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             study.remove("series");
             builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.0));
 
-            let mut series=db::list_children(id, "series").await?;
+            let mut series=db::list_children(id,"->parent->series.*").await?;
             let mut filesizes=BTreeMap::new();
             for s in &series
             {
