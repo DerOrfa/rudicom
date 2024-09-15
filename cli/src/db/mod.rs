@@ -286,7 +286,7 @@ pub async fn version() -> surrealdb::Result<String>
 pub async fn changes(since:Datetime) -> Result<Vec<Entry>>
 {
 	let since = since.to_rfc3339_opts(SecondsFormat::Secs, true); 
-	let res=db().query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE "{since}" LIMIT 1000"#))
+	let res=db().query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE d"{since}" LIMIT 1000"#))
 		.await?.take::<surrealdb::Value>(0)?.into_inner();
 	match res.pick(&sql::idiom("changes.update").expect("should be a valid idiom")).flatten()
 	{
