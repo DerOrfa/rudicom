@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
-use surrealdb::sql;
+use surrealdb::{sql, Error};
 
 use dicom::object::{DefaultDicomObject, Tag};
 use dicom::dictionary_std::tags;
+use surrealdb::error::Db::QueryNotExecutedDetail;
 use surrealdb::opt::IntoQuery;
 use crate::db;
 use crate::dcm;
@@ -29,16 +30,30 @@ pub async fn register(
 	let ins_study= INSERT_STUDY.get_or_init(||"INSERT INTO studies $study_meta return before".into_query().unwrap());
 	let ins_series = INSERT_SERIES.get_or_init(||"INSERT INTO series $series_meta return before".into_query().unwrap());
 	let ins_inst = INSERT_INSTANCE.get_or_init(||"INSERT INTO instances $instance_meta return before".into_query().unwrap());
-	let mut res= super::db()
-		.query(ins_study.clone())
-		.query(ins_series.clone())
-		.query(ins_inst.clone())
-		.bind(("instance_meta",instance_meta))
-		.bind(("series_meta",series_meta))
-		.bind(("study_meta",study_meta))
-		.await?.check()?;
 
-	res.take::<surrealdb::Value>(2).map(|r|r.into_inner().first())
+	loop {
+		let mut res= super::db()
+			.query(ins_study.clone())
+			.query(ins_series.clone())
+			.query(ins_inst.clone())
+			.bind(("instance_meta",instance_meta.clone()))
+			.bind(("series_meta",series_meta.clone()))
+			.bind(("study_meta",study_meta.clone()))
+			.await?;
+		let mut errors= res.take_errors();
+		let series_error= errors.remove(&2usize);
+		if let Some(Error::Db(QueryNotExecutedDetail{ message })) = &series_error {
+			if message == "There was a problem with a datastore transaction: Transaction read conflict" {
+				continue
+			} else {
+				return Err(series_error.unwrap())
+			}
+		}
+		if let Some((_,last))= errors.into_iter().last() {
+			return Err(last);
+		}
+		return res.take::<surrealdb::Value>(2).map(|r|r.into_inner().first())
+	}
 }
 
 pub async fn unregister(id:RecordId) -> Result<sql::Value>
