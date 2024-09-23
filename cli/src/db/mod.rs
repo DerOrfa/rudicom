@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
@@ -119,17 +119,12 @@ impl InstancesPer
 {
 	pub async fn select(id:RecordId) -> Result<Self>
 	{
-		let res:Option<Self>=db().select(&id.0).await?;
+		let res:Option<Self>=DB.select(&id.0).await?;
 		res.ok_or(Error::ElementMissing {element:id.0.key().to_string(),parent:id.0.table().to_string()})
 	}
 }
 
-static DB: OnceLock<Surreal<Any>> = OnceLock::new();
-
-fn db() -> &'static Surreal<Any>
-{
-	DB.get_or_init(Surreal::init)
-}
+pub(crate) static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
 fn make_pick_from_valid(pick:&str) -> Idiom
 {
@@ -138,7 +133,7 @@ fn make_pick_from_valid(pick:&str) -> Idiom
 
 async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surrealdb::Result<Value>
 {
-	let mut result= db()
+	let mut result= DB
 		.query(qry)
 		.bind(bindings)
 		.await?;
@@ -149,7 +144,7 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surreald
 pub async fn list_fields<T>(id: RecordId, child:&str) -> Result<T> where T:DeserializeOwned, T:Default
 {
 	let ctx = format!("querying for {child} from {id}");
-	let res:Option<T>=db()
+	let res:Option<T>=DB
 		.query(format!("select {child} as val from $id PARALLEL"))
 		.bind(("id", id.0)).await
 		.and_then(Response::check)
@@ -221,7 +216,7 @@ pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
 async fn query_for_record<T>(id:RecordId, col:T) -> Result<RecordId> where T:AsRef<str>
 {
 	let query_context=format!("querying for {} in {id}",col.as_ref());
-	let res:Option<RecordId> = db()
+	let res:Option<RecordId> = DB
 		.query(format!("select {} from $id",col.as_ref()))
 		.bind(("id",id.0)).await
 		.and_then(Response::check)
@@ -252,33 +247,33 @@ pub async fn init_local(file:&std::path::Path) -> surrealdb::Result<()>
 {
 	let file = file.to_str().expect(format!(r#""{}" is an invalid filename"#,file.to_string_lossy()).as_str());
 	let file = format!("surrealkv://{file}");
-	db().connect(file).await?;
+	DB.connect(file).await?;
 	init().await
 }
 pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 {
-	db().connect(addr).await?;
+	DB.connect(addr).await?;
 
 	// Sign in as a namespace, database, or root user
-	db().signin(Root { username: "root", password: "root", }).await?;
+	DB.signin(Root { username: "root", password: "root", }).await?;
 	init().await
 }
 async fn init() -> surrealdb::Result<()>{
 	// Select a specific namespace / database
-	db().use_ns("namespace").use_db("database").await?;
-	db().query(include_str!("init.surql")).await?;
+	DB.use_ns("namespace").use_db("database").await?;
+	DB.query(include_str!("init.surql")).await?;
 	Ok(())
 }
 
 pub async fn version() -> surrealdb::Result<String>
 {
-	Ok(format!("{}",db().version().await?))
+	Ok(format!("{}",DB.version().await?))
 }
 
 pub async fn changes(since:Datetime) -> Result<Vec<Entry>>
 {
 	let since = since.to_rfc3339_opts(SecondsFormat::Secs, true); 
-	let res=db().query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE d"{since}" LIMIT 1000"#))
+	let res=DB.query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE d"{since}" LIMIT 1000"#))
 		.await?.take::<surrealdb::Value>(0)?.into_inner();
 	match res.pick(&sql::idiom("changes.update").expect("should be a valid idiom")).flatten()
 	{
@@ -313,7 +308,7 @@ pub async fn statistics() -> Result<Stats>
 		.filter_map(|v|sql::Number::try_from(v).ok()).map(|n|n.as_usize())
 		.map(Byte::from)
 		.reduce(|a,b|a.add(b).unwrap_or(Byte::MAX)).unwrap_or(Byte::MIN);
-	let health= match db().health().await{
+	let health= match DB.health().await{
 		Ok(_) => String::from("good"),
 		Err(e) => e.to_string()
 	};
@@ -324,7 +319,7 @@ pub async fn statistics() -> Result<Stats>
 	Ok(Stats{
 		studies,instances,health,version:env!("CARGO_PKG_VERSION").to_string(),
 		size_mb:format!("{:.2}",size.get_appropriate_unit(Binary)),
-		db_version:db().version().await?.to_string(),
+		db_version:DB.version().await?.to_string(),
 		activity:format!("{changes} updates within the last 10 seconds")
 	})
 }

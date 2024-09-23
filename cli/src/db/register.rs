@@ -1,20 +1,20 @@
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use surrealdb::{sql, Error};
 
-use dicom::object::{DefaultDicomObject, Tag};
-use dicom::dictionary_std::tags;
-use surrealdb::error::Db::QueryNotExecutedDetail;
-use surrealdb::opt::IntoQuery;
 use crate::db;
+use crate::db::{RecordId, DB};
 use crate::dcm;
 use crate::tools::extract_from_dicom;
+use dicom::dictionary_std::tags;
+use dicom::object::{DefaultDicomObject, Tag};
+use surrealdb::error::Db::QueryNotExecutedDetail;
+use surrealdb::opt::IntoQuery;
 use surrealdb::Result;
-use crate::db::{db, RecordId};
 
-static INSERT_STUDY:OnceLock<Vec<sql::Statement>> = OnceLock::new();
-static INSERT_SERIES:OnceLock<Vec<sql::Statement>> = OnceLock::new();
-static INSERT_INSTANCE:OnceLock<Vec<sql::Statement>> = OnceLock::new();
+static INSERT_STUDY:LazyLock<Vec<sql::Statement>> = LazyLock::new(||"INSERT IGNORE INTO studies $study_meta return none".into_query().unwrap());
+static INSERT_SERIES:LazyLock<Vec<sql::Statement>> = LazyLock::new(||"INSERT IGNORE INTO series $series_meta return none".into_query().unwrap());
+static INSERT_INSTANCE:LazyLock<Vec<sql::Statement>> = LazyLock::new(||"INSERT IGNORE INTO instances $instance_meta return before".into_query().unwrap());
 
 /// register a new instance using values in instance_meta
 /// if the series and study referred to in instance_meta do not exist already
@@ -27,15 +27,11 @@ pub async fn register(
 	study_meta:BTreeMap<String, sql::Value>)
 -> Result<sql::Value>
 {
-	let ins_study= INSERT_STUDY.get_or_init(||"INSERT INTO studies $study_meta return before".into_query().unwrap());
-	let ins_series = INSERT_SERIES.get_or_init(||"INSERT INTO series $series_meta return before".into_query().unwrap());
-	let ins_inst = INSERT_INSTANCE.get_or_init(||"INSERT INTO instances $instance_meta return before".into_query().unwrap());
-
 	loop {
-		let mut res= super::db()
-			.query(ins_study.clone())
-			.query(ins_series.clone())
-			.query(ins_inst.clone())
+		let mut res= super::DB
+			.query(INSERT_STUDY.clone())
+			.query(INSERT_SERIES.clone())
+			.query(INSERT_INSTANCE.clone())
 			.bind(("instance_meta",instance_meta.clone()))
 			.bind(("series_meta",series_meta.clone()))
 			.bind(("study_meta",study_meta.clone()))
@@ -58,7 +54,7 @@ pub async fn register(
 
 pub async fn unregister(id:RecordId) -> Result<sql::Value>
 {
-	let r:Option<surrealdb::Value> = db().delete(id.0).await?;
+	let r:Option<surrealdb::Value> = DB.delete(id.0).await?;
 	dbg!(r);
 	todo!()
 }
@@ -90,30 +86,26 @@ pub async fn register_instance<'a>(
 	add_meta:Vec<(&'a str,db::Value)>,
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>> {
-	pub static INSTANCE_TAGS: OnceLock<Vec<(String, Tag)>> = OnceLock::new();
-	pub static SERIES_TAGS: OnceLock<Vec<(String, Tag)>> = OnceLock::new();
-	pub static STUDY_TAGS: OnceLock<Vec<(String, Tag)>> = OnceLock::new();
+	pub static INSTANCE_TAGS: LazyLock<Vec<(String, Tag)>> = LazyLock::new(|| dcm::get_attr_list("instance_tags", vec!["InstanceNumber"]));
+	pub static SERIES_TAGS: LazyLock<Vec<(String, Tag)>> = LazyLock::new(|| dcm::get_attr_list("series_tags", vec!["SeriesDescription", "SeriesNumber"]));
+	pub static STUDY_TAGS: LazyLock<Vec<(String, Tag)>> = LazyLock::new(|| dcm::get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
 
 	let instance_id = RecordId::instance(extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?.as_ref());
 	let series_id = RecordId::series(extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?.as_ref());
 	let study_id = RecordId::study(extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?.as_ref());
 
-	let instance_tags = INSTANCE_TAGS.get_or_init(|| dcm::get_attr_list("instance_tags", vec!["InstanceNumber"]));
-	let series_tags = SERIES_TAGS.get_or_init(|| dcm::get_attr_list("series_tags", vec!["SeriesDescription", "SeriesNumber"]));
-	let study_tags = STUDY_TAGS.get_or_init(|| dcm::get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
-
-	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, instance_tags).into_iter()
+	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, &INSTANCE_TAGS).into_iter()
 		.chain([("id", instance_id.clone().into()), ("series", series_id.clone().into())])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
-	let series_meta: BTreeMap<_, _> = dcm::extract(&obj, series_tags).into_iter()
+	let series_meta: BTreeMap<_, _> = dcm::extract(&obj, &SERIES_TAGS).into_iter()
 		.chain([("id", series_id.into()), ("study", study_id.clone().into())])
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
-	let study_meta: BTreeMap<_, _> = dcm::extract(&obj, study_tags).into_iter()
+	let study_meta: BTreeMap<_, _> = dcm::extract(&obj, &STUDY_TAGS).into_iter()
 		.chain([("id", study_id.into())])
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
