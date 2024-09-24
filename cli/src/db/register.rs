@@ -9,12 +9,8 @@ use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::{DefaultDicomObject, Tag};
 use surrealdb::error::Db::QueryNotExecutedDetail;
-use surrealdb::opt::IntoQuery;
+use surrealdb::sql::Value;
 use surrealdb::Result;
-
-static INSERT_STUDY:LazyLock<Vec<sql::Statement>> = LazyLock::new(||"INSERT IGNORE INTO studies $study_meta return none".into_query().unwrap());
-static INSERT_SERIES:LazyLock<Vec<sql::Statement>> = LazyLock::new(||"INSERT IGNORE INTO series $series_meta return none".into_query().unwrap());
-static INSERT_INSTANCE:LazyLock<Vec<sql::Statement>> = LazyLock::new(||"INSERT IGNORE INTO instances $instance_meta return before".into_query().unwrap());
 
 /// register a new instance using values in instance_meta
 /// if the series and study referred to in instance_meta do not exist already
@@ -22,16 +18,14 @@ static INSERT_INSTANCE:LazyLock<Vec<sql::Statement>> = LazyLock::new(||"INSERT I
 /// if the instance exists already no change is done and the existing instance data is returned
 /// None otherwise (on a successful register)
 pub async fn register(
-	instance_meta:BTreeMap<String, sql::Value>,
-	series_meta:BTreeMap<String, sql::Value>,
-	study_meta:BTreeMap<String, sql::Value>)
--> Result<sql::Value>
+	instance_meta:BTreeMap<String, Value>,
+	series_meta:BTreeMap<String, Value>,
+	study_meta:BTreeMap<String, Value>)
+-> Result<Value>
 {
 	loop {
-		let mut res= super::DB
-			.query(INSERT_STUDY.clone())
-			.query(INSERT_SERIES.clone())
-			.query(INSERT_INSTANCE.clone())
+		let mut res= DB
+			.query("fn::register($instance_meta, $series_meta, $study_meta)")
 			.bind(("instance_meta",instance_meta.clone()))
 			.bind(("series_meta",series_meta.clone()))
 			.bind(("study_meta",study_meta.clone()))
@@ -95,18 +89,26 @@ pub async fn register_instance<'a>(
 	let study_id = RecordId::study(extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?.as_ref());
 
 	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, &INSTANCE_TAGS).into_iter()
-		.chain([("id", instance_id.clone().into()), ("series", series_id.clone().into())])
+		.chain([
+			("id", instance_id.clone().into()),
+			("series", series_id.clone().into())
+		])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
 	let series_meta: BTreeMap<_, _> = dcm::extract(&obj, &SERIES_TAGS).into_iter()
-		.chain([("id", series_id.into()), ("study", study_id.clone().into())])
+		.chain([
+			("id", series_id.into()),
+			("study", study_id.clone().into()),
+		])
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
 	let study_meta: BTreeMap<_, _> = dcm::extract(&obj, &STUDY_TAGS).into_iter()
-		.chain([("id", study_id.into())])
+		.chain([
+			("id", study_id.into()),
+		])
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
@@ -114,9 +116,7 @@ pub async fn register_instance<'a>(
 	if res.is_some() { // we just created an entry, set the guard if provided
 		Ok(Some(db::Entry::try_from(res)?))
 	} else { // data already existed - no data stored - return existing data
-		if let Some(g) = guard {
-			g.set(instance_id);
-		}
+		if let Some(g) = guard { g.set(instance_id); }
 		Ok(None) //and return None existing entry
 	}
 }
