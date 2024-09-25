@@ -8,7 +8,7 @@ use crate::dcm;
 use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::{DefaultDicomObject, Tag};
-use surrealdb::error::Db::QueryNotExecutedDetail;
+use surrealdb::error::Api::Query;
 use surrealdb::sql::Value;
 use surrealdb::Result;
 
@@ -30,19 +30,11 @@ pub async fn register(
 			.bind(("series_meta",series_meta.clone()))
 			.bind(("study_meta",study_meta.clone()))
 			.await?;
-		let mut errors= res.take_errors();
-		let series_error= errors.remove(&2usize);
-		if let Some(Error::Db(QueryNotExecutedDetail{ message })) = &series_error {
-			if message == "There was a problem with a datastore transaction: Transaction read conflict" {
-				continue
-			} else {
-				return Err(series_error.unwrap())
-			}
-		}
+		let errors= res.take_errors();
 		if let Some((_,last))= errors.into_iter().last() {
 			return Err(last);
 		}
-		return res.take::<surrealdb::Value>(2).map(|r|r.into_inner().first())
+		return res.take::<surrealdb::Value>(0).map(|r|r.into_inner().first())
 	}
 }
 
@@ -112,11 +104,26 @@ pub async fn register_instance<'a>(
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
-	let res = register(instance_meta, series_meta, study_meta).await?;
-	if res.is_some() { // we just created an entry, set the guard if provided
-		Ok(Some(db::Entry::try_from(res)?))
-	} else { // data already existed - no data stored - return existing data
-		if let Some(g) = guard { g.set(instance_id); }
-		Ok(None) //and return None existing entry
+	loop {
+		match register(instance_meta.clone(), series_meta.clone(), study_meta.clone()).await
+		{
+			Ok(v) => {
+				return if v.is_some() { // we just created an entry, set the guard if provided
+					Ok(Some(db::Entry::try_from(v)?))
+				} else { // data already existed - no data stored - return existing data
+					if let Some(g) = guard { g.set(instance_id); }
+					Ok(None) //and return None existing entry
+				}
+			}
+			Err(Error::Api(Query(message))) => {
+				if message == "The query was not executed due to a failed transaction. There was a problem with a datastore transaction: Transaction read conflict" {
+					continue // retry
+				} else {
+					return Err(Error::Api(Query(message)).into())
+				}
+			},
+			Err(e) => return Err(e.into())
+		}
 	}
+
 }

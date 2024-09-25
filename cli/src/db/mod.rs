@@ -313,14 +313,14 @@ pub async fn statistics() -> Result<Stats>
 		Err(e) => e.to_string()
 	};
 	
-	let timestamp = Utc::now()-TimeDelta::try_seconds(10).unwrap();
+	let timestamp = Utc::now()-TimeDelta::try_seconds(5).unwrap();
 	let changes=changes(timestamp.into()).await?.len();
 	
 	Ok(Stats{
 		studies,instances,health,version:env!("CARGO_PKG_VERSION").to_string(),
 		size_mb:format!("{:.2}",size.get_appropriate_unit(Binary)),
 		db_version:DB.version().await?.to_string(),
-		activity:format!("{changes} updates within the last 10 seconds")
+		activity:format!("{changes} updates within the last 5 seconds")
 	})
 }
 
