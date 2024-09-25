@@ -58,18 +58,19 @@ pub async fn get_instance_dicom(id:&str) -> Result<Option<DefaultDicomObject>>
 }
 pub(crate) async fn lookup_instance_file<I>(id:I) -> Result<Option<db::File>> where surrealdb::RecordIdKey: From<I>
 {
-	let id = db::RecordId::instance(id);
-	let id_str = id.to_string();
-	if let Some(mut e)= db::lookup(id).await
-		.map_err(|e|e.context(format!("failed looking for file in {id_str}")))?
-	{
-		let file = e.remove("file")
-			.ok_or(Error::ElementMissing {element:"file".into(),parent:id_str})?
-			.try_into()?;
-		Ok(Some(file))
-	} else {
-		Ok(None)
-	}
+	todo!();
+	// let id = db::RecordId::instance(id);
+	// let id_str = id.to_string();
+	// if let Some(mut e)= db::lookup(id).await
+	// 	.map_err(|e|e.context(format!("failed looking for file in {id_str}")))?
+	// {
+	// 	let file = e.remove("file")
+	// 		.ok_or(Error::ElementMissing {element:"file".into(),parent:id_str})?
+	// 		.try_into()?;
+	// 	Ok(Some(file))
+	// } else {
+	// 	Ok(None)
+	// }
 }
 
 pub async fn instances_for_entry(id:RecordId) -> Result<Vec<String>>

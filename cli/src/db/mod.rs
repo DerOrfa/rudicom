@@ -32,13 +32,24 @@ mod file;
 pub struct RecordId(surrealdb::RecordId);
 
 impl RecordId {
-	pub(crate) fn instance<I>(id: I) -> RecordId where RecordIdKey: From<I> 
+	pub(crate) fn instance<I1,I2,I3>(instance_id: I1, series_id:I2, study_id:I3 ) -> RecordId
+		where RecordIdKey: From<I1>, RecordIdKey: From<I2>, RecordIdKey: From<I3>
 	{
-		RecordId(surrealdb::RecordId::from(("instances",id)))
+		let index = RecordIdKey::from(vec![
+			RecordIdKey::from(study_id).into(),
+			RecordIdKey::from(series_id).into(),
+			RecordIdKey::from(instance_id).into(),
+		]);
+		RecordId(surrealdb::RecordId::from(("instances",index)))
 	}
-	pub(crate) fn series<I>(id: I) -> RecordId where RecordIdKey: From<I>
+	pub(crate) fn series<I1,I2>(series_id:I1, study_id:I2) -> RecordId
+		where RecordIdKey: From<I1>, RecordIdKey: From<I2>
 	{
-		RecordId(surrealdb::RecordId::from(("series",id)))
+		let index = RecordIdKey::from(vec![
+			RecordIdKey::from(study_id).into(),
+			RecordIdKey::from(series_id).into(),
+		]);
+		RecordId(surrealdb::RecordId::from(("series",index)))
 	}
 	pub(crate) fn study<I>(id: I) -> RecordId where RecordIdKey: From<I>
 	{

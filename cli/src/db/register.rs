@@ -76,31 +76,27 @@ pub async fn register_instance<'a>(
 	pub static SERIES_TAGS: LazyLock<Vec<(String, Tag)>> = LazyLock::new(|| dcm::get_attr_list("series_tags", vec!["SeriesDescription", "SeriesNumber"]));
 	pub static STUDY_TAGS: LazyLock<Vec<(String, Tag)>> = LazyLock::new(|| dcm::get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
 
-	let instance_id = RecordId::instance(extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?.as_ref());
-	let series_id = RecordId::series(extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?.as_ref());
-	let study_id = RecordId::study(extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?.as_ref());
+	let study_uid = extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?;
+	let series_uid = extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?;
+	let instance_uid = extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?;
+	
+	let study_id =  RecordId::study(study_uid.as_ref());
+	let series_id = RecordId::series(study_uid.as_ref(), series_uid.as_ref());
+	let instance_id = RecordId::instance(study_uid.as_ref(), series_uid.as_ref(), instance_uid.as_ref());
 
 	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, &INSTANCE_TAGS).into_iter()
-		.chain([
-			("id", instance_id.clone().into()),
-			("series", series_id.clone().into())
-		])
+		.chain([("id", instance_id.clone().into())])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
 	let series_meta: BTreeMap<_, _> = dcm::extract(&obj, &SERIES_TAGS).into_iter()
-		.chain([
-			("id", series_id.into()),
-			("study", study_id.clone().into()),
-		])
+		.chain([("id", series_id.into())])
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
 	let study_meta: BTreeMap<_, _> = dcm::extract(&obj, &STUDY_TAGS).into_iter()
-		.chain([
-			("id", study_id.into()),
-		])
+		.chain([("id", study_id.into()),])
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 

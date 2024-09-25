@@ -170,9 +170,7 @@ impl TryFrom<sql::Object> for Entry
 					sql::Value::Thing(id) => 
 					{
 						match id.tb.as_str() {
-							"instances" => Ok(Instance((db::RecordId::instance(id.id.to_raw()), obj))),
-							"series" => Ok(Series((db::RecordId::series(id.id.to_raw()), obj))),
-							"studies" => Ok(Study((db::RecordId::study(id.id.to_raw()), obj))),
+							"instances" | "series" | "studies" => Ok(Study((surrealdb::RecordId::from_inner(id).into(), obj))),
 							_ => Err(Self::Error::InvalidTable{table:id.tb})
 						}
 					}

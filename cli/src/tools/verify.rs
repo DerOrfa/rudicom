@@ -18,10 +18,11 @@ pub async fn verify_entry(id:RecordId) -> crate::tools::Result<Vec<File>>
 
 async fn verify_instance<I>(instance: I) -> crate::tools::Result<File> where surrealdb::RecordIdKey: From<I>, I: Clone
 {
-    let id = RecordId::instance(instance.clone());
-    match lookup_instance_file(instance).await?
-    {
-        Some(file) => file.verify().await.and(Ok(file)),
-        None => Err(Error::IdNotFound{id})
-    }
+    todo!()
+    // let id = RecordId::instance(instance.clone());
+    // match lookup_instance_file(instance).await?
+    // {
+    //     Some(file) => file.verify().await.and(Ok(file)),
+    //     None => Err(Error::IdNotFound{id})
+    // }
 }
