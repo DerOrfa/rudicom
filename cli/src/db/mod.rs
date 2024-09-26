@@ -1,8 +1,9 @@
+use base64::{engine::general_purpose, Engine as _};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::sync::LazyLock;
-
+use std::vec::IntoIter;
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
 use chrono::offset::Utc;
@@ -32,28 +33,43 @@ mod file;
 pub struct RecordId(surrealdb::RecordId);
 
 impl RecordId {
-	pub(crate) fn instance<I1,I2,I3>(instance_id: I1, series_id:I2, study_id:I3 ) -> RecordId
-		where RecordIdKey: From<I1>, RecordIdKey: From<I2>, RecordIdKey: From<I3>
+	fn str_to_vec(s: &str) -> IntoIter<i64>
 	{
-		let index = RecordIdKey::from(vec![
-			RecordIdKey::from(study_id).into(),
-			RecordIdKey::from(series_id).into(),
-			RecordIdKey::from(instance_id).into(),
-		]);
+		let s = format!("{s:+<64}").replace(".","+");
+		let bytes = general_purpose::STANDARD.decode(s).unwrap();
+		let mut bytes = bytes.as_slice();
+		let mut big:Vec<i64>=vec![];
+		while !bytes.is_empty() {
+			let (head,rest) = bytes.split_at(size_of::<u64>());
+			bytes = rest;
+			big.push(i64::from_ne_bytes(head.try_into().unwrap()));
+		}
+		big.into_iter()
+	}
+
+	pub(crate) fn instance(instance_id: &str, series_id: &str, study_id: &str ) -> RecordId
+	{
+		let index:Vec<_> = Self::str_to_vec(study_id)
+			.chain(Self::str_to_vec(series_id))
+			.chain(Self::str_to_vec(instance_id))
+			.map(RecordIdKey::from).map(surrealdb::Value::from)
+			.collect();
 		RecordId(surrealdb::RecordId::from(("instances",index)))
 	}
-	pub(crate) fn series<I1,I2>(series_id:I1, study_id:I2) -> RecordId
-		where RecordIdKey: From<I1>, RecordIdKey: From<I2>
+	pub(crate) fn series(series_id: &str, study_id: &str) -> RecordId
 	{
-		let index = RecordIdKey::from(vec![
-			RecordIdKey::from(study_id).into(),
-			RecordIdKey::from(series_id).into(),
-		]);
+		let index:Vec<_> = Self::str_to_vec(study_id)
+			.chain(Self::str_to_vec(series_id))
+			.map(RecordIdKey::from).map(surrealdb::Value::from)
+			.collect();
 		RecordId(surrealdb::RecordId::from(("series",index)))
 	}
-	pub(crate) fn study<I>(id: I) -> RecordId where RecordIdKey: From<I>
+	pub(crate) fn study(id: &str) -> RecordId
 	{
-		RecordId(surrealdb::RecordId::from(("studies",id)))
+		let index:Vec<_> = Self::str_to_vec(id)
+			.map(RecordIdKey::from).map(surrealdb::Value::from)
+			.collect();
+		RecordId(surrealdb::RecordId::from(("studies",index)))
 	}
 	pub(crate) fn raw_key(&self) -> String {
 		if let Id::String(key) = self.key().clone().into_inner() {key} 

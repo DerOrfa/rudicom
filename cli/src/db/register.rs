@@ -81,8 +81,8 @@ pub async fn register_instance<'a>(
 	let instance_uid = extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?;
 	
 	let study_id =  RecordId::study(study_uid.as_ref());
-	let series_id = RecordId::series(study_uid.as_ref(), series_uid.as_ref());
-	let instance_id = RecordId::instance(study_uid.as_ref(), series_uid.as_ref(), instance_uid.as_ref());
+	let series_id = RecordId::series(series_uid.as_ref(), study_uid.as_ref());
+	let instance_id = RecordId::instance(instance_uid.as_ref(), series_uid.as_ref(), study_uid.as_ref());
 
 	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, &INSTANCE_TAGS).into_iter()
 		.chain([("id", instance_id.clone().into())])

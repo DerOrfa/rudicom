@@ -37,3 +37,4 @@ thiserror = { version = "1.0" }
 dhat = { version = "0.3", optional = true }
 byte-unit = "5.1"
 chrono = "0.4"
+base64 = "0.22.1"
