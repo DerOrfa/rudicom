@@ -78,15 +78,17 @@ impl File {
     }
 }
 
-impl TryFrom<sql::Value> for File
+impl TryFrom<surrealdb::Value> for File
 {
     type Error = Error;
 
-    fn try_from(obj: sql::Value) -> std::result::Result<Self, Self::Error> {
+    fn try_from(obj: surrealdb::Value) -> std::result::Result<Self, Self::Error> {
         let context=format!("parsing database object {obj} as File object");
+        let obj = obj.into_inner();
+        let kind = obj.kindof();
         match obj {
             sql::Value::Object(obj) => obj.try_into(),
-            _ => Err(Error::UnexpectedResult {expected:"object".into(),found:obj})
+            _ => Err(Error::UnexpectedResult {expected:"object".into(),found:kind})
         }.context(context)
     }
 }

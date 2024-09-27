@@ -77,7 +77,7 @@ pub(crate) async fn import_file(filename:&Path) -> crate::tools::Result<Option<d
 	{
 		let my_md5 = format!("{:x}",checksum);
 		if existing.get_file().unwrap().get_md5() != my_md5.as_str(){
-			existing.insert("conflicting_md5",my_md5);
+			existing.insert("conflicting_md5",surrealdb::Value::from_inner(sql::Value::Strand(my_md5.into())));
 		}
 	}
 	reg

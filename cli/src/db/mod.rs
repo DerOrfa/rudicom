@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::IntoQuery;
-use surrealdb::sql::{Datetime, Id, Idiom, Value};
+use surrealdb::sql::{Datetime, Id, Idiom};
+use surrealdb::Value;
 use surrealdb::{sql, RecordIdKey, Response, Surreal};
 
 pub use entry::Entry;
@@ -57,10 +58,10 @@ impl Display for RecordId {
 	}
 }
 
-impl Into<Value> for RecordId
+impl Into<surrealdb::Value> for RecordId
 {
-	fn into(self) -> Value {
-		self.0.into_inner().into()
+	fn into(self) -> surrealdb::Value {
+		surrealdb::Value::from(self.0)
 	}
 }
 
@@ -137,7 +138,7 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surreald
 		.query(qry)
 		.bind(bindings)
 		.await?;
-	result.take::<surrealdb::Value>(0usize).map(|v|v.into_inner())
+	result.take::<Value>(0usize)
 }
 
 /// Executes `select {child} as val from $id`
@@ -153,15 +154,17 @@ pub async fn list_fields<T>(id: RecordId, child:&str) -> Result<T> where T:Deser
 	Ok(res.unwrap_or(T::default()))
 }
 
-pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<sql::Value>> where sql::Table:From<T>
+pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<Value>> where sql::Table:From<T>
 {
 	let table:sql::Table = table.into();
 	let query_context = format!("querying for {selector} in table {table}");
-	let value= query(format!("select {selector} from $table  PARALLEL"), ("table", table)).await.context(&query_context)?;
+	let value= query(format!("select {selector} from $table  PARALLEL"), ("table", table))
+		.await.context(&query_context)?.into_inner();
+	let kind = value.kindof();
 	match value {
-		Value::Array(rows) => Ok(rows.0),
-		Value::None => Err(Error::NotFound),
-		_ => Err(Error::UnexpectedResult {expected:"list of entries".into(),found:value})
+		sql::Value::Array(rows) => Ok(rows.0.into_iter().map(Value::from_inner).collect()),
+		sql::Value::None => Err(Error::NotFound),
+		_ => Err(Error::UnexpectedResult {expected:"list of entries".into(),found:kind})
 	}.context(query_context)
 }
 pub(crate) async fn list_refs<'a,T>(id:RecordId, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
@@ -179,7 +182,7 @@ pub(crate) async fn list_refs<'a,T>(id:RecordId, col:T, selector: Selector<'a>, 
 		_ => Err(
 				Error::UnexpectedResult	{
 					expected: String::from("Array"),
-					found: result
+					found: result.kindof()
 				}.context(query_context)
 		)
 	}
@@ -188,7 +191,7 @@ pub(crate) async fn list_children<T>(id:RecordId, col:T) -> Result<Vec<Entry>> w
 {
 	let ctx = format!("listing children of {id} in column {}",col.as_ref());
 	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), Selector::All, true).await?.into_iter()
-		.map(Entry::try_from)
+		.map(|v|Entry::try_from(surrealdb::Value::from_inner(v)))
 		.collect();
 	result.context(ctx)
 }
@@ -208,7 +211,7 @@ pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
 				if a.is_empty() { return Ok(None) }
 			};
 			if !value.is_some(){ return Ok(None) }
-			Some(Entry::try_from(value)).transpose()
+			Some(Entry::try_from(surrealdb::Value::from_inner(value))).transpose()
 		})
 		.context(ctx)
 }
@@ -277,8 +280,8 @@ pub async fn changes(since:Datetime) -> Result<Vec<Entry>>
 		.await?.take::<surrealdb::Value>(0)?.into_inner();
 	match res.pick(&sql::idiom("changes.update").expect("should be a valid idiom")).flatten()
 	{
-		Value::Array(a) => a.into_iter().map(Entry::try_from).collect(),
-		_ => return Err(Error::UnexpectedResult {expected:"array of changes".into(),found:res})
+		Value::Array(a) => a.into_iter().map(surrealdb::Value::from_inner).map(Entry::try_from).collect(),
+		_ => return Err(Error::UnexpectedResult {expected:"array of changes".into(),found:res.kindof()})
 	}
 }
 

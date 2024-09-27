@@ -26,7 +26,7 @@ async fn remove_instance<I>(id:I) -> Result<Option<db::Entry>>  where RecordIdKe
 	if res.is_none() {
 		Ok(None)
 	} else {
-		let removed = db::Entry::try_from(res)?;
+		let removed = db::Entry::try_from(surrealdb::Value::from_inner(res))?;
 		let file = removed.get_file()?;
 		if file.owned {
 			let mut path = file.get_path();
