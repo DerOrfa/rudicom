@@ -332,10 +332,10 @@ pub async fn statistics() -> Result<Stats>
 	})
 }
 
-pub fn get_from_object<Q>(obj: &sql::Object, key: Q) -> Result<&sql::Value>
+pub fn get_from_object<Q>(obj: &surrealdb::Object, key: Q) -> Result<&Value>
 	where String:From<Q>, 
 {
 	let element = String::from(key);
-	obj.0.get(&element)
+	obj.get(&element)
 		.ok_or(Error::ElementMissing {element,parent:"file object".into()})
 }

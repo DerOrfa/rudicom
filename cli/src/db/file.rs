@@ -87,7 +87,7 @@ impl TryFrom<surrealdb::Value> for File
         let obj = obj.into_inner();
         let kind = obj.kindof();
         match obj {
-            sql::Value::Object(obj) => obj.try_into(),
+            sql::Value::Object(obj) => surrealdb::Object::from_inner(obj).try_into(),
             _ => Err(Error::UnexpectedResult {expected:"object".into(),found:kind})
         }.context(context)
     }
@@ -123,16 +123,16 @@ impl Serialize for File
     }
 }
 
-impl TryFrom<sql::Object> for File
+impl TryFrom<surrealdb::Object> for File
 {
     type Error = Error;
 
-    fn try_from(obj: sql::Object) -> std::result::Result<Self, Self::Error> {
-        let path = get_from_object(&obj,"path").map(|v| v.clone().as_raw_string())?;
-        let owned = get_from_object(&obj,"owned").map(|v|v.is_true())?;
-        let md5 = get_from_object(&obj,"md5").map(|v|v.clone().as_raw_string())?;
+    fn try_from(obj: surrealdb::Object) -> std::result::Result<Self, Self::Error> {
+        let path = get_from_object(&obj,"path").map(|v| v.clone().into_inner().as_raw_string())?;
+        let owned = get_from_object(&obj,"owned").map(|v|v.into_inner_ref().is_true())?;
+        let md5 = get_from_object(&obj,"md5").map(|v|v.clone().into_inner().as_raw_string())?;
         let size = get_from_object(&obj,"size")
-            .map(|v|if let sql::Value::Number(num) = v { num.to_int()} else {0})?;
+            .map(|v|if let sql::Value::Number(num) = v.into_inner_ref() { num.to_int()} else {0})?;
         Ok(File{path:path.into(),owned,md5,size:size as u64})
     }
 }

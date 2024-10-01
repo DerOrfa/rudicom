@@ -5,7 +5,6 @@ use crate::config;
 use crate::db::IntoDbValue;
 use std::fmt::Write;
 use std::ops::Deref;
-use surrealdb::sql;
 use dicom::core::header::HasLength;
 use itertools::Itertools;
 use strfmt::{FmtError, strfmt_map};
