@@ -96,7 +96,7 @@ pub(crate) async fn table_from_objects(
             let mut cellbuilder=TableCell::builder();
             if let Some(value) = item
             {
-                cellbuilder.text(value.to_raw_string());
+                cellbuilder.text(value.into_inner().to_raw_string());
             } else {cellbuilder.text("----------");}
             row_builder.push(cellbuilder.build());
         }
@@ -118,7 +118,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
         Entry::Instance((id,mut instance)) => {
             instance.remove("series");
             builder.heading_2(|h|h.text("Attributes"))
-                .push(table_from_map(instance.0));
+                .push(table_from_map(instance.into_inner().0));
             builder.heading_2(|h|h.text("Image"))
                 .paragraph(|p|
                     p.image(|i|i.src(format!("/instances/{}/png",id.raw_key())))
@@ -127,7 +127,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
         Entry::Series((id,mut series)) => {
             series.remove("instances");
             series.remove("study");
-            builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.0));
+            builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.into_inner().0));
             let mut instances=db::list_children(id, "instances").await?;
             instances.sort_by_key(|s|s
                 .get_string("InstanceNumber")
@@ -153,7 +153,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
         }
         Entry::Study((id,mut study)) => {
             study.remove("series");
-            builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.0));
+            builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.into_inner().0));
 
             let mut series=db::list_children(id, "series").await?;
             let mut filesizes=BTreeMap::new();
@@ -172,7 +172,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
             let countinstances = |obj:&Entry,cell:&mut TableCellBuilder|{
                 if let Some(len)= obj
                     .get("instances")
-                    .and_then(|v|if let sql::Value::Array(a) = v {Some(a)} else {None} )
+                    .and_then(|v|if let sql::Value::Array(a) = v.into_inner_ref() {Some(a)} else {None} )
                     .map(|l|l.len())
                 {
                     cell.text(format!("{len} instances"));

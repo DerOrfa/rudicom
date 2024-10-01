@@ -1,30 +1,29 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use byte_unit::Byte;
-use surrealdb::sql;
+use surrealdb::{Value,Object};
 use crate::db;
-use crate::tools::{reduce_path, transform};
-use crate::tools::{Result,Context};
+use crate::tools::{reduce_path, transform,Result,Context};
 use self::Entry::{Instance, Series, Study};
 
 #[derive(Clone,Debug)]
 pub enum Entry
 {
-	Instance((db::RecordId,sql::Object)),
-	Series((db::RecordId,sql::Object)),
-	Study((db::RecordId,sql::Object))
+	Instance((db::RecordId,Object)),
+	Series((db::RecordId,Object)),
+	Study((db::RecordId,Object))
 }
 
 impl Entry
 {
-	pub fn get(&self, key:&str) -> Option<&sql::Value>
+	pub fn get(&self, key:&str) -> Option<&Value>
 	{
-		let obj:&sql::Object = self.as_ref();
+		let obj:&Object = self.as_ref();
 		obj.get(key)
 	}
 	pub fn get_string(&self, key:&str) -> Option<String>
 	{
-		self.get(key).map(|v|v.to_raw_string())
+		self.get(key).map(|v|v.into_inner_ref().to_raw_string())
 	}
 	pub fn id(&self) -> &db::RecordId {&self.as_ref()}
 
@@ -77,11 +76,11 @@ impl Entry
 		Ok(Byte::from(size))
 	}
 
-	pub fn remove(&mut self,key:&str) -> Option<sql::Value>
+	pub fn remove(&mut self,key:&str) -> Option<Value>
 	{
 		self.as_mut().remove(key)
 	}
-	pub fn insert<T,K>(&mut self,key:K,value:T) -> Option<sql::Value> where T:Into<sql::Value>,K:Into<String>
+	pub fn insert<T,K>(&mut self,key:K,value:T) -> Option<Value> where T:Into<Value>,K:Into<String>
 	{
 		self.as_mut().insert(key.into(),value.into())
 	}
@@ -108,73 +107,81 @@ impl AsRef<db::RecordId> for Entry
 	}
 }
 
-impl AsRef<sql::Object> for Entry
+impl AsRef<Object> for Entry
 {
-	fn as_ref(&self) -> &sql::Object {
+	fn as_ref(&self) -> &Object {
 		match self {
 			Instance(data)| Series(data) | Study(data) => &data.1
 		}
 	}
 }
-impl AsMut<sql::Object> for Entry
+impl AsMut<Object> for Entry
 {
-	fn as_mut(&mut self) -> &mut sql::Object {
+	fn as_mut(&mut self) -> &mut Object {
 		match self {
 			Instance(data)| Series(data) | Study(data) => &mut data.1
 		}
 	}
 }
 
-impl From<Entry> for sql::Object {
+impl From<Entry> for Object {
 	fn from(entry: Entry) -> Self {
 		match entry {
 			Instance(mut data)| Series(mut data) | Study(mut data) => {
-				data.1.insert("id".into(),data.0.into());
+				data.1.insert("id".into(),data.0.0);
 				data.1
 			}
 		}
 	}
 }
-impl From<Entry> for sql::Value {
-	fn from(entry: Entry) -> Self {	sql::Object::from(entry).into()	}
+impl From<Entry> for Value {
+	fn from(entry: Entry) -> Self {	
+		Value::from_inner(Object::from(entry).into_inner().into())	
+	}
 }
 
-impl TryFrom<sql::Value> for Entry
+impl TryFrom<Value> for Entry
 {
 	type Error = crate::tools::Error;
 
-	fn try_from(mut value: sql::Value) -> std::result::Result<Self, Self::Error>
+	fn try_from(value: Value) -> std::result::Result<Self, Self::Error>
 	{
-		match value {
-			sql::Value::Array(ref mut array) => {
-				if array.len() == 1 { Entry::try_from(array.0.remove(0)) } else {
-					Err(Self::Error::UnexpectedResult {expected:"single object".into(),found:value.to_owned()})
+		let kind = value.into_inner_ref().kindof();
+		let err = Self::Error::UnexpectedResult {expected:"single object".into(),found:kind};
+		match value.into_inner() {
+			surrealdb::sql::Value::Array(ref mut array) => {
+				if array.len() == 1 {
+					let last = array.drain(..1).last().unwrap();
+					Entry::try_from(Value::from_inner(last)) 
+				} else {
+					Err(err)
 				}
 			}
-			sql::Value::Object(obj) => Entry::try_from(obj),
-			_ => Err(Self::Error::UnexpectedResult {expected:"single object".into(),found:value}),
+			surrealdb::sql::Value::Object(obj) => Entry::try_from(surrealdb::Object::from_inner(obj)),
+			_ => Err(err),
 		}.context("trying to convert database value into an Entry")
 	}
 }
-impl TryFrom<sql::Object> for Entry
+impl TryFrom<Object> for Entry
 {
 	type Error = crate::tools::Error;
 
-	fn try_from(mut obj: sql::Object) -> std::result::Result<Self, Self::Error>
+	fn try_from(mut obj: Object) -> std::result::Result<Self, Self::Error>
 	{
 		obj.remove("id")
 			.ok_or(Self::Error::ElementMissing{element:"id".into(),parent:obj.to_string()})
+			.map(Value::into_inner)
 			.and_then(|id_val|
 				match id_val
 				{
-					sql::Value::Thing(id) => 
+					surrealdb::sql::Value::Thing(id) => 
 					{
 						match id.tb.as_str() {
 							"instances" | "series" | "studies" => Ok(Study((surrealdb::RecordId::from_inner(id).into(), obj))),
 							_ => Err(Self::Error::InvalidTable{table:id.tb})
 						}
 					}
-					_ => Err(Self::Error::UnexpectedResult{expected:"id".into(),found:id_val.into()})
+					_ => Err(Self::Error::UnexpectedResult{expected:"id".into(),found:id_val.kindof()})
 				}
 			).context("trying to convert database object into an Entry")
 	}
@@ -184,14 +191,13 @@ impl From<Entry> for serde_json::Value
 {
 	fn from(entry: Entry) -> Self {
 		// transform all Thing-objects into generic Objects to make them more useful in json
-		let transformer = |v|if let sql::Value::Thing(id)=v{
-			sql::Object::from(BTreeMap::from([
+		let transformer = |v|if let surrealdb::sql::Value::Thing(id)=v
+		{
+			surrealdb::sql::Object::from(BTreeMap::from([
 				("tb", id.tb.into()),
 				("id", id.id.to_raw().into()),
 			])).into()
 		} else {v};
-		let value = transform(entry.into(),transformer);
-		let object = sql::Object::try_from(value).unwrap();
-		serde_json::Value::from(sql::Value::Object(object))
+		transform(surrealdb::Value::from(entry).into_inner(),transformer).into()
 	}
 }

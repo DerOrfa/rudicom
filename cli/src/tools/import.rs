@@ -85,7 +85,7 @@ async fn import_file<T>(path:T, store:bool) -> ImportResult where T:Into<PathBuf
 				if let Some(conflicting_md5) = existed.remove("conflicting_md5"){
 					ImportResult::ExistedConflict {
 						filename,existed,
-						my_md5: conflicting_md5.as_raw_string().to_string()
+						my_md5: conflicting_md5.into_inner().as_raw_string().to_string()
 					}
 				} else {ImportResult::Existed { filename, existed }}
 			},

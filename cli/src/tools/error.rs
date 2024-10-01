@@ -1,6 +1,5 @@
 use glob::{GlobError, PatternError};
 use std::fmt::{Debug, Display, Formatter};
-use surrealdb::sql;
 use thiserror::Error;
 use crate::db::RecordId;
 
@@ -107,7 +106,7 @@ pub enum Error
 	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
 	UnexpectedResult{
 		expected: String,
-		found: sql::Value,
+		found: &'static str,
 	},
 	#[error("Entry {id} is not an {expected}")]
 	UnexpectedEntry {

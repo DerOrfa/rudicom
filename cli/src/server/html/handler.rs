@@ -47,7 +47,11 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         let sortby= sortby.as_str();
         studies.sort_by(|e1,e2|
             match (e1.get(sortby),e2.get(sortby)) {
-                (Some(v1),Some(v2)) => if config.sort_reverse {v1.cmp(v2)} else {v2.cmp(v1)},
+                (Some(v1),Some(v2)) => if config.sort_reverse {
+                    v1.partial_cmp(v2).unwrap_or(Ordering::Equal)
+                } else {
+                    v2.partial_cmp(v1).unwrap_or(Ordering::Equal)
+                },
                 _ => Ordering::Equal
             }
         )

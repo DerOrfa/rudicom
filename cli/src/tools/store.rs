@@ -28,7 +28,7 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 
 	let fileinfo = db::File::from_owned(gen_filepath(&obj)?, checksum.compute(), buffer.len() as u64);
 	let c_path = fileinfo.get_path();
-	let fileinfo:sql::Object = fileinfo.try_into()?;
+	let fileinfo = surrealdb::Value::try_from(fileinfo)?;
 
 	let registered = db::register_instance(&obj,
 	   vec![("file",fileinfo.into())],
@@ -71,13 +71,13 @@ pub(crate) async fn import_file(filename:&Path) -> crate::tools::Result<Option<d
 		.context(format!("creating file info for {}",filename.to_string_lossy()))?;
 	let obj= fileinfo.read().await?;
 	let mut reg=db::register_instance(&obj,vec![
-		("file", sql::Object::try_from(fileinfo)?.into())
+		("file", surrealdb::Value::try_from(fileinfo)?.into())
 	],None).await;
 	if let Ok(Some(existing)) = &mut reg
 	{
 		let my_md5 = format!("{:x}",checksum);
 		if existing.get_file().unwrap().get_md5() != my_md5.as_str(){
-			existing.insert("conflicting_md5",my_md5);
+			existing.insert("conflicting_md5",surrealdb::Value::from_inner(sql::Value::Strand(my_md5.into())));
 		}
 	}
 	reg

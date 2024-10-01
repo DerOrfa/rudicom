@@ -9,7 +9,6 @@ use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::{DefaultDicomObject, Tag};
 use surrealdb::error::Api::Query;
-use surrealdb::sql::Value;
 use surrealdb::Result;
 
 /// register a new instance using values in instance_meta
@@ -18,10 +17,10 @@ use surrealdb::Result;
 /// if the instance exists already no change is done and the existing instance data is returned
 /// None otherwise (on a successful register)
 pub async fn register(
-	instance_meta:BTreeMap<String, Value>,
-	series_meta:BTreeMap<String, Value>,
-	study_meta:BTreeMap<String, Value>)
--> Result<Value>
+	instance_meta:BTreeMap<String, surrealdb::Value>,
+	series_meta:BTreeMap<String, surrealdb::Value>,
+	study_meta:BTreeMap<String, surrealdb::Value>)
+-> Result<surrealdb::Value>
 {
 	loop {
 		let mut res= DB
@@ -34,7 +33,7 @@ pub async fn register(
 		if let Some((_,last))= errors.into_iter().last() {
 			return Err(last);
 		}
-		return res.take::<surrealdb::Value>(0).map(|r|r.into_inner().first())
+		return res.take::<surrealdb::Value>(0)
 	}
 }
 
@@ -69,7 +68,7 @@ impl Drop for RegistryGuard
 /// None is returned on a successful register
 pub async fn register_instance<'a>(
 	obj:&DefaultDicomObject,
-	add_meta:Vec<(&'a str,db::Value)>,
+	add_meta:Vec<(&'a str,surrealdb::Value)>,
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>> {
 	pub static INSTANCE_TAGS: LazyLock<Vec<(String, Tag)>> = LazyLock::new(|| dcm::get_attr_list("instance_tags", vec!["InstanceNumber"]));
@@ -79,7 +78,7 @@ pub async fn register_instance<'a>(
 	let study_uid = extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?;
 	let series_uid = extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?;
 	let instance_uid = extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?;
-	
+
 	let study_id =  RecordId::study(study_uid.as_ref());
 	let series_id = RecordId::series(series_uid.as_ref(), study_uid.as_ref());
 	let instance_id = RecordId::instance(instance_uid.as_ref(), series_uid.as_ref(), study_uid.as_ref());
@@ -104,7 +103,7 @@ pub async fn register_instance<'a>(
 		match register(instance_meta.clone(), series_meta.clone(), study_meta.clone()).await
 		{
 			Ok(v) => {
-				return if v.is_some() { // we just created an entry, set the guard if provided
+				return if v.into_inner_ref().is_some() { // we just created an entry, set the guard if provided
 					Ok(Some(db::Entry::try_from(v)?))
 				} else { // data already existed - no data stored - return existing data
 					if let Some(g) = guard { g.set(instance_id); }

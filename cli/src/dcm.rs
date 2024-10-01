@@ -5,7 +5,6 @@ use crate::config;
 use crate::db::IntoDbValue;
 use std::fmt::Write;
 use std::ops::Deref;
-use surrealdb::sql;
 use dicom::core::header::HasLength;
 use itertools::Itertools;
 use strfmt::{FmtError, strfmt_map};
@@ -36,11 +35,11 @@ pub fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
 		.collect()
 }
 
-pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a Vec<(String, Tag)>) -> Vec<(&'a str, sql::Value)>
+pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a Vec<(String, Tag)>) -> Vec<(&'a str, surrealdb::Value)>
 {
 	requested.iter()
 		.map(|(k,tag)|(k.as_str(),obj.element_opt(tag.clone()).unwrap()))
-		.map(|(k,v)|(k,v.cloned().into_db_value()))
+		.map(|(k,v)|(k,surrealdb::Value::from_inner(v.cloned().into_db_value())))
 		.collect()
 }
 
