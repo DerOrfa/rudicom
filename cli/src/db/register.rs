@@ -9,7 +9,6 @@ use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::{DefaultDicomObject, Tag};
 use surrealdb::error::Api::Query;
-use surrealdb::sql::Value;
 use surrealdb::Result;
 
 /// register a new instance using values in instance_meta
@@ -18,10 +17,10 @@ use surrealdb::Result;
 /// if the instance exists already no change is done and the existing instance data is returned
 /// None otherwise (on a successful register)
 pub async fn register(
-	instance_meta:BTreeMap<String, Value>,
-	series_meta:BTreeMap<String, Value>,
-	study_meta:BTreeMap<String, Value>)
--> Result<Value>
+	instance_meta:BTreeMap<String, surrealdb::Value>,
+	series_meta:BTreeMap<String, surrealdb::Value>,
+	study_meta:BTreeMap<String, surrealdb::Value>)
+-> Result<surrealdb::Value>
 {
 	loop {
 		let mut res= DB
@@ -34,7 +33,7 @@ pub async fn register(
 		if let Some((_,last))= errors.into_iter().last() {
 			return Err(last);
 		}
-		return res.take::<surrealdb::Value>(0).map(|r|r.into_inner().first())
+		return res.take::<surrealdb::Value>(0)
 	}
 }
 
@@ -69,7 +68,7 @@ impl Drop for RegistryGuard
 /// None is returned on a successful register
 pub async fn register_instance<'a>(
 	obj:&DefaultDicomObject,
-	add_meta:Vec<(&'a str,db::Value)>,
+	add_meta:Vec<(&'a str,surrealdb::Value)>,
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>> {
 	pub static INSTANCE_TAGS: LazyLock<Vec<(String, Tag)>> = LazyLock::new(|| dcm::get_attr_list("instance_tags", vec!["InstanceNumber"]));
@@ -80,10 +79,10 @@ pub async fn register_instance<'a>(
 	let series_id = RecordId::series(extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?.as_ref());
 	let study_id = RecordId::study(extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?.as_ref());
 
-	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, &INSTANCE_TAGS).into_iter()
+	let instance_meta: BTreeMap<_, surrealdb::Value> = dcm::extract(&obj, &INSTANCE_TAGS).into_iter()
 		.chain([
-			("id", instance_id.clone().into()),
-			("series", series_id.clone().into())
+			("id", surrealdb::Value::from(instance_id.clone().0)),
+			("series", surrealdb::Value::from(series_id.clone().0))
 		])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
@@ -108,8 +107,8 @@ pub async fn register_instance<'a>(
 		match register(instance_meta.clone(), series_meta.clone(), study_meta.clone()).await
 		{
 			Ok(v) => {
-				return if v.is_some() { // we just created an entry, set the guard if provided
-					Ok(Some(db::Entry::try_from(surrealdb::Value::from_inner(v))?))
+				return if v.into_inner_ref().is_some() { // we just created an entry, set the guard if provided
+					Ok(Some(db::Entry::try_from(v)?))
 				} else { // data already existed - no data stored - return existing data
 					if let Some(g) = guard { g.set(instance_id); }
 					Ok(None) //and return None existing entry

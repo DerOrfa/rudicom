@@ -93,7 +93,7 @@ impl TryFrom<surrealdb::Value> for File
     }
 }
 
-impl TryFrom<File> for sql::Object
+impl TryFrom<File> for surrealdb::Value
 {
     type Error = Error;
 
@@ -104,7 +104,7 @@ impl TryFrom<File> for sql::Object
         ret.insert("owned".into(),file.owned.into());
         ret.insert("md5".into(),file.md5.into());
         ret.insert("size".into(),file.size.into());
-        Ok(ret)
+        Ok(surrealdb::Value::from_inner(ret.into()))
     }
 }
 

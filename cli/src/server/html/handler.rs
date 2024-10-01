@@ -35,7 +35,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         .collect();
 
     let mut studies = db::list("studies",Selector::All).await?.into_iter()
-        .map(surrealdb::Value::from_inner).map(Entry::try_from).collect::<crate::tools::Result<Vec<_>>>()?;
+        .map(Entry::try_from).collect::<crate::tools::Result<Vec<_>>>()?;
 
     if let Some(filter) = config.filter
     {

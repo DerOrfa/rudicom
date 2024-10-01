@@ -174,11 +174,12 @@ pub(crate) async fn list_refs<'a,T>(id:RecordId, col:T, selector: Selector<'a>, 
 		format!("select {selector} from $id.{} PARALLEL",col.as_ref()),
 		("id",id.0)
 	).await
+		.map(|r| r.into_inner())
 		.context(&query_context)?;
-	if flatten {result=Value::flatten(result)}
+	if flatten {result=sql::Value::flatten(result)}
 	match result
 	{
-		Value::Array(values) => Ok(values.0),
+		sql::Value::Array(values) => Ok(values.0.into_iter().map(Value::from_inner).collect()),
 		_ => Err(
 				Error::UnexpectedResult	{
 					expected: String::from("Array"),
@@ -191,7 +192,7 @@ pub(crate) async fn list_children<T>(id:RecordId, col:T) -> Result<Vec<Entry>> w
 {
 	let ctx = format!("listing children of {id} in column {}",col.as_ref());
 	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), Selector::All, true).await?.into_iter()
-		.map(|v|Entry::try_from(surrealdb::Value::from_inner(v)))
+		.map(|v|Entry::try_from(v))
 		.collect();
 	result.context(ctx)
 }
@@ -199,15 +200,16 @@ pub(crate) async fn list_children<T>(id:RecordId, col:T) -> Result<Vec<Entry>> w
 pub(crate) async fn list_json<'a,T>(id:RecordId, selector: Selector<'a>, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
 {
 	let list= list_refs(id, col, selector, true).await?;
-	Ok(list.into_iter().map(Value::into_json).collect())
+	Ok(list.into_iter().map(|v|v.into_inner()).map(sql::Value::into_json).collect())
 }
 pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
 {
 	let ctx = format!("looking up {id}");
 	query("select * from $id", ("id", id.0)).await
 		.map_err(Error::from)
+		.map(|r| r.into_inner())
 		.and_then(|value| {
-			if let Value::Array(a) = &value {
+			if let sql::Value::Array(a) = &value {
 				if a.is_empty() { return Ok(None) }
 			};
 			if !value.is_some(){ return Ok(None) }
@@ -277,10 +279,10 @@ pub async fn changes(since:Datetime) -> Result<Vec<Entry>>
 {
 	let since = since.to_rfc3339_opts(SecondsFormat::Secs, true); 
 	let res=DB.query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE d"{since}" LIMIT 1000"#))
-		.await?.take::<surrealdb::Value>(0)?.into_inner();
+		.await?.take::<Value>(0)?.into_inner();
 	match res.pick(&sql::idiom("changes.update").expect("should be a valid idiom")).flatten()
 	{
-		Value::Array(a) => a.into_iter().map(surrealdb::Value::from_inner).map(Entry::try_from).collect(),
+		sql::Value::Array(a) => a.into_iter().map(Value::from_inner).map(Entry::try_from).collect(),
 		_ => return Err(Error::UnexpectedResult {expected:"array of changes".into(),found:res.kindof()})
 	}
 }
@@ -301,13 +303,16 @@ pub async fn statistics() -> Result<Stats>
 	let size_picker=make_pick_from_valid("size");
 	let count_picker=make_pick_from_valid("count");
 	let studies_v= list("instances_per_studies",Selector::Select("size")).await?;
-	let instances= list("instances_per_studies",Selector::Select("count")).await?
-		.into_iter().map(move|v|v.pick(&count_picker)).filter_map(|v|sql::Number::try_from(v).ok())
+	let instances= list("instances_per_studies",Selector::Select("count")).await?.into_iter()
+		.map(|v|v.into_inner())
+		.map(move|v|v.pick(&count_picker)).filter_map(|v|sql::Number::try_from(v).ok())
 		.map(|n|n.as_usize()).reduce(|a,b|a+b).unwrap_or_default();
 	let studies = studies_v.len();
 	
 	// let instances = instances_v.len();
-	let size = studies_v.into_iter().map(|v|v.pick(&size_picker))
+	let size = studies_v.into_iter()
+		.map(|v|v.into_inner())
+		.map(|v|v.pick(&size_picker))
 		.filter_map(|v|sql::Number::try_from(v).ok()).map(|n|n.as_usize())
 		.map(Byte::from)
 		.reduce(|a,b|a.add(b).unwrap_or(Byte::MAX)).unwrap_or(Byte::MIN);
@@ -327,7 +332,7 @@ pub async fn statistics() -> Result<Stats>
 	})
 }
 
-pub fn get_from_object<Q>(obj: &sql::Object, key: Q) -> Result<&Value>
+pub fn get_from_object<Q>(obj: &sql::Object, key: Q) -> Result<&sql::Value>
 	where String:From<Q>, 
 {
 	let element = String::from(key);
