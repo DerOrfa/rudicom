@@ -125,7 +125,7 @@ pub enum Error
 	#[error("No data found")]
 	NotFound,
 	#[error("{id} not found")]
-	IdNotFound{id:RecordId},
+	IdNotFound{id:String},
 	#[error("checksum {checksum} for {file} doesn't fit")]
 	ChecksumErr{checksum:String,file:String},
 	#[error("Globbing pattern error {0}")]

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
-use surrealdb::{sql, Error};
+use surrealdb::Error;
 
 use crate::db;
 use crate::db::{RecordId, DB};
@@ -22,26 +22,23 @@ pub async fn register(
 	study_meta:BTreeMap<String, surrealdb::Value>)
 -> Result<surrealdb::Value>
 {
-	loop {
-		let mut res= DB
-			.query("fn::register($instance_meta, $series_meta, $study_meta)")
-			.bind(("instance_meta",instance_meta.clone()))
-			.bind(("series_meta",series_meta.clone()))
-			.bind(("study_meta",study_meta.clone()))
-			.await?;
-		let errors= res.take_errors();
-		if let Some((_,last))= errors.into_iter().last() {
-			return Err(last);
-		}
-		return res.take::<surrealdb::Value>(0)
+	let mut res= DB
+		.query("fn::register($instance_meta, $series_meta, $study_meta)")
+		.bind(("instance_meta",instance_meta.clone()))
+		.bind(("series_meta",series_meta.clone()))
+		.bind(("study_meta",study_meta.clone()))
+		.await?;
+	let errors= res.take_errors();
+	if let Some((_,last))= errors.into_iter().last() {
+		Err(last)
+	} else {
+		res.take::<surrealdb::Value>(0)
 	}
 }
 
-pub async fn unregister(id:RecordId) -> Result<sql::Value>
+pub async fn unregister(id:RecordId) -> Result<surrealdb::Value>
 {
-	let r:Option<surrealdb::Value> = DB.delete(id.0).await?;
-	dbg!(r);
-	todo!()
+	DB.delete(surrealdb::opt::Resource::from(id.0)).await
 }
 
 #[derive(Default)]
@@ -79,23 +76,32 @@ pub async fn register_instance<'a>(
 	let series_uid = extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?;
 	let instance_uid = extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?;
 
-	let study_id =  RecordId::study(study_uid.as_ref());
-	let series_id = RecordId::series(series_uid.as_ref(), study_uid.as_ref());
-	let instance_id = RecordId::instance(instance_uid.as_ref(), series_uid.as_ref(), study_uid.as_ref());
+	let study_id =  RecordId::from_study(study_uid.as_ref());
+	let series_id = RecordId::from_series(series_uid.as_ref(), study_uid.as_ref());
+	let instance_id = RecordId::from_instance(instance_uid.as_ref(), series_uid.as_ref(), study_uid.as_ref());
 
 	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, &INSTANCE_TAGS).into_iter()
-		.chain([("id", instance_id.clone().into())])
+		.chain([
+			("id", instance_id.clone().into()),
+			("uid", surrealdb::Value::from_inner(instance_uid.as_ref().into()))
+		])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
 	let series_meta: BTreeMap<_, _> = dcm::extract(&obj, &SERIES_TAGS).into_iter()
-		.chain([("id", series_id.into())])
+		.chain([
+			("id", series_id.into()),
+			("uid", surrealdb::Value::from_inner(series_uid.as_ref().into()))
+		])
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
 	let study_meta: BTreeMap<_, _> = dcm::extract(&obj, &STUDY_TAGS).into_iter()
-		.chain([("id", study_id.into()),])
+		.chain([
+			("id", study_id.into()),
+			("uid", surrealdb::Value::from_inner(study_uid.as_ref().into()))
+		])
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
@@ -103,11 +109,11 @@ pub async fn register_instance<'a>(
 		match register(instance_meta.clone(), series_meta.clone(), study_meta.clone()).await
 		{
 			Ok(v) => {
-				return if v.into_inner_ref().is_some() { // we just created an entry, set the guard if provided
-					Ok(Some(db::Entry::try_from(v)?))
-				} else { // data already existed - no data stored - return existing data
+				return if v.into_inner_ref().is_true() { // we just created an entry, set the guard if provided
 					if let Some(g) = guard { g.set(instance_id); }
 					Ok(None) //and return None existing entry
+				} else { // data already existed - no data stored - return existing data
+					Some(db::Entry::try_from(v)).transpose()
 				}
 			}
 			Err(Error::Api(Query(message))) => {

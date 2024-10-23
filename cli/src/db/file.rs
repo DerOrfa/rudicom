@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde::ser::SerializeStruct;
 use surrealdb::sql;
 use tokio::io::AsyncReadExt;
-
-use crate::db::{Entry, get_from_object};
+use crate::db::Pickable;
 use crate::storage::async_store::compute_md5;
 use crate::tools::{complete_filepath, Context, Error, Result};
 
@@ -64,7 +63,7 @@ impl File {
         from_reader(Cursor::new(buffer)).map_err(|e|Error::DicomError(e.into()))
     }
 
-    pub(crate) async fn verify(&self) -> crate::tools::Result<()>
+    pub(crate) async fn verify(&self) -> Result<()>
     {
         let md5_stored = &self.md5;
         let filename = self.get_path();
@@ -127,28 +126,12 @@ impl TryFrom<surrealdb::Object> for File
 {
     type Error = Error;
 
-    fn try_from(obj: surrealdb::Object) -> std::result::Result<Self, Self::Error> {
-        let path = get_from_object(&obj,"path").map(|v| v.clone().into_inner().as_raw_string())?;
-        let owned = get_from_object(&obj,"owned").map(|v|v.into_inner_ref().is_true())?;
-        let md5 = get_from_object(&obj,"md5").map(|v|v.clone().into_inner().as_raw_string())?;
-        let size = get_from_object(&obj,"size")
-            .map(|v|if let sql::Value::Number(num) = v.into_inner_ref() { num.to_int()} else {0})?;
+    fn try_from(mut obj: surrealdb::Object) -> std::result::Result<Self, Self::Error> {
+        let path = obj.pick_remove("path").map(|v| v.into_inner().as_raw_string())?;
+        let owned = obj.pick_remove("owned").map(|v|v.into_inner().is_true())?;
+        let md5 = obj.pick_remove("md5").map(|v|v.into_inner().as_raw_string())?;
+        let size = obj.pick_remove("size")
+            .map(|v|if let sql::Value::Number(num) = v.into_inner() { num.to_int()} else {0})?;
         Ok(File{path:path.into(),owned,md5,size:size as u64})
-    }
-}
-
-impl TryFrom<Entry> for File
-{
-    type Error = Error;
-
-    fn try_from(entry: Entry) -> std::result::Result<Self, Self::Error> {
-        let context= format!("trying to extract a File object from {}",entry.id());
-        let result = if let Entry::Instance((id,mut inst)) = entry
-        {
-            inst.remove("file")
-                .ok_or(Error::ElementMissing{element:"file".into(), parent:id.to_string()})?
-                .try_into()
-        } else {Err(Error::UnexpectedEntry {expected:"instance".into(),id:entry.id().clone()})};
-        result.context(context)
     }
 }

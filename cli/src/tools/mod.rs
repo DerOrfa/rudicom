@@ -5,28 +5,16 @@ pub mod verify;
 mod error;
 
 use crate::db;
-use crate::db::RecordId;
+use crate::db::{lookup_uid, Entry, RecordId, DB};
 use crate::tools::Error::DicomError;
 use dicom::object::DefaultDicomObject;
 pub use error::{Context, Error, Result, Source};
-use std::collections::BTreeMap;
+use std::iter::repeat;
+use std::ops::Bound::Included;
 use std::path::{Path, PathBuf};
+use surrealdb::opt::Resource;
 use surrealdb::sql;
 
-pub fn transform(root:sql::Value, transformer:fn(sql::Value)->sql::Value) -> sql::Value
-{
-	match root {
-		sql::Value::Array(a) => {
-			let a:sql::Array=a.into_iter().map(|v|transform(v,transformer)).collect();
-			sql::Value::Array(a)
-		}
-		sql::Value::Object(o) => {
-			let o:BTreeMap<_,_>=o.into_iter().map(|(k,v)|(k,transform(v,transformer))).collect();
-			sql::Object::from(o).into()
-		}
-		_ => transformer(root)
-	}
-}
 pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 {
 	let first=paths.first().expect("path list must not be empty");
@@ -47,42 +35,51 @@ pub fn complete_filepath<P>(path:&P) -> PathBuf where P:AsRef<Path>
 		.expect(r#""storage_path" missing or invalid in config"#)
 		.join(path)
 }
-pub async fn get_instance_dicom(id:&str) -> Result<Option<DefaultDicomObject>>
+pub async fn get_instance_dicom(id:String) -> Result<Option<DefaultDicomObject>>
 {
 	match lookup_instance_file(id).await
 	{
 		Ok(Some(file)) => Some(file.read().await).transpose(),
 		Ok(None) => Ok(None),
-		Err(e) => Err(e.context(format!("looking up fileinfo for {id}")))
+		Err(e) => Err(e)
 	}
 }
-pub(crate) async fn lookup_instance_file<I>(id:I) -> Result<Option<db::File>> where surrealdb::RecordIdKey: From<I>
+pub async fn lookup_instance_file(id:String) -> Result<Option<db::File>>
 {
-	todo!();
-	// let id = db::RecordId::instance(id);
-	// let id_str = id.to_string();
-	// if let Some(mut e)= db::lookup(id).await
-	// 	.map_err(|e|e.context(format!("failed looking for file in {id_str}")))?
-	// {
-	// 	let file = e.remove("file")
-	// 		.ok_or(Error::ElementMissing {element:"file".into(),parent:id_str})?
-	// 		.try_into()?;
-	// 	Ok(Some(file))
-	// } else {
-	// 	Ok(None)
-	// }
+	let ctx = format!("failed looking for file for instance {id}");
+	match lookup_uid("instances",id).await
+	{
+		Ok(Some(e)) => Some(e.get_file()).transpose(),
+		Ok(None) => Ok(None),
+		Err(e) => Err(e) 
+	}.context(ctx)
 }
 
-pub async fn instances_for_entry(id:RecordId) -> Result<Vec<String>>
+pub async fn entries_for_record(id:&RecordId,table:&str) -> Result<Vec<db::Entry>>
 {
-	let context = format!("listing instances in {}",id);
-	let res = match id.table() {
-		"studies" => db::list_fields(id.clone(), "array::flatten(series.instances)").await,
-		"series" => db::list_fields(id.clone(), "instances").await,
-		"instances" => Ok(vec![id]),
-		_ => Err(Error::InvalidTable {table:id.table().to_string()})
-	}.map_err(|e|e.context(context))?;
-	Ok(res.into_iter().map(|r|r.key().to_string()).collect())
+	let size = match table { 
+		"instances" => 18,
+		"series" => 12,
+		_ => unreachable!()
+	};
+	let ctx = format!("listing children of {}",id);
+	let id_vec= id.key_vec().to_vec();
+	let max_gen = repeat(i64::MAX).map(sql::Value::from).take(size-id_vec.len());
+	let min_gen = repeat(i64::MIN).map(sql::Value::from).take(size-id_vec.len());
+
+	
+	let begin:Vec<_> = id_vec.iter().map(|v|v.clone()).chain(min_gen)
+		.map(surrealdb::Value::from_inner).collect();
+	let end:Vec<_> = id_vec.into_iter().chain(max_gen)
+		.map(surrealdb::Value::from_inner).collect();
+	let results = DB.select::<surrealdb::Value>(Resource::Table(table.to_string()))
+		.range((Included(begin),Included(end))).await?.into_inner();
+	if let sql::Value::Array(instances) = results {
+		instances.0.into_iter().map(surrealdb::Value::from_inner).map(Entry::try_from)
+			.collect::<Result<Vec<_>>>().context(ctx)
+	} else {
+		Err(Error::UnexpectedResult {expected:"list of entries".into(),found: results.kindof()})
+	}
 }
 
 pub fn extract_from_dicom(obj:&DefaultDicomObject,tag:dicom::core::Tag) -> Result<std::borrow::Cow<str>>

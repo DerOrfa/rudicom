@@ -19,6 +19,8 @@ use dicom::pixeldata::PixelDecoder;
 use serde::Deserialize;
 use serde_json::json;
 use std::io::Cursor;
+use crate::db::lookup_uid;
+use crate::tools::Error::NotFound;
 
 pub(super) fn router() -> axum::Router
 {
@@ -42,14 +44,18 @@ async fn get_statistics() -> Result<Json<db::Stats>,JsonError>
 	db::statistics().await.map(Json).map_err(|e|e.into())
 }
 
-async fn del_entry(Path(id):Path<(String, String)>) -> Result<(),JsonError>
+async fn del_entry(Path((table,id)):Path<(String, String)>) -> Result<(),JsonError>
 {
-	remove(id.into()).await.map_err(|e|e.into())
+	let ctx = format!("deleting {table}:{id}");
+	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(ctx)?;
+	remove(entry.id()).await.map_err(|e|e.into())
 }
 
-async fn verify(Path(id):Path<(String, String)>) -> Result<Json<Vec<db::File>>,JsonError>
+async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Json<Vec<db::File>>,JsonError>
 {
-	Ok(Json(verify_entry(id.into()).await?))
+	let ctx = format!("verifying {table}:{id}");
+	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(ctx)?;
+	Ok(Json(verify_entry(entry.id()).await?))
 }
 
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
@@ -62,7 +68,7 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 			Json(json!({"Status":"Success"}))
 		).into_response()),
 		Some(ob) => {
-			let path = format!("/{}/{}",ob.id().table(),ob.id().key());
+			let path = format!("/{}/{}",ob.id().table(),ob.id().str_key());
 			let ob = serde_json::Value::from(ob);
 			Ok((
 				StatusCode::FOUND,
@@ -77,10 +83,11 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 }
 
 async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> {
-	if let Some(file)=lookup_instance_file(id.as_str()).await.context("looking up fileinfo")?
+	let filename_for_header = format!(r#"attachment; filename="MR.{}.ima""#, id);
+	let not_found = format!("Instance {} not found", id);
+	if let Some(file)=lookup_instance_file(id).await.context("looking up fileinfo")?
 	{
 		let file= tokio::fs::File::open(file.get_path()).await?;
-		let filename_for_header = format!(r#"attachment; filename="MR.{}.ima""#, id);
 		Ok((
 			StatusCode::OK,
 			[
@@ -92,14 +99,14 @@ async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> 
 	}
 	else
 	{
-		Ok((StatusCode::NOT_FOUND, format!("Instance {} not found", id)).into_response())
+		Ok((StatusCode::NOT_FOUND, not_found).into_response())
 	}
 }
 
 #[cfg(feature = "dicom-json")]
 async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Response,JsonError>
 {
-	if let Some(obj)=get_instance_dicom(id.as_str()).await?
+	if let Some(obj)=get_instance_dicom(id).await?
 	{
 		dicom_json::to_value(obj)
 			.map(|v|Json(v).into_response())
@@ -119,13 +126,15 @@ pub(crate) struct ImageSize {
 
 async fn get_instance_png(Path(id):Path<String>, size: Option<Query<ImageSize>>) -> Result<Response,TextError>
 {
-	if let Some(obj)=get_instance_dicom(id.as_str()).await?
+	let ctx = format!("decoding pixel data of {id}");
+	let not_found = format!("Instance {} not found", id);
+	if let Some(obj)=get_instance_dicom(id).await?
 	{
 		let mut buffer = Cursor::new(Vec::<u8>::new());
 		let mut image = obj.decode_pixel_data()
 			.and_then(|p|p.to_dynamic_image(0))
 			.map_err(|e|DicomError(e.into()))
-			.context(format!("decoding pixel data of {id}"))?;
+			.context(ctx)?;
 		if let Some(size) = size{
 			image=image.thumbnail(size.width,size.height);
 		}
@@ -138,6 +147,6 @@ async fn get_instance_png(Path(id):Path<String>, size: Option<Query<ImageSize>>)
 	}
 	else
 	{
-		Ok((StatusCode::NOT_FOUND, format!("Instance {} not found", id)).into_response())
+		Ok((StatusCode::NOT_FOUND, not_found).into_response())
 	}
 }

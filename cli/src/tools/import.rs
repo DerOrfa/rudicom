@@ -1,12 +1,12 @@
-use std::path::PathBuf;
-use tokio::task::JoinError;
-use futures::{Stream, TryStreamExt, StreamExt};
+use crate::db::Entry;
+use crate::tools::Error;
+use futures::{Stream, StreamExt, TryStreamExt};
 use glob::glob;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize, Serializer};
 use serde::ser::SerializeStruct;
-use crate::db::{Entry, File};
-use crate::tools::Error;
+use serde::{Deserialize, Serialize, Serializer};
+use std::path::PathBuf;
+use tokio::task::JoinError;
 
 pub(crate) enum ImportResult {
 	Registered{filename:String},
@@ -145,12 +145,12 @@ pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig) -> crate::tools::R
 			let register_msg = match item {
 				ImportResult::Registered { filename } => Ok(filename),
 				ImportResult::ExistedConflict { filename, existed, .. } => {
-					File::try_from(existed).map(|f|f.get_path())
+					existed.get_file().map(|f|f.get_path())
 						.map(|p| format!("{filename} already existed as {} but checksum differs", p.to_string_lossy()))
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},
 				ImportResult::Existed { filename, existed } => {
-					File::try_from(existed).map(|f|f.get_path())
+					existed.get_file().map(|f|f.get_path())
 						.map(|p| format!("{filename} already existed as {}", p.to_string_lossy()))
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},

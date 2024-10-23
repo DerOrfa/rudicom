@@ -5,7 +5,8 @@ use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tracing;
-use crate::{config, db};
+use crate::config;
+use crate::db::DB;
 use crate::tools::Result;
 
 #[cfg(feature = "html")]
@@ -27,7 +28,7 @@ async fn server_info() -> Info
 {
 	Info{
 		version:format!("{} v{}",env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),
-		db_version:db::version().await.unwrap(),
+		db_version:format!("{}",DB.version().await.unwrap()),
 		storage_path:config::get::<String>("storage_path").unwrap(),
 	}
 }

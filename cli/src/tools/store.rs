@@ -1,13 +1,12 @@
-use std::path::Path;
-use dicom::object::DefaultDicomObject;
-use surrealdb::sql;
-use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use crate::dcm::gen_filepath;
-use crate::storage::async_store::{read, write};
 use crate::db;
 use crate::db::RegistryGuard;
+use crate::dcm::gen_filepath;
+use crate::storage::async_store::{read, write};
 use crate::tools::Context;
+use dicom::object::DefaultDicomObject;
+use std::path::Path;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn read_to_buffer(filename:&Path) -> crate::tools::Result<Vec<u8>>
 {
@@ -76,8 +75,8 @@ pub(crate) async fn import_file(filename:&Path) -> crate::tools::Result<Option<d
 	if let Ok(Some(existing)) = &mut reg
 	{
 		let my_md5 = format!("{:x}",checksum);
-		if existing.get_file().unwrap().get_md5() != my_md5.as_str(){
-			existing.insert("conflicting_md5",surrealdb::Value::from_inner(sql::Value::Strand(my_md5.into())));
+		if existing.get_file()?.get_md5() != my_md5.as_str(){
+			existing.insert("conflicting_md5",my_md5);
 		}
 	}
 	reg

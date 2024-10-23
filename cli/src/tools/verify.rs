@@ -1,28 +1,19 @@
 use crate::db::{File, RecordId};
-use crate::tools::{instances_for_entry, lookup_instance_file};
-use crate::tools::Error;
+use crate::tools::entries_for_record;
 
-pub async fn verify_entry(id:RecordId) -> crate::tools::Result<Vec<File>>
+pub async fn verify_entry(id:&RecordId) -> crate::tools::Result<Vec<File>>
 {
     let mut jobs=tokio::task::JoinSet::new();
-    for job in instances_for_entry(id).await?.into_iter().map(verify_instance)
+    let files:crate::tools::Result<Vec<_>> = entries_for_record(&id,"instances").await?.into_iter()
+        .map(|e|e.get_file()).collect(); 
+    for file in files? 
     {
-        jobs.spawn(job);
+        jobs.spawn(async { file.verify().await.map(|_|file) });
     }
     let mut ret=Vec::new();
     while let Some(result) = jobs.join_next().await {
-        ret.push(result??);
+        let file = result??; 
+        ret.push(file);
     }
     Ok(ret)
-}
-
-async fn verify_instance<I>(instance: I) -> crate::tools::Result<File> where surrealdb::RecordIdKey: From<I>, I: Clone
-{
-    todo!()
-    // let id = RecordId::instance(instance.clone());
-    // match lookup_instance_file(instance).await?
-    // {
-    //     Some(file) => file.verify().await.and(Ok(file)),
-    //     None => Err(Error::IdNotFound{id})
-    // }
 }

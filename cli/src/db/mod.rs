@@ -1,28 +1,24 @@
+use crate::tools::Error::{ElementMissing, UnexpectedResult};
+use crate::tools::{Context, Error, Result};
 use base64::{engine::general_purpose, Engine as _};
+use byte_unit::Byte;
+use byte_unit::UnitType::Binary;
+pub use entry::Entry;
+pub use file::File;
+pub use into_db_value::IntoDbValue;
+pub use register::{register_instance, unregister, RegistryGuard};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::sync::LazyLock;
 use std::vec::IntoIter;
-use byte_unit::Byte;
-use byte_unit::UnitType::Binary;
-use chrono::offset::Utc;
-use chrono::{SecondsFormat, TimeDelta};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::opt::IntoQuery;
-use surrealdb::sql::{Datetime, Id, Idiom};
-use surrealdb::Value;
-use surrealdb::{sql, RecordIdKey, Response, Surreal};
-
-pub use entry::Entry;
-pub use file::File;
-pub use into_db_value::IntoDbValue;
-pub use register::{register_instance, unregister, RegistryGuard};
-
-use crate::tools::{Context, Error, Result};
+use surrealdb::opt::{IntoQuery, Resource};
+use surrealdb::sql::Id;
+use surrealdb::{sql, RecordIdKey, Surreal};
+use surrealdb::{Object, Value};
 
 mod into_db_value;
 mod register;
@@ -31,7 +27,7 @@ mod file;
 
 
 #[derive(Deserialize, Debug, PartialEq, PartialOrd, Clone)]
-pub struct RecordId(surrealdb::RecordId);
+pub struct RecordId(pub surrealdb::RecordId);
 
 impl RecordId {
 	fn str_to_vec(s: &str) -> IntoIter<i64>
@@ -41,14 +37,14 @@ impl RecordId {
 		let mut bytes = bytes.as_slice();
 		let mut big:Vec<i64>=vec![];
 		while !bytes.is_empty() {
-			let (head,rest) = bytes.split_at(size_of::<u64>());
+			let (head,rest) = bytes.split_at(size_of::<i64>());
 			bytes = rest;
 			big.push(i64::from_ne_bytes(head.try_into().unwrap()));
 		}
 		big.into_iter()
 	}
 
-	pub(crate) fn instance(instance_id: &str, series_id: &str, study_id: &str ) -> RecordId
+	pub(crate) fn from_instance(instance_id: &str, series_id: &str, study_id: &str ) -> RecordId
 	{
 		let index:Vec<_> = Self::str_to_vec(study_id)
 			.chain(Self::str_to_vec(series_id))
@@ -57,7 +53,7 @@ impl RecordId {
 			.collect();
 		RecordId(surrealdb::RecordId::from(("instances",index)))
 	}
-	pub(crate) fn series(series_id: &str, study_id: &str) -> RecordId
+	pub(crate) fn from_series(series_id: &str, study_id: &str) -> RecordId
 	{
 		let index:Vec<_> = Self::str_to_vec(study_id)
 			.chain(Self::str_to_vec(series_id))
@@ -65,29 +61,63 @@ impl RecordId {
 			.collect();
 		RecordId(surrealdb::RecordId::from(("series",index)))
 	}
-	pub(crate) fn study(id: &str) -> RecordId
+	pub(crate) fn from_study(id: &str) -> RecordId
 	{
 		let index:Vec<_> = Self::str_to_vec(id)
 			.map(RecordIdKey::from).map(surrealdb::Value::from)
 			.collect();
 		RecordId(surrealdb::RecordId::from(("studies",index)))
 	}
-	pub(crate) fn raw_key(&self) -> String {
-		if let Id::String(key) = self.key().clone().into_inner() {key} 
-		else  {panic!("Only string IDs are allowed")}
+	pub(crate) fn str_key(&self) -> String {
+		let bytes= self.key_vec();
+		// the last 6 numbers in the vector are the actual ID (not parents)
+		let bytes:Vec<_> = bytes.split_at(bytes.len()-6).1.to_vec().into_iter()
+			.map(i64::try_from)
+			.map(|v|v.unwrap().to_ne_bytes())
+			.flatten().collect();
+		general_purpose::STANDARD.encode(bytes)
+			.trim_end_matches("+").to_string()
+			.replace("+",".")
+	}
+	pub(crate) fn key_vec(&self) -> &[sql::Value] {
+		if let Id::Array(key) = self.deref().key().into_inner_ref() {
+			if key.0.len() == 1 { //aggregate ids are arrays of arrays, just flatten that
+				if let sql::Value::Array(array)= &key.0[0]{
+					return array.0.as_slice()
+				}
+			}
+			key.0.as_slice()
+		}
+		else  {panic!("Only vector IDs are allowed")}
+	}
+	// pub(crate) fn key(&self) -> RecordIdKey {
+	// 	let key:Vec<_> = self.key_vec().into_iter()
+	// 		.map(|v|v.clone())
+	// 		.map(Value::from_inner)
+	// 		.collect();
+	// 	RecordIdKey::from(key)
+	// }
+
+	pub fn to_aggregate(&self) -> surrealdb::RecordId {
+		let me = Value::from(self.0.clone());
+		match self.table() {
+			"series" => surrealdb::RecordId::from_table_key("instances_per_series", vec![me]),
+			"studies" => surrealdb::RecordId::from(("instances_per_studies",vec![me])),
+			_ => panic!("cannot get aggregate data for {}:{}",self.table(),self.str_key())
+		}
 	}
 }
 
 impl Eq for RecordId {}
 impl Display for RecordId {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		self.0.fmt(f)
+		f.write_fmt(format_args!("{}:{}",self.table(),self.str_key()))
 	}
 }
 
-impl Into<surrealdb::Value> for RecordId
+impl Into<Value> for RecordId
 {
-	fn into(self) -> surrealdb::Value {
+	fn into(self) -> Value {
 		surrealdb::Value::from(self.0)
 	}
 }
@@ -104,60 +134,46 @@ impl Ord for RecordId {
 		let tb=self.0.table().cmp(&other.0.table());
 		match tb {
 			Ordering::Equal => self.0.key().partial_cmp(&other.0.key()).expect("Failed to compare record keys"),
-			_ => return tb,
+			_ => tb,
 		}
 	}
 }
 
-impl<R> From<R> for RecordId where surrealdb::RecordId: From<R> 
+impl<S> From<(S,Vec<Value>)> for RecordId where S: Into<String>
 {
-	fn from(value: R) -> Self {RecordId(value.into())}
-}
-
-pub enum Selector<'a>{
-	Select(&'a str),
-	All
-}
-
-impl<'a> AsRef<str> for Selector<'a>
-{
-	fn as_ref(&self) -> &str {
-		match *self {
-			Selector::Select(s) => s,
-			Selector::All => "*"
-		}
-	}
-}
-impl<'a> Display for Selector<'a>
-{
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		f.write_str(self.as_ref())
+	fn from(value: (S, Vec<Value>)) -> Self {
+		let (table,key) = value;
+		RecordId(surrealdb::RecordId::from_table_key(table,key))
 	}
 }
 
 #[derive(Deserialize,Debug)]
-pub struct InstancesPer
+pub struct AggregateData
 {
+	id:surrealdb::RecordId,
 	pub count:usize,
 	pub size:u64, 
-	pub me:RecordId
 }
 
-impl InstancesPer 
+impl AggregateData
 {
-	pub async fn select(id:RecordId) -> Result<Self>
+	pub fn get_inner_id(&self) -> RecordId
 	{
-		let res:Option<Self>=DB.select(&id.0).await?;
-		res.ok_or(Error::ElementMissing {element:id.0.key().to_string(),parent:id.0.table().to_string()})
+		let ret = if let Id::Array(array) = self.id.key().into_inner_ref()
+		{
+			let inner_id_value= array.get(0)
+				.expect("aggregate RecordIdKeys must be arrays with one element");
+			if let sql::Value::Thing(id) = inner_id_value {
+				let inner_key = RecordIdKey::try_from(Value::from_inner(id.clone().id.into()))
+					.expect("aggregate RecordIdKeys must be arrays of RecordIds");
+				surrealdb::RecordId::from_table_key(id.tb.clone(),inner_key)
+			} else {panic!("aggregate RecordIdKeys must be arrays of RecordIds")}
+		} else {panic!("aggregate RecordIdKeys must be arrays")};
+		RecordId(ret)
 	}
 }
 
 pub(crate) static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
-
-fn make_pick_from_valid(pick:&str) -> Idiom
-{
-	sql::idiom(pick).expect("should be a valid idiom")
-}
 
 async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surrealdb::Result<Value>
 {
@@ -168,109 +184,63 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surreald
 	result.take::<Value>(0usize)
 }
 
-/// Executes `select {child} as val from $id`
-pub async fn list_fields<T>(id: RecordId, child:&str) -> Result<T> where T:DeserializeOwned, T:Default
+pub(crate) async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where Resource: From<T>
 {
-	let ctx = format!("querying for {child} from {id}");
-	let res:Option<T>=DB
-		.query(format!("select {child} as val from $id PARALLEL"))
-		.bind(("id", id.0)).await
-		.and_then(Response::check)
-		.and_then(|mut r|r.take("val"))
-		.context(ctx)?;
-	Ok(res.unwrap_or(T::default()))
-}
-
-pub(crate) async fn list<'a,T>(table:T,selector: Selector<'a>) -> Result<Vec<Value>> where sql::Table:From<T>
-{
-	let table:sql::Table = table.into();
-	let query_context = format!("querying for {selector} in table {table}");
-	let value= query(format!("select {selector} from $table  PARALLEL"), ("table", table))
-		.await.context(&query_context)?.into_inner();
-	let kind = value.kindof();
-	match value {
-		sql::Value::Array(rows) => Ok(rows.0.into_iter().map(Value::from_inner).collect()),
-		sql::Value::None => Err(Error::NotFound),
-		_ => Err(Error::UnexpectedResult {expected:"list of entries".into(),found:kind})
-	}.context(query_context)
-}
-pub(crate) async fn list_refs<'a,T>(id:RecordId, col:T, selector: Selector<'a>, flatten:bool) -> Result<Vec<Value>> where T:AsRef<str>
-{
-	let query_context = format!("when looking up {} in {}",col.as_ref(),id);
-	let mut result = query(
-		format!("select {selector} from $id.{} PARALLEL",col.as_ref()),
-		("id",id.0)
-	).await
-		.map(|r| r.into_inner())
-		.context(&query_context)?;
-	if flatten {result=sql::Value::flatten(result)}
-	match result
-	{
-		sql::Value::Array(values) => Ok(values.0.into_iter().map(Value::from_inner).collect()),
-		_ => Err(
-				Error::UnexpectedResult	{
-					expected: String::from("Array"),
-					found: result.kindof()
-				}.context(query_context)
-		)
+	let val = DB.select::<Value>(Resource::from(table)).await?.into_inner();
+	let kind = val.kindof();
+	if let sql::Value::Array(array) = val {
+		array.0.into_iter().map(Value::from_inner).map(Entry::try_from).collect()
+	} else {
+		Err(UnexpectedResult {found:kind,expected:"list of entries".into()})
 	}
 }
-pub(crate) async fn list_children<T>(id:RecordId, col:T) -> Result<Vec<Entry>> where T:AsRef<str>
-{
-	let ctx = format!("listing children of {id} in column {}",col.as_ref());
-	let result:Result<Vec<_>>= list_refs(id, col.as_ref(), Selector::All, true).await?.into_iter()
-		.map(|v|Entry::try_from(v))
-		.collect();
-	result.context(ctx)
-}
 
-pub(crate) async fn list_json<'a,T>(id:RecordId, selector: Selector<'a>, col:T) -> Result<Vec<serde_json::Value>> where T:AsRef<str>
-{
-	let list= list_refs(id, col, selector, true).await?;
-	Ok(list.into_iter().map(|v|v.into_inner()).map(sql::Value::into_json).collect())
-}
 pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
 {
 	let ctx = format!("looking up {id}");
-	query("select * from $id", ("id", id.0)).await
-		.map_err(Error::from)
-		.map(|r| r.into_inner())
-		.and_then(|value| {
-			if let sql::Value::Array(a) = &value {
-				if a.is_empty() { return Ok(None) }
-			};
-			if !value.is_some(){ return Ok(None) }
-			Some(Entry::try_from(surrealdb::Value::from_inner(value))).transpose()
-		})
-		.context(ctx)
+	let v:Value = DB.select(surrealdb::opt::Resource::from(id.0)).await.context(ctx.clone())?;
+	if v.into_inner_ref().is_some(){
+		Some(Entry::try_from(v)).transpose().context(ctx)
+	} else {
+		Ok(None)
+	}
 }
 
-async fn query_for_record<T>(id:RecordId, col:T) -> Result<RecordId> where T:AsRef<str>
+pub(crate) async fn lookup_uid<S:AsRef<str>>(table:S, uid:String) -> Result<Option<Entry>>
 {
-	let query_context=format!("querying for {} in {id}",col.as_ref());
-	let res:Option<RecordId> = DB
-		.query(format!("select {} from $id",col.as_ref()))
-		.bind(("id",id.0)).await
-		.and_then(Response::check)
-		.and_then(|mut r|r.take(col.as_ref()))
-		.context(&query_context)?;
-	res.ok_or(Error::NotFound.context(query_context))
+	let ctx = format!("looking up {uid} in {}",table.as_ref());
+	let value= query(format!("select * from {} where uid == $uid",table.as_ref()), ("uid", uid))
+		.await.context(ctx.clone())?;
+	if value.into_inner_ref().is_truthy() {
+		Some(Entry::try_from(value)).transpose().context(ctx)
+	}else{
+		Ok(None)
+	}
+
 }
 
-pub async fn find_down_tree(id:RecordId) -> Result<Vec<RecordId>>
+/// returns [me,parent,parents_parent]
+pub fn find_down_tree(id:RecordId) -> Result<Vec<RecordId>>
 {
 	let query_context = format!("looking for parents of {id}");
+	let key_vec:Vec<_> = id.key_vec().to_vec().into_iter().map(Value::from_inner).collect();
 	match id.table() {
 		"instances" => {
-			let series = query_for_record(id.clone(), "series").await.map_err(|e|e.context(&query_context))?;
-			let study = query_for_record(series.clone(), "study").await.map_err(|e|e.context(&query_context))?;
-			Ok(vec![id,series,study])
+			let (study,_) = key_vec.split_at(6); // just study
+			let (series, _) = key_vec.split_at(12); // study + series
+			Ok(vec![
+				id,
+				("series",series.to_vec()).into(),
+				("studies",study.to_vec()).into()
+			])
 		},
 		"series" => {
-			let study = query_for_record(id.clone(), "study").await.map_err(|e|e.context(&query_context))?;
-			Ok(vec![id, study])
+			let (study,_) = key_vec.split_at(6);
+			Ok(vec![
+				id,("studies",study.to_vec()).into()
+			])
 		},
-		"studies" => Ok(vec![id.to_owned()]),
+		"studies" => Ok(vec![id]),
 		_ => {Err(Error::InvalidTable {table:id.table().to_string()}.context(query_context))}
 	}
 }
@@ -297,72 +267,78 @@ async fn init() -> surrealdb::Result<()>{
 	Ok(())
 }
 
-pub async fn version() -> surrealdb::Result<String>
-{
-	Ok(format!("{}",DB.version().await?))
-}
-
-pub async fn changes(since:Datetime) -> Result<Vec<Entry>>
-{
-	let since = since.to_rfc3339_opts(SecondsFormat::Secs, true); 
-	let res=DB.query(format!(r#"SHOW CHANGES FOR TABLE instances SINCE d"{since}" LIMIT 1000"#))
-		.await?.take::<Value>(0)?.into_inner();
-	match res.pick(&sql::idiom("changes.update").expect("should be a valid idiom")).flatten()
-	{
-		sql::Value::Array(a) => a.into_iter().map(Value::from_inner).map(Entry::try_from).collect(),
-		_ => return Err(Error::UnexpectedResult {expected:"array of changes".into(),found:res.kindof()})
-	}
-}
-
 #[derive(Serialize)]
 pub struct Stats
 {
 	studies:usize,
 	instances:usize,
-	size_mb:String,
+	stored_size:String,
 	db_version:String,
 	health:String,
 	version:String,
-	activity:String
 }
 pub async fn statistics() -> Result<Stats>
 {
-	let size_picker=make_pick_from_valid("size");
-	let count_picker=make_pick_from_valid("count");
-	let studies_v= list("instances_per_studies",Selector::Select("size")).await?;
-	let instances= list("instances_per_studies",Selector::Select("count")).await?.into_iter()
-		.map(|v|v.into_inner())
-		.map(move|v|v.pick(&count_picker)).filter_map(|v|sql::Number::try_from(v).ok())
-		.map(|n|n.as_usize()).reduce(|a,b|a+b).unwrap_or_default();
+	let studies_v:Vec<AggregateData> = DB.select("instances_per_studies").await?;
+
+	let size = studies_v.iter()
+		.map(|v|Byte::from(v.size))
+		.reduce(|a,b|a.add(b).unwrap_or(Byte::MAX)).unwrap_or(Byte::MIN);
+	let instances = studies_v.iter()
+		.map(|v|v.count)
+		.reduce(|a,b|a+b).unwrap_or(0);
 	let studies = studies_v.len();
 	
 	// let instances = instances_v.len();
-	let size = studies_v.into_iter()
-		.map(|v|v.into_inner())
-		.map(|v|v.pick(&size_picker))
-		.filter_map(|v|sql::Number::try_from(v).ok()).map(|n|n.as_usize())
-		.map(Byte::from)
-		.reduce(|a,b|a.add(b).unwrap_or(Byte::MAX)).unwrap_or(Byte::MIN);
 	let health= match DB.health().await{
 		Ok(_) => String::from("good"),
 		Err(e) => e.to_string()
 	};
 	
-	let timestamp = Utc::now()-TimeDelta::try_seconds(5).unwrap();
-	let changes=changes(timestamp.into()).await?.len();
-	
 	Ok(Stats{
 		studies,instances,health,version:env!("CARGO_PKG_VERSION").to_string(),
-		size_mb:format!("{:.2}",size.get_appropriate_unit(Binary)),
+		stored_size:format!("{:.2}",size.get_appropriate_unit(Binary)),
 		db_version:DB.version().await?.to_string(),
-		activity:format!("{changes} updates within the last 5 seconds")
 	})
 }
 
-pub fn get_from_object<Q>(obj: &surrealdb::Object, key: Q) -> Result<&Value>
-	where String:From<Q>, 
+trait Pickable
 {
-	let element = String::from(key);
-	obj.get(&element)
-		.ok_or(Error::ElementMissing {element,parent:"file object".into()})
+	fn pick_ref<Q>(&self, element:Q) -> Result<&Value> where String: From<Q>;
+	fn pick_remove<Q>(&mut self, element:Q) -> Result<Value> where String: From<Q>;
+}
+
+impl Pickable for Value {
+	fn pick_ref<Q>(&self, element:Q) -> Result<&Value> where String: From<Q>{
+		let slf = self.into_inner_ref();
+		let kind = slf.kindof();
+		match slf {
+			sql::Value::Object(obj) => Object::from_inner_ref(obj).pick_ref(element),
+			_ => Err(UnexpectedResult {expected:"entry object".into(),found:kind})
+		}
+	}
+
+	fn pick_remove<Q>(&mut self, element:Q) -> Result<Value> where String: From<Q> {
+		let slf = self.into_inner_mut();
+		let kind = slf.kindof();
+		match slf {
+			sql::Value::Object(obj) => Object::from_inner_mut(obj).pick_remove(element),
+			_ => Err(UnexpectedResult {expected:"entry object".into(),found:kind})
+		}
+	}
+}
+
+impl Pickable for Object {
+	fn pick_ref<Q>(&self, element:Q) -> Result<&Value> where String: From<Q>{
+		let element = String::from(element);
+		let slf = self.into_inner_ref();
+		slf.get(&element).map(Value::from_inner_ref)
+			.ok_or(ElementMissing {element,parent:"object".into()})
+	}
+
+	fn pick_remove<Q>(&mut self, element:Q) -> Result<Value> where String: From<Q> {
+		let element = String::from(element);
+		self.into_inner_mut().remove(&element).map(Value::from_inner)
+			.ok_or(ElementMissing {element,parent:"object".into()})
+	}
 }

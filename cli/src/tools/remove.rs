@@ -1,16 +1,14 @@
 use crate::db;
-use crate::tools::instances_for_entry;
+use crate::tools::entries_for_record;
 use crate::tools::Result;
 use std::path::{Path, PathBuf};
-use surrealdb::RecordIdKey;
 use tokio::fs::{remove_dir, remove_file};
-use crate::db::RecordId;
 
-pub async fn remove(id:db::RecordId) -> Result<()>
+pub async fn remove(id:&db::RecordId) -> Result<()>
 {
 	let mut jobs=tokio::task::JoinSet::new();
-	for job in instances_for_entry(id).await?
-		.into_iter().map(remove_instance)
+	for job in entries_for_record(id,"instances").await?
+		.into_iter().map(|e|remove_instance(e.id().clone()))
 	{
 		jobs.spawn(job);
 	}
@@ -20,25 +18,23 @@ pub async fn remove(id:db::RecordId) -> Result<()>
 	Ok(())
 }
 
-async fn remove_instance<I>(id:I) -> Result<Option<db::Entry>>  where RecordIdKey: From<I>
+async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 {
-	todo!()
-	// let res= db::unregister(RecordId::instance(id)).await?;
-	// if res.is_none() {
-	// 	Ok(None)
-	// } else {
-	// 	let removed = db::Entry::try_from(res)?;
-	// 	let file = removed.get_file()?;
-	// 	if file.owned {
-	// 		let mut path = file.get_path();
-	// 		remove_file(&path).await?;
-	// 		if path.pop(){// if there is a parent path, try to delete it as far as possible
-	// 			let storage_path:PathBuf = crate::config::get("storage_path").expect(r#"Failed to get "storage_path""#);
-	// 			remove_path(path,storage_path.as_path()).await?;
-	// 		}
-	// 	}
-	// 	Ok(Some(removed))
-	// }
+	let res = db::unregister(id).await?;
+	if res.into_inner_ref().is_none_or_null(){
+		return Ok(None)
+	}
+	let removed= db::Entry::try_from(res)?;
+	let file = removed.get_file()?;
+	if file.owned {
+		let mut path = file.get_path();
+		remove_file(&path).await?;
+		if path.pop(){// if there is a parent path, try to delete it as far as possible
+			let storage_path:PathBuf = crate::config::get("storage_path").expect(r#"Failed to get "storage_path""#);
+			remove_path(path,storage_path.as_path()).await?;
+		}
+	}
+	Ok(Some(removed))
 }
 
 /// removes given directory and all parents until path is empty or stop_path is reached

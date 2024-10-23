@@ -1,63 +1,63 @@
-use axum::routing::get;
-use axum::Json;
+use crate::db;
+use crate::server::http_error::JsonError;
+use crate::tools::Error::IdNotFound;
+use crate::tools::{entries_for_record, Context};
 use axum::extract::Path;
 use axum::response::{IntoResponse, Response};
-use crate::db;
-use crate::db::{RecordId, Selector};
-use crate::server::http_error::JsonError;
-use crate::tools::{Context, Error};
+use axum::routing::get;
+use axum::Json;
+
+async fn lookup_or(rec:&(String, String)) -> crate::tools::Result<db::Entry>
+{
+	db::lookup_uid(rec.0.as_str(), rec.1.clone()).await?.ok_or(IdNotFound {id:rec.1.clone()})
+}
 
 pub(super) fn router() -> axum::Router
 {
     axum::Router::new()
-        .route("/studies/json",get(get_studies))
-        .route("/:table/:id/json",get(get_entry))
+        .route("/:table/json",get(query_table))
+        .route("/:table/:id/json",get(query_entry))
 		.route("/:table/:id/parents",get(get_entry_parents))
-		.route("/:table/:id/json/*query",get(query))
+		.route("/:table/:id/instances",get(query_instances))
+		.route("/:table/:id/series",get(query_series))
 }
 
-async fn get_studies() -> Result<Json<Vec<serde_json::Value>>,JsonError>
+async fn query_instances(Path(path):Path<(String, String)>) -> Result<Response,JsonError>
 {
-	let studies:Vec<_> = db::list("studies",Selector::All).await?
-		.into_iter().map(|v|v.into_inner().into_json()).collect();
-	Ok(Json(studies))
+	let entry = lookup_or(&path).await?;
+	let instances = entries_for_record(entry.id(),"instances").await?;
+	Ok(Json(serde_json::Value::from(instances)).into_response())
+}
+async fn query_series(Path(path):Path<(String, String)>) -> Result<Response,JsonError>
+{
+	let entry = lookup_or(&path).await?;
+	let instances:Vec<_> = entries_for_record(entry.id(),"series").await?;
+	Ok(Json(serde_json::Value::from(instances)).into_response())
+}
+async fn query_table(Path(table):Path<String>) -> Result<Response,JsonError>
+{
+	let qry = db::list_entries(table).await?;
+	Ok(Json(serde_json::Value::from(qry)).into_response())
 }
 
-async fn get_entry(Path(id):Path<(String, String)>) -> Result<Response,JsonError>
+async fn query_entry(Path(path):Path<(String, String)>) -> Result<Response,JsonError>
 {
-	let id:RecordId = id.into();
-	db::lookup(id.clone()).await?
-		.ok_or(Error::IdNotFound {id}.into())
-		.map(|e|Json(serde_json::Value::from(e)).into_response())
+	let entry = lookup_or(&path).await?;
+	Ok(Json(serde_json::Value::from(entry)).into_response())
 }
 
-async fn query(Path((table,id,query)):Path<(String, String, String)>) -> Result<Response,JsonError>
+async fn get_entry_parents(Path(path):Path<(String, String)>) -> Result<Response,JsonError>
 {
-	let id:RecordId = (table, id).into();
-	// @todo that lookup is only needed to trigger the NotFound
-	let e = db::lookup(id.clone()).await?
-		.ok_or(Error::IdNotFound {id:id.clone()}).context(format!("Looking for {query} in {id}",))?;
-
-	let query=query.replace("/",".");
-	db::list_json(e.id().clone(),Selector::All,query).await
-		.map(|v|Json(v).into_response())
-		.map_err(Error::into)
-}
-
-async fn get_entry_parents(Path(id):Path<(String, String)>) -> Result<Response,JsonError>
-{
-	let id:RecordId = id.into();
-	let mut ret:Vec<serde_json::Value>=Vec::new();
-	let parents = db::find_down_tree(id.clone()).await?;
-
-	if parents.is_empty() {	return Err(Error::NotFound.context(format!("no parents for {id} found")).into()) }
+	let entry = lookup_or(&path).await?;
+	let mut ret:Vec<_>=vec![];
+	let parents = db::find_down_tree(entry.id().clone())?;
 	for p_id in parents
 	{
-		let e=db::lookup(p_id.clone()).await.transpose()
-			.ok_or(Error::NotFound)
-			.and_then(|r|r.map(serde_json::Value::from))
-			.context(format!("looking up parent {p_id} of {id}"))?;
-		ret.push(e);//@todo this results in split up id. Maybe fix that
+		let ctx = format!("looking up parent {p_id} of {}:{}",path.0,path.1);
+		let e=db::lookup(p_id.clone()).await
+			.and_then(|e|e.ok_or(IdNotFound {id:p_id.str_key()}))
+			.context(ctx)?;
+		ret.push(e);
 	}
-	Ok(Json(ret).into_response())
+	Ok(Json(serde_json::Value::from(ret)).into_response())
 }
