@@ -9,8 +9,8 @@ use crate::tools::import::{import_glob,import_glob_as_text,ImportConfig};
 pub(super) fn router() -> axum::Router
 {
     axum::Router::new()
-        .route("/tools/import/json",post(import_json))
-        .route("/tools/import/text",post(import_text))
+        .route("/import/json",post(import_json))
+        .route("/import/text",post(import_text))
 }
 
 async fn import_text(Query(config): Query<ImportConfig>, pattern:String) -> Result<Response,TextError>

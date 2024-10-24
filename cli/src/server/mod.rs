@@ -42,17 +42,18 @@ pub async fn serve(listener:TcpListener) -> Result<()>
 	// build our application with a route
 	let mut app = Router::new();
 	app = app
-		.route("/info/json",get(||async {Json(inf)}))
-		.merge(other::router())
-		.merge(json::router())
-		.merge(import::router())
+		.nest("/api", other::router()
+			.route("/info",get(||async {Json(inf)}))
+			.merge(json::router())
+		)
+		.nest("/tools",import::router())
 		.layer(DefaultBodyLimit::max(
 			config::get::<usize>("upload_sizelimit_mb").unwrap_or(10)*1024*1024
 		))
 		;
 	#[cfg(feature = "html")]
 	{
-		app = app.merge(html::router());
+		app = app.nest("/html", html::router());
 	}
 
 	// run it

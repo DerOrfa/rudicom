@@ -15,8 +15,8 @@ async fn lookup_or(rec:&(String, String)) -> crate::tools::Result<db::Entry>
 pub(super) fn router() -> axum::Router
 {
     axum::Router::new()
-        .route("/:table/json",get(query_table))
-        .route("/:table/:id/json",get(query_entry))
+        .route("/:table",get(query_table))
+        .route("/:table/:id",get(query_entry))
 		.route("/:table/:id/parents",get(get_entry_parents))
 		.route("/:table/:id/instances",get(query_instances))
 		.route("/:table/:id/series",get(query_series))
