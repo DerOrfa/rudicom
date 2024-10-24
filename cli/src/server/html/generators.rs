@@ -25,7 +25,7 @@ impl Entry {
 		Ok(Navigation::builder().class("crumbs")
 			.ordered_list(|l| {
 				l.list_item(|i|i.anchor(|a|
-					a.href("/studies/html").text("Studies")
+					a.href("/html/studies").text("Studies")
 				).class("crumb"));
 				anchors.into_iter().rev().fold(l, |l, anchor|
 					l.list_item(|i| i.push(anchor).class("crumb"))
@@ -38,7 +38,7 @@ impl Entry {
 	{
 		let id = self.id();
 		Anchor::builder()
-			.href(format!("/{}/{}/html",id.table(),id.str_key()))
+			.href(format!("/html/{}/{}",id.table(),id.str_key()))
 			.text(self.name())
 			.build()
 	}
@@ -122,7 +122,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 				.push(table_from_map(instance.into_inner().0));
 			builder.heading_2(|h|h.text("Image"))
 				.paragraph(|p|
-					p.image(|i|i.src(format!("/instances/{}/png",id.str_key())))
+					p.image(|i|i.src(format!("/api/instances/{}/png",id.str_key())))
 				);
 		}
 		Entry::Series((id,mut series)) => {
@@ -144,7 +144,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 			let keys=crate::config::get::<Vec<String>>("instance_tags").expect("failed to get instance_tags");
 			let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
 				cell.image(|i|i.src(
-					format!("/instances/{}/png?width=64&height=64",obj.id().str_key())
+					format!("/api/instances/{}/png?width=64&height=64",obj.id().str_key())
 				));
 			};
 			let instance_text = format!("{} Instances",instances.len());
