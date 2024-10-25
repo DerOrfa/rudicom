@@ -1,42 +1,17 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
-use surrealdb::Error;
+use surrealdb::Value;
 
 use crate::db;
-use crate::db::{RecordId, DB};
+use crate::db::{lookup, RecordId, DB};
 use crate::dcm;
 use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::{DefaultDicomObject, Tag};
-use surrealdb::error::Api::Query;
+use surrealdb::opt::Resource;
 use surrealdb::Result;
 
-/// register a new instance using values in instance_meta
-/// if the series and study referred to in instance_meta do not exist already
-/// they are created using series_meta and study_meta
-/// if the instance exists already no change is done and the existing instance data is returned
-/// None otherwise (on a successful register)
-pub async fn register(
-	instance_meta:BTreeMap<String, surrealdb::Value>,
-	series_meta:BTreeMap<String, surrealdb::Value>,
-	study_meta:BTreeMap<String, surrealdb::Value>)
--> Result<surrealdb::Value>
-{
-	let mut res= DB
-		.query("fn::register($instance_meta, $series_meta, $study_meta)")
-		.bind(("instance_meta",instance_meta.clone()))
-		.bind(("series_meta",series_meta.clone()))
-		.bind(("study_meta",study_meta.clone()))
-		.await?;
-	let errors= res.take_errors();
-	if let Some((_,last))= errors.into_iter().last() {
-		Err(last)
-	} else {
-		res.take::<surrealdb::Value>(0)
-	}
-}
-
-pub async fn unregister(id:RecordId) -> Result<surrealdb::Value>
+pub async fn unregister(id:RecordId) -> Result<Value>
 {
 	DB.delete(surrealdb::opt::Resource::from(id.0)).await
 }
@@ -59,13 +34,40 @@ impl Drop for RegistryGuard
 	}
 }
 
+async fn insert<'a>(
+	obj:&DefaultDicomObject,
+	record_id: RecordId,
+	add_meta:Vec<(&'a str,Value)>,
+	tags:&Vec<(String,Tag)>
+) -> crate::tools::Result<Option<Value>>
+{
+	let series_meta: BTreeMap<_, _> = dcm::extract(&obj, &tags).into_iter()
+		.chain([("uid", Value::from_inner(record_id.str_key().into()))])
+		.chain(add_meta)
+		.map(|(k,v)| (k.to_string(), v))
+		.collect();
+
+	let id = Resource::from(record_id.0);
+	let res = DB.insert::<Value>(id.clone()).content(series_meta).await;
+	match res
+	{
+		Ok(v) => Ok(None),
+		Err(surrealdb::Error::Api(surrealdb::error::Api::Query(s))) => {
+			let existing = DB.select::<Value>(id).await?;
+			if existing.into_inner_ref().is_some(){
+				Ok(Some(existing))
+			} else {Err(surrealdb::Error::Api(surrealdb::error::Api::Query(s)).into())}
+		},
+		Err(e) => Err(e.into()),
+	}
+}
 /// register dicom object of an instance
 /// if the instance already exists no change is done and
 /// the existing instance is returned as Entry
 /// None is returned on a successful register
 pub async fn register_instance<'a>(
 	obj:&DefaultDicomObject,
-	add_meta:Vec<(&'a str,surrealdb::Value)>,
+	add_meta:Vec<(&'a str,Value)>,
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>> {
 	pub static INSTANCE_TAGS: LazyLock<Vec<(String, Tag)>> = LazyLock::new(|| dcm::get_attr_list("instance_tags", vec!["InstanceNumber"]));
@@ -76,55 +78,31 @@ pub async fn register_instance<'a>(
 	let series_uid = extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?;
 	let instance_uid = extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?;
 
-	let study_id =  RecordId::from_study(study_uid.as_ref());
-	let series_id = RecordId::from_series(series_uid.as_ref(), study_uid.as_ref());
 	let instance_id = RecordId::from_instance(instance_uid.as_ref(), series_uid.as_ref(), study_uid.as_ref());
 
-	let instance_meta: BTreeMap<_, _> = dcm::extract(&obj, &INSTANCE_TAGS).into_iter()
-		.chain([
-			("id", instance_id.clone().into()),
-			("uid", surrealdb::Value::from_inner(instance_uid.as_ref().into()))
-		])
-		.chain(add_meta)
-		.map(|(k,v)| (k.to_string(), v))
-		.collect();
-
-	let series_meta: BTreeMap<_, _> = dcm::extract(&obj, &SERIES_TAGS).into_iter()
-		.chain([
-			("id", series_id.into()),
-			("uid", surrealdb::Value::from_inner(series_uid.as_ref().into()))
-		])
-		.map(|(k,v)| (k.to_string(), v))
-		.collect();
-
-	let study_meta: BTreeMap<_, _> = dcm::extract(&obj, &STUDY_TAGS).into_iter()
-		.chain([
-			("id", study_id.into()),
-			("uid", surrealdb::Value::from_inner(study_uid.as_ref().into()))
-		])
-		.map(|(k,v)| (k.to_string(), v))
-		.collect();
-
-	loop {
-		match register(instance_meta.clone(), series_meta.clone(), study_meta.clone()).await
-		{
-			Ok(v) => {
-				return if v.into_inner_ref().is_true() { // we just created an entry, set the guard if provided
-					if let Some(g) = guard { g.set(instance_id); }
-					Ok(None) //and return None existing entry
-				} else { // data already existed - no data stored - return existing data
-					Some(db::Entry::try_from(v)).transpose()
-				}
+	// try to avoid insert operation as much as possible
+	if let Some(existing) = lookup(instance_id.clone()).await?{
+		Ok(Some(existing))
+	} else {
+		let series_id= RecordId::from_series(&series_uid,&study_uid);
+		if DB.select::<Value>(Resource::from(&series_id.0)).await?.into_inner().is_none() {
+			let study_id = RecordId::from_study(&study_uid);
+			if DB.select::<Value>(Resource::from(&study_id.0)).await?.into_inner().is_none() {
+				insert(obj, study_id, vec![], &STUDY_TAGS).await?;
 			}
-			Err(Error::Api(Query(message))) => {
-				if message == "The query was not executed due to a failed transaction. There was a problem with a datastore transaction: Transaction read conflict" {
-					continue // retry
-				} else {
-					return Err(Error::Api(Query(message)).into())
+			insert(obj, series_id, vec![], &SERIES_TAGS).await?;
+		}
+		match insert(obj, instance_id.clone(), add_meta, &INSTANCE_TAGS).await?
+		{
+			None => { // ok actually stored (didn't exist already)
+				//set up the guard with the registered instance, so we can roll back the registry if needed
+				if let Some(guard) = guard{
+					guard.set(instance_id);
 				}
-			},
-			Err(e) => return Err(e.into())
+				Ok(None)
+			}
+			// actually there was an instance after all (race condition)
+			Some(existing) => Some(db::Entry::try_from(existing)).transpose()
 		}
 	}
-
 }
