@@ -29,7 +29,7 @@ impl ValueEnum for LogLevel
 }
 
 #[derive(Args,Debug)]
-#[group(required = true, multiple = false)]
+#[group(required = false, multiple = false)]
 pub(super) struct Endpoint{
 	/// hostname of the database
 	#[arg(long, value_hint = Hostname)]

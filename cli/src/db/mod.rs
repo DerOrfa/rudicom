@@ -120,12 +120,10 @@ pub fn find_down_tree(id:RecordId) -> Result<Vec<RecordId>>
 	}
 }
 
-pub async fn init_local(file:&std::path::Path) -> surrealdb::Result<()>
+pub async fn init_file(file:&std::path::Path) -> surrealdb::Result<()>
 {
 	let file = file.to_str().expect(format!(r#""{}" is an invalid filename"#,file.to_string_lossy()).as_str());
-	let file = format!("surrealkv://{file}");
-	DB.connect(file).await?;
-	init().await
+	init_local(format!("surrealkv://{file}").as_str()).await
 }
 pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 {
@@ -133,6 +131,11 @@ pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 
 	// Sign in as a namespace, database, or root user
 	DB.signin(Root { username: "root", password: "root", }).await?;
+	init().await
+}
+pub async fn init_local(addr:&str) -> surrealdb::Result<()>
+{
+	DB.connect(addr).await?;
 	init().await
 }
 async fn init() -> surrealdb::Result<()>{

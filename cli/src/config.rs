@@ -17,7 +17,7 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 		tracing::info!("loading config from {filename}");
 		builder=builder.add_source(File::new(filename,Toml));
 	} else {
-		tracing::info!(r#"no config file given loading defaults (use "write-config" subcommand to write it to a file)"#);
+		tracing::warn!(r#"no config file given loading defaults (use "write-config" subcommand to write it to a file)"#);
 	}
 
 	CONFIG.set(builder.build()?).ok();

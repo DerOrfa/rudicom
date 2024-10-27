@@ -31,11 +31,11 @@ async fn main() -> tools::Result<()>
 	} else if let Some(file) = args.endpoint.file {
 		let file = file.canonicalize()
 			.context(format!("Failed canonicalize database path {}", file.to_string_lossy()))?;
-		db::init_local(file.as_path()).await
+		db::init_file(file.as_path()).await
 			.context(format!("Failed opening {}", file.to_string_lossy()))?;
 	} else {
-		println!("No database backend, go away..");
-		panic!("No database backend");
+		db::init_local("memory").await
+			.context("Failed opening in-memory db".to_string())?;
 	}
 	
 

@@ -35,8 +35,8 @@ async fn server_info() -> Info
 pub async fn serve(listener:TcpListener) -> Result<()>
 {
 	let inf=server_info().await;
-	tracing::info!("listening on {}", listener.local_addr()?);
-	tracing::info!("database is {}",inf.db_version);
+	tracing::info!("listening on http://{}", listener.local_addr()?);
+	tracing::info!("database version is {}",inf.db_version);
 	tracing::info!("storage path is {}",inf.storage_path);
 
 	// build our application with a route
