@@ -5,7 +5,7 @@ use byte_unit::UnitType::Binary;
 pub use entry::Entry;
 pub use file::File;
 pub use into_db_value::IntoDbValue;
-pub use register::{register_instance, unregister, RegistryGuard};
+pub use register::{register_instance, RegistryGuard};
 pub use record::RecordId;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -73,7 +73,7 @@ pub(crate) async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where Resourc
 pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
 {
 	let ctx = format!("looking up {id}");
-	let v:Value = DB.select(surrealdb::opt::Resource::from(id.0)).await.context(ctx.clone())?;
+	let v:Value = DB.select(id).await.context(ctx.clone())?;
 	if v.into_inner_ref().is_some(){
 		Some(Entry::try_from(v)).transpose().context(ctx)
 	} else {

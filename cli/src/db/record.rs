@@ -7,6 +7,7 @@ use std::ops::Deref;
 use std::vec::IntoIter;
 use surrealdb::sql::Id;
 use surrealdb::{sql, RecordIdKey, Value};
+use surrealdb::opt::{IntoResource, Resource};
 
 #[derive(Deserialize, Debug, PartialEq, PartialOrd, Clone)]
 pub struct RecordId(pub surrealdb::RecordId);
@@ -119,5 +120,17 @@ impl<S> From<(S,Vec<Value>)> for RecordId where S: Into<String>
 	fn from(value: (S, Vec<Value>)) -> Self {
 		let (table,key) = value;
 		RecordId(surrealdb::RecordId::from_table_key(table,key))
+	}
+}
+
+impl IntoResource<Value> for RecordId {
+	fn into_resource(self) -> surrealdb::Result<Resource> {
+		Ok(Resource::from(self.0))
+	}
+}
+
+impl IntoResource<Value> for &RecordId {
+	fn into_resource(self) -> surrealdb::Result<Resource> {
+		Ok(Resource::from(&self.0))
 	}
 }

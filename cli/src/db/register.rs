@@ -8,13 +8,6 @@ use crate::dcm;
 use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::{DefaultDicomObject, Tag};
-use surrealdb::opt::Resource;
-use surrealdb::Result;
-
-pub async fn unregister(id:RecordId) -> Result<Value>
-{
-	DB.delete(surrealdb::opt::Resource::from(id.0)).await
-}
 
 #[derive(Default)]
 pub struct RegistryGuard(Option<RecordId>);
@@ -28,7 +21,8 @@ impl Drop for RegistryGuard
 {
 	fn drop(&mut self) {
 		if let Some(ref id)=self.0{
-			tokio::spawn(unregister(id.clone()));//todo https://github.com/tokio-rs/tokio/issues/2289
+			let del = DB.delete(id);
+			tokio::spawn(async { del.await });//todo https://github.com/tokio-rs/tokio/issues/2289
 		}
 		self.0=None;
 	}
@@ -49,9 +43,9 @@ async fn insert<'a>(
 	match record_id.table()
 	{
 		// colliding inserts of instances will result in no insert and Err,
-		"instances" => DB.insert::<Value>(Resource::from(record_id.0)).content(series_meta).await,
+		"instances" => DB.insert(record_id).content(series_meta).await,
 		// others will silently overwrite the data (it's the same anyway, and we don't need to know)  
-		_ => 	DB.upsert::<Value>(Resource::from(record_id.0)).content(series_meta).await,
+		_ => 	DB.upsert(record_id).content(series_meta).await,
 	}.map_err(|e|e.into())
 }
 /// register dicom object of an instance
@@ -78,9 +72,9 @@ pub async fn register_instance<'a>(
 		Ok(Some(existing)) // return already existing entry
 	} else {
 		let series_id= RecordId::from_series(&series_uid,&study_uid);
-		if DB.select::<Value>(Resource::from(&series_id.0)).await?.into_inner().is_none() {
+		if DB.select::<Value>(&series_id).await?.into_inner().is_none() {
 			let study_id = RecordId::from_study(&study_uid);
-			if DB.select::<Value>(Resource::from(&study_id.0)).await?.into_inner().is_none() {
+			if DB.select::<Value>(&study_id).await?.into_inner().is_none() {
 				insert(obj, study_id, vec![], &STUDY_TAGS).await?;
 			}
 			insert(obj, series_id, vec![], &SERIES_TAGS).await?;

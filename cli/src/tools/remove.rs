@@ -3,6 +3,7 @@ use crate::tools::entries_for_record;
 use crate::tools::Result;
 use std::path::{Path, PathBuf};
 use tokio::fs::{remove_dir, remove_file};
+use crate::db::DB;
 
 pub async fn remove(id:&db::RecordId) -> Result<()>
 {
@@ -20,7 +21,7 @@ pub async fn remove(id:&db::RecordId) -> Result<()>
 
 async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 {
-	let res = db::unregister(id).await?;
+	let res = DB.delete(id).await?;
 	if res.into_inner_ref().is_none_or_null(){
 		return Ok(None)
 	}
