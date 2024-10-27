@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use surrealdb::Value;
 
 use crate::db;
-use crate::db::{lookup, RecordId, DB};
+use crate::db::{lookup, Entry, RecordId, DB};
 use crate::dcm;
 use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
@@ -39,27 +39,20 @@ async fn insert<'a>(
 	record_id: RecordId,
 	add_meta:Vec<(&'a str,Value)>,
 	tags:&Vec<(String,Tag)>
-) -> crate::tools::Result<Option<Value>>
+) -> crate::tools::Result<Value>
 {
 	let series_meta: BTreeMap<_, _> = dcm::extract(&obj, &tags).into_iter()
 		.chain([("uid", Value::from_inner(record_id.str_key().into()))])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
-
-	let id = Resource::from(record_id.0);
-	let res = DB.insert::<Value>(id.clone()).content(series_meta).await;
-	match res
+	match record_id.table()
 	{
-		Ok(v) => Ok(None),
-		Err(surrealdb::Error::Api(surrealdb::error::Api::Query(s))) => {
-			let existing = DB.select::<Value>(id).await?;
-			if existing.into_inner_ref().is_some(){
-				Ok(Some(existing))
-			} else {Err(surrealdb::Error::Api(surrealdb::error::Api::Query(s)).into())}
-		},
-		Err(e) => Err(e.into()),
-	}
+		// colliding inserts of instances will result in no insert and Err,
+		"instances" => DB.insert::<Value>(Resource::from(record_id.0)).content(series_meta).await,
+		// others will silently overwrite the data (it's the same anyway, and we don't need to know)  
+		_ => 	DB.upsert::<Value>(Resource::from(record_id.0)).content(series_meta).await,
+	}.map_err(|e|e.into())
 }
 /// register dicom object of an instance
 /// if the instance already exists no change is done and
@@ -82,7 +75,7 @@ pub async fn register_instance<'a>(
 
 	// try to avoid insert operation as much as possible
 	if let Some(existing) = lookup(instance_id.clone()).await?{
-		Ok(Some(existing))
+		Ok(Some(existing)) // return already existing entry
 	} else {
 		let series_id= RecordId::from_series(&series_uid,&study_uid);
 		if DB.select::<Value>(Resource::from(&series_id.0)).await?.into_inner().is_none() {
@@ -92,17 +85,12 @@ pub async fn register_instance<'a>(
 			}
 			insert(obj, series_id, vec![], &SERIES_TAGS).await?;
 		}
-		match insert(obj, instance_id.clone(), add_meta, &INSTANCE_TAGS).await?
-		{
-			None => { // ok actually stored (didn't exist already)
-				//set up the guard with the registered instance, so we can roll back the registry if needed
-				if let Some(guard) = guard{
-					guard.set(instance_id);
-				}
-				Ok(None)
-			}
-			// actually there was an instance after all (race condition)
-			Some(existing) => Some(db::Entry::try_from(existing)).transpose()
+		let inserted:Entry = insert(obj, instance_id.clone(), add_meta, &INSTANCE_TAGS).await?.try_into()?;
+		// successfully inserted
+		// set up the guard with the registered instance, so we can roll back the registration if needed
+		if let Some(guard) = guard{
+			guard.set(inserted.id().clone());
 		}
+		Ok(None) // return None (as opposed to returning already existing entry)
 	}
 }
