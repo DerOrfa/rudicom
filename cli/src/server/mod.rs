@@ -1,5 +1,7 @@
 use axum::{Json, Router};
-use axum::extract::DefaultBodyLimit;
+use axum::body::Body;
+use axum::extract::{DefaultBodyLimit, Query};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
 use tokio::net::TcpListener;
@@ -7,6 +9,7 @@ use tokio::signal;
 use tracing;
 use crate::config;
 use crate::db::DB;
+use crate::server::http_error::TextError;
 use crate::tools::Result;
 
 #[cfg(feature = "html")]
@@ -32,6 +35,13 @@ async fn server_info() -> Info
 		storage_path:config::get::<String>("storage_path").unwrap(),
 	}
 }
+
+pub async fn backup() -> std::result::Result<Response, TextError>
+{
+	let export = DB.export(()).await?;
+	Ok(Body::from_stream(export).into_response())
+}
+
 pub async fn serve(listener:TcpListener) -> Result<()>
 {
 	let inf=server_info().await;
@@ -43,10 +53,12 @@ pub async fn serve(listener:TcpListener) -> Result<()>
 	let mut app = Router::new();
 	app = app
 		.nest("/api", other::router()
-			.route("/info",get(||async {Json(inf)}))
+			.route("/info", get(||async {Json(inf)}))
 			.merge(json::router())
 		)
-		.nest("/tools",import::router())
+		.nest("/tools",import::router()
+			.route("/backup", get(backup))
+		)
 		.layer(DefaultBodyLimit::max(
 			config::get::<usize>("upload_sizelimit_mb").unwrap_or(10)*1024*1024
 		))

@@ -32,6 +32,8 @@ or (only with feature `embedded`)
 - /instances/:id/json-ext (GET)
 
 ## /tools
+### /backup
+generates SureQL snapshot of the database
 ### /import (POST)
 `curl http://localhost:3000/tools/import/{text,json}[?<parameters>] -d"<glob>"`
 - `echo=true` generate output for successfully registered or stored files (default:false)
