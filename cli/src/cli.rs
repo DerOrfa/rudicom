@@ -57,15 +57,15 @@ pub(super) struct Cli {
 #[derive(Subcommand)]
 pub(crate) enum Commands {
 	/// writing the default config out into the given file
-	WriteConfig {
-		file:PathBuf
-	},
+	WriteConfig {file:PathBuf},
 	/// run the server
 	Server {
 		/// ip and port to listen on
 		#[arg(default_value = "127.0.0.1:3000")]
 		address: String,
 	},
+	/// restore database from SureQL snapshot
+	Restore {file:PathBuf},
 	/// import (big chunks of) data from the filesystem
 	Import {
 		/// report on already existing files

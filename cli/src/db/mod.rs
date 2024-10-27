@@ -131,18 +131,11 @@ pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 
 	// Sign in as a namespace, database, or root user
 	DB.signin(Root { username: "root", password: "root", }).await?;
-	init().await
+	Ok(())
 }
 pub async fn init_local(addr:&str) -> surrealdb::Result<()>
 {
-	DB.connect(addr).await?;
-	init().await
-}
-async fn init() -> surrealdb::Result<()>{
-	// Select a specific namespace / database
-	DB.use_ns("namespace").use_db("database").await?;
-	DB.query(include_str!("init.surql")).await?;
-	Ok(())
+	DB.connect(addr).await
 }
 
 #[derive(Serialize)]

@@ -10,6 +10,8 @@ mod cli;
 use futures::StreamExt;
 use tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
+use crate::cli::Commands;
+use crate::db::DB;
 use crate::tools::Context;
 use crate::tools::import::ImportConfig;
 
@@ -37,30 +39,35 @@ async fn main() -> tools::Result<()>
 		db::init_local("memory").await
 			.context("Failed opening in-memory db".to_string())?;
 	}
-	
+	DB.use_ns("namespace").use_db("database").await?;
 
 	match args.command {
-		cli::Commands::Server{address} => {
+		Commands::Server{address} => {
 			let bound = TcpListener::bind(address).await?;
+			DB.query(include_str!("db/init.surql")).await?;
 			server::serve(bound).await?;
 		}
-		cli::Commands::Import{ echo_existing, echo_imported, store, pattern } =>
-			{
-				let config = ImportConfig{ echo: echo_imported, echo_existing, store };
-				for glob in pattern {
-					let stream = import_glob_as_text(glob, config.clone())?;
-					//filter doesn't do unpin, so we have to nail it down here
-					let mut stream = Box::pin(stream);
-					while let Some(result) = stream.next().await {
-						match result {
-							Ok(result) => println!("{result}"),
-							Err(e) => eprintln!("{e}")
-						}
+		Commands::Import{ echo_existing, echo_imported, store, pattern } =>	{
+			let config = ImportConfig{ echo: echo_imported, echo_existing, store };
+			DB.query(include_str!("db/init.surql")).await?;
+			for glob in pattern {
+				let stream = import_glob_as_text(glob, config.clone())?;
+				//filter doesn't do unpin, so we have to nail it down here
+				let mut stream = Box::pin(stream);
+				while let Some(result) = stream.next().await {
+					match result {
+						Ok(result) => println!("{result}"),
+						Err(e) => eprintln!("{e}")
 					}
 				}
 			}
-		cli::Commands::WriteConfig { file } => {
+		}
+		Commands::WriteConfig { file } => {
 			config::write(file)?
+		}
+		Commands::Restore { file } => {
+			tracing::info!("Restoring database from {}", file.to_string_lossy());
+			DB.import(file).await?
 		}
 	}
 	Ok(())

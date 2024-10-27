@@ -1,6 +1,6 @@
 use axum::{Json, Router};
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Query};
+use axum::extract::DefaultBodyLimit;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
