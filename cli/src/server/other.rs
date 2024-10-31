@@ -4,7 +4,7 @@ use crate::storage::async_store;
 use crate::tools::remove::remove;
 use crate::tools::store::store;
 use crate::tools::verify::verify_entry;
-use crate::tools::{get_instance_dicom, lookup_instance_file};
+use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
 use crate::tools::{Context, Error::DicomError};
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
@@ -51,11 +51,26 @@ async fn del_entry(Path((table,id)):Path<(String, String)>) -> Result<(),JsonErr
 	remove(entry.id()).await.map_err(|e|e.into())
 }
 
-async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Json<Vec<db::File>>,JsonError>
+async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
 {
 	let ctx = format!("verifying {table}:{id}");
 	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(ctx)?;
-	Ok(Json(verify_entry(entry.id()).await?))
+	let fails:Vec<_> = verify_entry(entry).await?.into_iter()
+		.map(|e|
+			if let Error::ChecksumErr { checksum, file } = e {
+				json!({
+					"file": file,
+					"actual_checksum": checksum,
+				})
+			}
+			else {panic!("expected a checksum error")}
+		)
+		.collect();
+
+	Ok(
+		if fails.is_empty() { StatusCode::OK.into_response() }
+		else { (StatusCode::INTERNAL_SERVER_ERROR, Json(fails)).into_response() }
+	)
 }
 
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {

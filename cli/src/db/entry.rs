@@ -1,6 +1,6 @@
 use self::Entry::{Instance, Series, Study};
 use crate::db;
-use crate::db::{AggregateData, RecordId, DB};
+use crate::db::{AggregateData, Pickable, RecordId, DB};
 use crate::tools::Error::{NotFound, UnexpectedResult};
 use crate::tools::{entries_for_record, reduce_path, Context, Result};
 use byte_unit::Byte;
@@ -94,11 +94,9 @@ impl Entry
 	pub fn get_file(&self) -> Result<db::File>
 	{
 		let context= format!("trying to extract a File object from {}",self.id());
-		let result = if let Instance((id,inst)) = &self
+		let result = if let Instance((_,inst)) = &self
 		{
-			inst.get("file")
-				.ok_or(db::Error::ElementMissing{element:"file".into(), parent:id.to_string()})?
-				.clone().try_into()
+			inst.pick_ref("file")?.clone().try_into()
 		} else {Err(db::Error::UnexpectedEntry {expected:"instance".into(),id:self.id().clone()})};
 		result.context(context)
 	}
