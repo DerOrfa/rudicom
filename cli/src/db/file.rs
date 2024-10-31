@@ -73,7 +73,6 @@ impl File {
             checksum:md5_computed,
             file:filename.to_string_lossy().into()
         })}
-
     }
 }
 

@@ -180,3 +180,12 @@ impl<T,E> Context for std::result::Result<T,E> where Error:From<E>
 		self.map_err(|e|Error::context_from(e,context))
 	}
 }
+
+impl From<&Error> for serde_json::Value{
+	fn from(err: &Error) -> Self {
+		let ret:Vec<_> = Source { current: Some( err ) }
+			.map(|e|e.to_string())
+			.map(serde_json::Value::String).collect();
+		ret.into()
+	}
+}

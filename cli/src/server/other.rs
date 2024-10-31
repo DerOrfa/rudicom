@@ -17,7 +17,7 @@ use axum_extra::body::AsyncReadBody;
 use dicom::pixeldata::image::ImageFormat;
 use dicom::pixeldata::PixelDecoder;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::io::Cursor;
 use crate::db::lookup_uid;
 use crate::tools::Error::NotFound;
@@ -56,15 +56,12 @@ async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Response,Json
 	let ctx = format!("verifying {table}:{id}");
 	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(ctx)?;
 	let fails:Vec<_> = verify_entry(entry).await?.into_iter()
-		.map(|e|
-			if let Error::ChecksumErr { checksum, file } = e {
-				json!({
-					"file": file,
-					"actual_checksum": checksum,
-				})
-			}
-			else {panic!("expected a checksum error")}
-		)
+		.map(|e|if let Error::ChecksumErr { checksum, file } = e
+		{
+			json!({"checksum_error":{"file":file,"actual_checksum":checksum}})
+		}else {
+			json!({"error":Value::from(&e)})
+		})
 		.collect();
 
 	Ok(
@@ -121,6 +118,7 @@ async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> 
 #[cfg(feature = "dicom-json")]
 async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Response,JsonError>
 {
+	let err = format!("Instance {id} not found");
 	if let Some(obj)=get_instance_dicom(id).await?
 	{
 		dicom_json::to_value(obj)
@@ -129,7 +127,7 @@ async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Response,JsonErr
 	}
 	else
 	{
-		Ok((StatusCode::NOT_FOUND, format!("Instance {} not found", id)).into_response())
+		Ok((StatusCode::NOT_FOUND, err).into_response())
 	}
 }
 
