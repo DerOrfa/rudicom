@@ -4,7 +4,7 @@ use crate::storage::async_store;
 use crate::tools::remove::remove;
 use crate::tools::store::store;
 use crate::tools::verify::verify_entry;
-use crate::tools::{get_instance_dicom, lookup_instance_file};
+use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
 use crate::tools::{Context, Error::DicomError};
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
@@ -17,7 +17,7 @@ use axum_extra::body::AsyncReadBody;
 use dicom::pixeldata::image::ImageFormat;
 use dicom::pixeldata::PixelDecoder;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::io::Cursor;
 use crate::db::lookup_uid;
 use crate::tools::Error::NotFound;
@@ -51,11 +51,23 @@ async fn del_entry(Path((table,id)):Path<(String, String)>) -> Result<(),JsonErr
 	remove(entry.id()).await.map_err(|e|e.into())
 }
 
-async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Json<Vec<db::File>>,JsonError>
+async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
 {
 	let ctx = format!("verifying {table}:{id}");
 	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(ctx)?;
-	Ok(Json(verify_entry(entry.id()).await?))
+	let fails:Vec<_> = verify_entry(entry).await?.into_iter()
+		.map(|e|if let Error::ChecksumErr { checksum, file } = e
+		{
+			json!({"checksum_error":{"file":file,"actual_checksum":checksum}})
+		}else {
+			json!({"error":Value::from(&e)})
+		})
+		.collect();
+
+	Ok(
+		if fails.is_empty() { StatusCode::OK.into_response() }
+		else { (StatusCode::INTERNAL_SERVER_ERROR, Json(fails)).into_response() }
+	)
 }
 
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
@@ -106,6 +118,7 @@ async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> 
 #[cfg(feature = "dicom-json")]
 async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Response,JsonError>
 {
+	let err = format!("Instance {id} not found");
 	if let Some(obj)=get_instance_dicom(id).await?
 	{
 		dicom_json::to_value(obj)
@@ -114,7 +127,7 @@ async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Response,JsonErr
 	}
 	else
 	{
-		Ok((StatusCode::NOT_FOUND, format!("Instance {} not found", id)).into_response())
+		Ok((StatusCode::NOT_FOUND, err).into_response())
 	}
 }
 

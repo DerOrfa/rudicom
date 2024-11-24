@@ -51,9 +51,6 @@ impl HttpError
             _ => tracing::error!("http error {} reported", self),
         }
     }
-    pub(crate) fn sources(&self) -> tools::Source<'_> {
-        tools::Source { current: Some( self ) }
-    }
 }
 
 
@@ -63,7 +60,7 @@ impl IntoResponse for TextError {
     {
         self.0.do_trace();
         let status_code = self.0.status_code();
-        let sources:Vec<_>=self.0.sources().map(<dyn std::error::Error>::to_string).collect();
+        let sources:Vec<_>=tools::Source { current: Some( &self.0 ) }.map(<dyn std::error::Error>::to_string).collect();
         (
             status_code,
             sources.join("\n")
@@ -84,10 +81,11 @@ impl IntoResponse for JsonError {
     {
         self.0.do_trace();
         let status_code = self.0.status_code();
-        let sources:Vec<_>=self.0.sources().map(|e|{
-            serde_json::Value::String(e.to_string())
-        }).collect();
-        (status_code,Json(sources)).into_response()
+        let err= match &self.0 {
+            HttpError::Internal(e) => serde_json::Value::from(e),
+            HttpError::BadRequest {..} => serde_json::Value::String(self.0.to_string()),
+        };
+        (status_code,Json(err)).into_response()
     }
 }
 
