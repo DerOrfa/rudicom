@@ -6,6 +6,7 @@ use crate::db::IntoDbValue;
 use std::fmt::Write;
 use std::ops::Deref;
 use dicom::core::header::HasLength;
+use dicom::core::ops::AttributeSelector;
 use itertools::Itertools;
 use strfmt::{FmtError, strfmt_map};
 use crate::tools::Context;
@@ -18,8 +19,9 @@ pub fn find_tag(name:&str) -> Option<Tag>
 		.or_else(||Tag::from_str(name).ok())
 }
 
-pub fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
+pub fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,AttributeSelector)>
 {
+	let dict = StandardDataDictionary::default();
 	config::get::<Vec<String>>(config_key)//get tag list from config
 		.expect(format!(r#"failed getting {config_key} from the config"#).as_str())
 		.iter().map(|s| //without formatting
@@ -28,17 +30,17 @@ pub fn get_attr_list(config_key:&str, must_have:Vec<&str>) -> Vec<(String,Tag)>
 		.chain(must_have.into_iter().map(|s|s.to_string()))//add must_have
 		.sorted().dedup()
 		.map(|name|{ //if tag doesn't exist that's a critical error caused by the config of program logic
-			let tag = find_tag(name.as_str())
+			let tag = dict.parse_selector(name.as_str())
 				.expect(format!("Tag {name} not found in dictionary").as_str());
 			(name, tag)
 		})
 		.collect()
 }
 
-pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a Vec<(String, Tag)>) -> Vec<(&'a str, surrealdb::Value)>
+pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a Vec<(String, AttributeSelector)>) -> Vec<(&'a str, surrealdb::Value)>
 {
 	requested.iter()
-		.map(|(k,tag)|(k.as_str(),obj.element_opt(tag.clone()).unwrap()))
+		.map(|(k,tag)|(k.as_str(),obj.entry_at(tag.clone()).ok()))
 		.map(|(k,v)|(k,surrealdb::Value::from_inner(v.cloned().into_db_value())))
 		.collect()
 }
