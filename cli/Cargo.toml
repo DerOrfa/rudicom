@@ -7,7 +7,7 @@ rust-version = "1.80.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["html"]
+default = ["html", "dicom-json"]
 # enable html interface
 html = ["dep:html"]
 dicom-json = ["dep:dicom-json"]
