@@ -79,7 +79,7 @@ pub enum Error
 	#[error("task error {0}")]
 	JoinError(#[from] tokio::task::JoinError),
 
-	#[error("task error {0}")]
+	#[error("config error {0}")]
 	ConfigError(#[from] config::ConfigError),
 
 	#[error("Database error {0}")]

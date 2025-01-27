@@ -14,7 +14,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Deserialize)]
 pub(crate) struct ListingConfig {
@@ -27,8 +27,10 @@ pub(crate) struct ListingConfig {
 
 pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
 {
-    let keys=["StudyDate", "StudyTime"].into_iter().map(|s|s.to_string())
-        .chain(crate::config::get::<Vec<String>>("study_tags")?.into_iter())//get the rest from the config
+    let config_keys = crate::config::get::<HashMap<String, Vec<String>>>("study_tags")?.into_keys();
+    let keys=["date", "time"].into_iter()
+        .map(|s|s.to_string())
+        .chain(config_keys)//get the rest from the config
         .unique()//make sure there are no duplicates
         .collect();
 
@@ -39,20 +41,17 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         studies.retain(|e|e.name().find(filter.as_str()).is_some());
     }
 
-    if let Some(sortby) = config.sort_by
-    {
-        let sortby= sortby.as_str();
-        studies.sort_by(|e1,e2|
-            match (e1.get(sortby),e2.get(sortby)) {
-                (Some(v1),Some(v2)) => if config.sort_reverse {
-                    v1.partial_cmp(v2).unwrap_or(Ordering::Equal)
-                } else {
-                    v2.partial_cmp(v1).unwrap_or(Ordering::Equal)
-                },
-                _ => Ordering::Equal
-            }
-        )
-    }
+    let sortby = config.sort_by.unwrap_or("date".to_string());
+    studies.sort_by(|e1,e2|
+        match (e1.get(&sortby),e2.get(&sortby)) {
+            (Some(v1),Some(v2)) => if config.sort_reverse {
+                v1.partial_cmp(v2).unwrap_or(Ordering::Equal)
+            } else {
+                v2.partial_cmp(v1).unwrap_or(Ordering::Equal)
+            },
+            _ => Ordering::Equal
+        }
+    );
 
     // get some aggregated data
     let aggregate_instances:Vec<AggregateData> = DB.select("instances_per_studies").await?;
@@ -71,8 +70,8 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     };
 
     let table= generators::table_from_objects(
-        studies, "Study".to_string(), keys,
-        vec![("Instances",Box::new(countinstances)),("Size",Box::new(getfilesize))]
+        studies, "name".to_string(), keys,
+        vec![("instances",Box::new(countinstances)),("size",Box::new(getfilesize))]
     ).await.map_err(|e|e.context("Failed generating the table"))?;
 
     let mut builder = Body::builder();

@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use byte_unit::Byte;
 use byte_unit::UnitType::Binary;
 use html::content::Navigation;
@@ -6,6 +5,7 @@ use html::inline_text::Anchor;
 use html::root::{Body, Html};
 use html::tables::builders::TableCellBuilder;
 use html::tables::{Table, TableCell, TableRow};
+use std::collections::{BTreeMap, HashMap};
 use surrealdb::sql;
 
 use crate::db;
@@ -130,7 +130,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 			builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.into_inner().0));
 			let mut instances= entries_for_record(&id,"instances").await?;
 			instances.sort_by_key(|s|s
-				.get_string("InstanceNumber")
+				.get_string("number")
 				.map_or(0,|s|s
 					.parse::<u64>().unwrap_or(0)
 				)
@@ -141,14 +141,15 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 				.paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
 
 
-			let keys=crate::config::get::<Vec<String>>("instance_tags").expect("failed to get instance_tags");
+			let keys=crate::config::get::<HashMap<String, Vec<String>>>("instance_tags").expect("failed to get instance_tags")
+				.into_keys().collect();
 			let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
 				cell.image(|i|i.src(
 					format!("/api/instances/{}/png?width=64&height=64",obj.id().str_key())
 				));
 			};
-			let instance_text = format!("{} Instances",instances.len());
-			let instance_table = table_from_objects(instances, "Name".into(), keys, vec![("thumbnail",Box::new(makethumb))]).await?;
+			let instance_text = format!("{} instances",instances.len());
+			let instance_table = table_from_objects(instances, "name".into(), keys, vec![("thumbnail",Box::new(makethumb))]).await?;
 			builder.heading_2(|h|h.text(instance_text)).push(instance_table);
 		}
 		Entry::Study((id,study)) => {
@@ -158,8 +159,8 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 			for s in &mut series
 			{
 				let v = s.get_instances_per().await?;
-				s.insert("Instances", v.count);
-				s.insert("Size",format!("{:.2}",Byte::from(v.size).get_appropriate_unit(Binary)));
+				s.insert("instances", v.count);
+				s.insert("size",format!("{:.2}",Byte::from(v.size).get_appropriate_unit(Binary)));
 			}
 
 			builder
@@ -167,14 +168,14 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 				.paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
 
 			series.sort_by_key(|s|s
-				.get_string("SeriesNumber").expect("missing SeriesNumber")
-				.parse::<u64>().expect("SeriesNumber is not a number")
+				.get_string("number").expect("missing Number in series")
+				.parse::<u64>().expect("Number in Series is not a number")
 			);
 
-			let keys= crate::config::get::<Vec<String>>("series_tags").expect("failed to get series_tags")
-				.into_iter().chain(["Instances","Size"].map(str::to_string)).collect();
-			let series_text = format!("{} Series",series.len());
-			let series_table = table_from_objects(series, "Name".into(), keys, vec![]).await?;
+			let keys= crate::config::get::<HashMap<String, Vec<String>>>("series_tags").expect("failed to get series_tags")
+				.into_keys().chain(["instances","size"].map(str::to_string)).collect();
+			let series_text = format!("{} series",series.len());
+			let series_table = table_from_objects(series, "name".into(), keys, vec![]).await?;
 			builder.heading_2(|h|h.text(series_text)).push(series_table);
 		}
 	}

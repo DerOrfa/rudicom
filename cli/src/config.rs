@@ -21,7 +21,7 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	}
 
 	CONFIG.set(builder.build()?).ok();
-	let storage_path:PathBuf = get("storage_path")
+	let storage_path:PathBuf = get("paths.storage_path")
 		.expect(r#""storage_path" is missing in the config"#);
 	if !storage_path.is_absolute(){
 		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must be an absolute path"#,storage_path.to_string_lossy()).into()))

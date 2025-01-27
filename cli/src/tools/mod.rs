@@ -31,7 +31,7 @@ pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 /// as "storage_path" is guaranteed to be absolute already, the result is guaranteed to be absolute
 pub fn complete_filepath<P>(path:&P) -> PathBuf where P:AsRef<Path>
 {
-	crate::config::get::<PathBuf>("storage_path")
+	crate::config::get::<PathBuf>("paths.storage_path")
 		.expect(r#""storage_path" missing or invalid in config"#)
 		.join(path)
 }

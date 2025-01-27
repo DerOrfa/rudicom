@@ -1,5 +1,5 @@
 use dicom::core::ops::AttributeSelector;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 use surrealdb::Value;
 
@@ -33,10 +33,10 @@ async fn insert<'a>(
 	obj:&DefaultDicomObject,
 	record_id: RecordId,
 	add_meta:Vec<(&'a str,Value)>,
-	tags:&Vec<(String,AttributeSelector)>
+	tags:&HashMap<String,Vec<AttributeSelector>>
 ) -> crate::tools::Result<Value>
 {
-	let series_meta: BTreeMap<_, _> = 
+	let meta: BTreeMap<_, _> = 
 		dcm::extract(&obj, &tags).into_iter()
 		.chain([("uid", Value::from_inner(record_id.str_key().into()))])
 		.chain(add_meta)
@@ -45,9 +45,9 @@ async fn insert<'a>(
 	match record_id.table()
 	{
 		// colliding inserts of instances will result in no insert and Err,
-		"instances" => DB.insert(record_id).content(series_meta).await,
+		"instances" => DB.insert(record_id).content(meta).await,
 		// others will silently overwrite the data (it's the same anyway, and we don't need to know)  
-		_ => 	DB.upsert(record_id).content(series_meta).await,
+		_ => 	DB.upsert(record_id).content(meta).await,
 	}.map_err(|e|e.into())
 }
 
@@ -60,9 +60,21 @@ pub async fn register_instance<'a>(
 	add_meta:Vec<(&'a str,Value)>,
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>> {
-	pub static INSTANCE_TAGS: LazyLock<Vec<(String, AttributeSelector)>> = LazyLock::new(|| dcm::get_attr_list("instance_tags", vec!["InstanceNumber"]));
-	pub static SERIES_TAGS: LazyLock<Vec<(String, AttributeSelector)>> = LazyLock::new(|| dcm::get_attr_list("series_tags", vec!["SeriesDescription", "SeriesNumber"]));
-	pub static STUDY_TAGS: LazyLock<Vec<(String, AttributeSelector)>> = LazyLock::new(|| dcm::get_attr_list("study_tags", vec!["PatientID", "StudyTime", "StudyDate"]));
+	pub static INSTANCE_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
+		LazyLock::new(|| dcm::get_attr_list("instance_tags", vec![("number", vec!["InstanceNumber"])]));
+	pub static SERIES_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
+		LazyLock::new(|| dcm::get_attr_list("series_tags", vec![
+			("description",vec!["SeriesDescription"]),
+			("number",vec!["SeriesNumber"])
+		])
+	);
+	pub static STUDY_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
+		LazyLock::new(|| dcm::get_attr_list("study_tags", vec![
+			("name",vec!["PatientName"]),
+			("time", vec!["StudyTime"]),
+			("date", vec!["StudyDate"])
+		])
+	);
 
 	let study_uid = extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?;
 	let series_uid = extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?;
