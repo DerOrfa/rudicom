@@ -31,8 +31,7 @@ async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 		let mut path = file.get_path();
 		remove_file(&path).await?;
 		if path.pop(){// if there is a parent path, try to delete it as far as possible
-			let storage_path:PathBuf = crate::config::get("paths.storage_path").expect(r#"Failed to get "storage_path""#);
-			remove_path(path,storage_path.as_path()).await?;
+			remove_path(path,&crate::config::get().paths.storage_path).await?;
 		}
 	}
 	Ok(Some(removed))

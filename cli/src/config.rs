@@ -1,9 +1,49 @@
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::PathBuf;
 use config::{Config,ConfigError, File, FileFormat::Toml};
 use std::sync::OnceLock;
-use serde::Deserialize;
+use dicom::core::DataDictionary;
+use dicom::dictionary_std::StandardDataDictionary;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use crate::dcm::AttributeSelector;
 
-static CONFIG:OnceLock<Config> = OnceLock::new();
+#[derive(Debug,Serialize,Deserialize)]
+pub struct Limits{pub upload_sizelimit:byte_unit::Byte, pub max_files:u16}
+#[derive(Debug,Serialize,Deserialize)]
+pub struct Paths{pub filename_pattern:String,pub storage_path:PathBuf}
+
+#[derive(Debug,Serialize,Deserialize)]
+pub struct ConfigStruct
+{
+	pub instance_tags:HashMap<String,Vec<AttributeSelector>>,
+	pub series_tags:HashMap<String,Vec<AttributeSelector>>,
+	pub study_tags:HashMap<String,Vec<AttributeSelector>>,
+	pub limits: Limits,
+	pub paths: Paths
+}
+
+impl Serialize for AttributeSelector {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer
+	{
+		serializer.serialize_str(self.0.to_string().as_str())
+	}
+}
+impl<'de> Deserialize<'de> for AttributeSelector {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de>
+	{
+		let dict = StandardDataDictionary::default();
+
+		let parts=String::deserialize(deserializer)?;
+		dict.parse_selector(parts.as_str())
+			.map(AttributeSelector)
+			.map_err(serde::de::Error::custom)
+	}
+}
+
+
+
+static CONFIG:OnceLock<ConfigStruct> = OnceLock::new();
 
 static CONFIG_STR:&str = include_str!("config.toml");
 
@@ -20,9 +60,9 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 		tracing::warn!(r#"no config file given loading defaults (use "write-config" subcommand to write it to a file)"#);
 	}
 
-	CONFIG.set(builder.build()?).ok();
-	let storage_path:PathBuf = get("paths.storage_path")
-		.expect(r#""storage_path" is missing in the config"#);
+	CONFIG.set(builder.build().unwrap().try_deserialize()?).expect("Failed to set config");
+
+	let storage_path = &get().paths.storage_path;
 	if !storage_path.is_absolute(){
 		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must be an absolute path"#,storage_path.to_string_lossy()).into()))
 	}
@@ -37,9 +77,4 @@ pub fn write(path:PathBuf) -> Result<(),ConfigError>
 	std::fs::write(path,CONFIG_STR).map_err(|e|ConfigError::Foreign(Box::new(e)))
 }
 
-pub(crate) fn get<'de, T: Deserialize<'de>>(key: &str) -> Result<T,ConfigError>
-{
-	CONFIG.get()
-		.expect("accessing uninitialized global config")
-		.get(key)
-}
+pub fn get() -> &'static ConfigStruct { CONFIG.get().unwrap() }

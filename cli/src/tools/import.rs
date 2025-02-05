@@ -101,7 +101,6 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let max_files = crate::config::get::<usize>("limits.max_files").unwrap_or(32);
 
 	//if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
@@ -112,7 +111,7 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 	// make a stream that polls tasks and feeds new ones
 	let stream=futures::stream::poll_fn(move |c|{
 		// fill task list up to max_files 
-		while tasks.len() < max_files
+		while tasks.len() < crate::config::get().limits.max_files as usize
 		{
 			if let Some(nextfile) = files.next() {
 				tasks.spawn(async move {

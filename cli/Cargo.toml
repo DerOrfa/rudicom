@@ -35,6 +35,6 @@ html = { version = "0.6", optional = true}
 itertools = "0.13"
 thiserror = { version = "1.0" }
 dhat = { version = "0.3", optional = true }
-byte-unit = "5.1"
+byte-unit = { version = "5.1", features = ["serde"] }
 chrono = "0.4"
 base64 = "0.22.1"

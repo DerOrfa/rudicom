@@ -8,7 +8,7 @@ Scanner = ["ManufacturerModelName"]
 [series_tags]
 Date = ["SeriesDate"]
 Time = ["SeriesTime"]
-"Protocol" = ["ProtocolName"]
+Protocol = ["ProtocolName"]
 
 # InstanceNumber will always be there as its needed internally
 [instance_tags]
@@ -16,7 +16,7 @@ Date = ["InstanceCreationDate"]
 Time = ["InstanceCreationTime"]
 
 [limits]
-upload_sizelimit_mb = 100
+upload_sizelimit = "50M"
 max_files = 32 # max amount of concurrently processed files
 
 [paths]

@@ -5,7 +5,7 @@ use html::inline_text::Anchor;
 use html::root::{Body, Html};
 use html::tables::builders::TableCellBuilder;
 use html::tables::{Table, TableCell, TableRow};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use surrealdb::sql;
 
 use crate::db;
@@ -140,14 +140,13 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 				.heading_2(|t|t.text("Path"))
 				.paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
 
-
-			let keys=crate::config::get::<HashMap<String, Vec<String>>>("instance_tags").expect("failed to get instance_tags")
-				.into_keys().collect();
+			let keys:Vec<_>=crate::config::get().instance_tags.keys().cloned().collect();
 			let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
 				cell.image(|i|i.src(
 					format!("/api/instances/{}/png?width=64&height=64",obj.id().str_key())
 				));
 			};
+
 			let instance_text = format!("{} instances",instances.len());
 			let instance_table = table_from_objects(instances, "name".into(), keys, vec![("thumbnail",Box::new(makethumb))]).await?;
 			builder.heading_2(|h|h.text(instance_text)).push(instance_table);
@@ -172,8 +171,8 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 				.parse::<u64>().expect("Number in Series is not a number")
 			);
 
-			let keys= crate::config::get::<HashMap<String, Vec<String>>>("series_tags").expect("failed to get series_tags")
-				.into_keys().chain(["instances","size"].map(str::to_string)).collect();
+			let keys= crate::config::get().series_tags.keys().cloned()
+				.chain(["instances","size"].map(str::to_string)).collect();
 			let series_text = format!("{} series",series.len());
 			let series_table = table_from_objects(series, "name".into(), keys, vec![]).await?;
 			builder.heading_2(|h|h.text(series_text)).push(series_table);

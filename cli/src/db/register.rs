@@ -1,6 +1,6 @@
-use dicom::core::ops::AttributeSelector;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
+use dicom::core::Tag;
 use surrealdb::Value;
 
 use crate::db;
@@ -9,6 +9,7 @@ use crate::dcm;
 use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
+use dcm::AttributeSelector;
 
 #[derive(Default)]
 pub struct RegistryGuard(Option<RecordId>);
@@ -61,18 +62,18 @@ pub async fn register_instance<'a>(
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>> {
 	pub static INSTANCE_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
-		LazyLock::new(|| dcm::get_attr_list("instance_tags", vec![("number", vec!["InstanceNumber"])]));
+		LazyLock::new(|| dcm::get_attr_list(db::Table::Instances, vec![("number", vec![Tag::from((0x0020,0x0013))])]));//InstanceNumber
 	pub static SERIES_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
-		LazyLock::new(|| dcm::get_attr_list("series_tags", vec![
-			("description",vec!["SeriesDescription"]),
-			("number",vec!["SeriesNumber"])
+		LazyLock::new(|| dcm::get_attr_list(db::Table::Series, vec![
+			("description",vec![Tag::from((0x0008,0x103E))]), //SeriesDescription
+			("number",vec![Tag::from((0x0020,0x0011))]) // SeriesNumber
 		])
 	);
 	pub static STUDY_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
-		LazyLock::new(|| dcm::get_attr_list("study_tags", vec![
-			("name",vec!["PatientName"]),
-			("time", vec!["StudyTime"]),
-			("date", vec!["StudyDate"])
+		LazyLock::new(|| dcm::get_attr_list(db::Table::Studies, vec![
+			("name",vec![Tag::from((0x0010,0x0010))]),//PatientName
+			("time", vec![Tag::from((0x0008,0x0030))]), // StudyTime 
+			("date", vec![Tag::from((0x0008,0x0020))]) // StudyDate
 		])
 	);
 

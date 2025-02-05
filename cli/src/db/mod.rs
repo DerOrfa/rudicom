@@ -179,6 +179,8 @@ trait Pickable
 	fn pick_remove<Q>(&mut self, element:Q) -> Result<Value> where String: From<Q>;
 }
 
+pub enum Table{Studies,Series,Instances}
+
 impl Pickable for Value {
 	fn pick_ref<Q>(&self, element:Q) -> Result<&Value> where String: From<Q>{
 		let slf = self.into_inner_ref();

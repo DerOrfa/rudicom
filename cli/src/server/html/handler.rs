@@ -14,7 +14,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde_json::json;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 #[derive(Deserialize)]
 pub(crate) struct ListingConfig {
@@ -27,10 +27,8 @@ pub(crate) struct ListingConfig {
 
 pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
 {
-    let config_keys = crate::config::get::<HashMap<String, Vec<String>>>("study_tags")?.into_keys();
-    let keys=["date", "time"].into_iter()
-        .map(|s|s.to_string())
-        .chain(config_keys)//get the rest from the config
+    let keys:Vec<_> = crate::config::get().study_tags.keys().cloned()
+        .chain(["date", "time"].map(String::from))
         .unique()//make sure there are no duplicates
         .collect();
 
