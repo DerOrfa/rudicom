@@ -6,7 +6,7 @@ use std::cmp::min;
 pub async fn verify_entry(entry:Entry) -> Result<Vec<Error>>
 {
     let mut jobs=tokio::task::JoinSet::new();
-    let max_files = crate::config::get::<usize>("max_files").unwrap_or(32);
+    let max_files = crate::config::get::<usize>("limits.max_files").unwrap_or(32);
     let mut files = entry.get_files().await?;
 
     // pre-fill jobs

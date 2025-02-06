@@ -101,7 +101,7 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let max_files = crate::config::get::<usize>("max_files").unwrap_or(32);
+	let max_files = crate::config::get::<usize>("limits.max_files").unwrap_or(32);
 
 	//if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{

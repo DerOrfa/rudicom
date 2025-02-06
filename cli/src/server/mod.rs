@@ -32,7 +32,7 @@ async fn server_info() -> Info
 	Info{
 		version:format!("{} v{}",env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),
 		db_version:format!("{}",DB.version().await.unwrap()),
-		storage_path:config::get::<String>("storage_path").unwrap(),
+		storage_path:config::get::<String>("paths.storage_path").unwrap(),
 	}
 }
 
@@ -60,7 +60,7 @@ pub async fn serve(listener:TcpListener) -> Result<()>
 			.route("/backup", get(backup))
 		)
 		.layer(DefaultBodyLimit::max(
-			config::get::<usize>("upload_sizelimit_mb").unwrap_or(10)*1024*1024
+			config::get::<usize>("limits.upload_sizelimit_mb").unwrap_or(10)*1024*1024
 		))
 		;
 	#[cfg(feature = "html")]
