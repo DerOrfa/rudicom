@@ -20,14 +20,14 @@ mod other;
 mod http_error;
 
 #[derive(Serialize,Clone)]
-struct Info
+pub struct Info
 {
 	version:String,
-	db_version:String,
-	storage_path:String
+	pub(crate) db_version:String,
+	pub(crate) storage_path:String
 }
 
-async fn server_info() -> Info
+pub(crate) async fn server_info() -> Info
 {
 	Info{
 		version:format!("{} v{}",env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),
@@ -46,8 +46,6 @@ pub async fn serve(listener:TcpListener) -> Result<()>
 {
 	let inf=server_info().await;
 	tracing::info!("listening on http://{}", listener.local_addr()?);
-	tracing::info!("database version is {}",inf.db_version);
-	tracing::info!("storage path is {}",inf.storage_path);
 
 	// build our application with a route
 	let mut app = Router::new();

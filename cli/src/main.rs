@@ -43,9 +43,18 @@ async fn main() -> tools::Result<()>
 
 	match args.command {
 		Commands::Server{address} => {
-			let bound = TcpListener::bind(address).await?;
-			DB.query(include_str!("db/init.surql")).await?;
-			server::serve(bound).await?;
+		DB.query(include_str!("db/init.surql")).await?;
+
+		let inf= crate::server::server_info().await;
+		tracing::info!("database version is {}",inf.db_version);
+		tracing::info!("storage path is {}",inf.storage_path);
+			
+		let mut set= tokio::task::JoinSet::new();
+			for a in address{
+				let bound = TcpListener::bind(a).await?;
+				set.spawn(server::serve(bound));
+			}
+			set.join_all().await.into_iter().collect::<Result<Vec<_>,_>>()?;
 		}
 		Commands::Import{ echo_existing, echo_imported, store, pattern } =>	{
 			let config = ImportConfig{ echo: echo_imported, echo_existing, store };
