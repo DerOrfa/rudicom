@@ -3,15 +3,14 @@ use std::io::Cursor;
 use std::path::PathBuf;
 
 use dicom::object::{DefaultDicomObject, from_reader};
-use serde::{Deserialize, Serialize, Serializer};
-use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize};
 use surrealdb::sql;
 use tokio::io::AsyncReadExt;
 use crate::db::Pickable;
 use crate::storage::async_store::compute_md5;
 use crate::tools::{complete_filepath, Context, Error, Result};
 
-#[derive(Deserialize)]
+#[derive(Deserialize,Serialize)]
 pub struct File
 {
     path:PathBuf,
@@ -103,21 +102,6 @@ impl TryFrom<File> for surrealdb::Value
         ret.insert("md5".into(),file.md5.into());
         ret.insert("size".into(),file.size.into());
         Ok(surrealdb::Value::from_inner(ret.into()))
-    }
-}
-
-impl Serialize for File
-{
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> where S: Serializer {
-        let mut ser = serializer.serialize_struct("file",3)?;
-        let file_path = self.path.to_str()
-            .ok_or(Error::InvalidFilename {name:self.path.clone()})
-            .map_err(serde::ser::Error::custom)?;
-        ser.serialize_field("path",file_path)?;
-        ser.serialize_field("owned",&self.owned)?;
-        ser.serialize_field("md5",self.md5.as_str())?;
-        ser.serialize_field("size",&self.size)?;
-        ser.end()
     }
 }
 
