@@ -1,5 +1,5 @@
 use crate::db;
-use crate::tools::entries_for_record;
+use crate::tools::{entries_for_record, Context};
 use crate::tools::Result;
 use std::path::{Path, PathBuf};
 use tokio::fs::{remove_dir, remove_file};
@@ -29,9 +29,11 @@ async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 	let file = removed.get_file()?;
 	if file.owned {
 		let mut path = file.get_path();
-		remove_file(&path).await?;
+		remove_file(&path).await.context(format!("deleting {}",path.to_string_lossy()))?;
 		if path.pop(){// if there is a parent path, try to delete it as far as possible
-			remove_path(path,&crate::config::get().paths.storage_path).await?;
+			let ctx = format!("deleting {}",path.to_string_lossy());
+			remove_path(path,&crate::config::get().paths.storage_path)
+				.await.context(ctx)?;
 		}
 	}
 	Ok(Some(removed))
@@ -43,11 +45,11 @@ async fn remove_path(mut path:PathBuf, stop_path:&Path) -> std::io::Result<()>
 	loop {
 		if let Err(e) = remove_dir(path.as_path()).await
 		{
-			if e.raw_os_error() == Some(39) //dir is not empty (that's fine, we'll just stop deleting)
-			{
-				return Ok(());
+			match e.kind() { 
+				std::io::ErrorKind::NotFound => return Ok(()), //dir is not empty (that's fine, we'll just stop deleting)
+				std::io::ErrorKind::DirectoryNotEmpty => return Ok(()), //dir is gone already (that's fine, some other thread deleted it)
+				_ => return Err(e),
 			}
-			return Err(e);
 		}
 		if !path.pop() || path == stop_path
 		{
