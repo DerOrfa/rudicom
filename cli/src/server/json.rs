@@ -15,11 +15,11 @@ async fn lookup_or(rec:&(String, String)) -> crate::tools::Result<db::Entry>
 pub(super) fn router() -> axum::Router
 {
     axum::Router::new()
-        .route("/:table",get(query_table))
-        .route("/:table/:id",get(query_entry))
-		.route("/:table/:id/parents",get(get_entry_parents))
-		.route("/:table/:id/instances",get(query_instances))
-		.route("/:table/:id/series",get(query_series))
+        .route("/{table}",get(query_table))
+        .route("/{table}/{id}",get(query_entry))
+		.route("/{table}/{id}/parents",get(get_entry_parents))
+		.route("/{table}/{id}/instances",get(query_instances))
+		.route("/{table}/{id}/series",get(query_series))
 }
 
 async fn query_instances(Path(path):Path<(String, String)>) -> Result<Response,JsonError>

@@ -62,7 +62,7 @@ pub(crate) enum Commands {
 	Server {
 		/// ip and port to listen on
 		#[arg(default_value = "127.0.0.1:3000")]
-		address: String,
+		address: Vec<String>,
 	},
 	/// restore database from SureQL snapshot
 	Restore {file:PathBuf},

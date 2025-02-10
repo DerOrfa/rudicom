@@ -8,12 +8,13 @@ use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
 use crate::tools::{Context, Error::DicomError};
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
-use axum::extract::{Path, Query};
+use axum::extract::Path;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::Json;
 use axum_extra::body::AsyncReadBody;
+use axum_extra::extract::OptionalQuery;
 use dicom::pixeldata::image::ImageFormat;
 use dicom::pixeldata::PixelDecoder;
 use serde::Deserialize;
@@ -28,13 +29,13 @@ pub(super) fn router() -> axum::Router
 	rtr=rtr
 		.route("/statistics", get(get_statistics))
         .route("/instances",post(store_instance))
-        .route("/:table/:id",delete(del_entry))
-		.route("/:table/:id/verify",get(verify))
-        .route("/instances/:id/file",get(get_instance_file))
-        .route("/instances/:id/png",get(get_instance_png));
+        .route("/{table}/{id}",delete(del_entry))
+		.route("/{table}/{id}/verify",get(verify))
+        .route("/instances/{id}/file",get(get_instance_file))
+        .route("/instances/{id}/png",get(get_instance_png));
     #[cfg(feature="dicom-json")]
     {
-        rtr = rtr.route("/instances/:id/json-ext", get(get_instance_json_ext));
+        rtr = rtr.route("/instances/{id}/json-ext", get(get_instance_json_ext));
     }
     rtr
 }
@@ -137,7 +138,7 @@ pub(crate) struct ImageSize {
 	height: u32,
 }
 
-async fn get_instance_png(Path(id):Path<String>, size: Option<Query<ImageSize>>) -> Result<Response,TextError>
+async fn get_instance_png(Path(id):Path<String>, OptionalQuery(size): OptionalQuery<ImageSize>) -> Result<Response,TextError>
 {
 	let ctx = format!("decoding pixel data of {id}");
 	let not_found = format!("Instance {} not found", id);
