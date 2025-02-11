@@ -28,7 +28,7 @@ pub(crate) struct ListingConfig {
 pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
 {
     let keys:Vec<_> = crate::config::get().study_tags.keys().cloned()
-        .chain(["date", "time"].map(String::from))
+        .chain(["Date", "Time"].map(String::from))
         .unique()//make sure there are no duplicates
         .collect();
 
@@ -39,7 +39,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         studies.retain(|e|e.name().find(filter.as_str()).is_some());
     }
 
-    let sortby = config.sort_by.unwrap_or("date".to_string());
+    let sortby = config.sort_by.unwrap_or("Date".to_string());
     studies.sort_by(|e1,e2|
         match (e1.get(&sortby),e2.get(&sortby)) {
             (Some(v1),Some(v2)) => if config.sort_reverse {
@@ -60,7 +60,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
         .map(|e|(e.get_inner_id(),Byte::from(e.size))).collect();
 
     let countinstances = move |obj:&Entry,cell:&mut TableCellBuilder| {
-        let inst_cnt=instance_count[obj.id()];
+        let inst_cnt= instance_count[obj.id()];
         cell.text(inst_cnt.to_string());
     };
     let getfilesize = move |obj:&Entry,cell:&mut TableCellBuilder|{
@@ -68,8 +68,8 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     };
 
     let table= generators::table_from_objects(
-        studies, "name".to_string(), keys,
-        vec![("instances",Box::new(countinstances)),("size",Box::new(getfilesize))]
+        studies, "Name".to_string(), keys,
+        vec![("Instances",Box::new(countinstances)),("Size",Box::new(getfilesize))]
     ).await.map_err(|e|e.context("Failed generating the table"))?;
 
     let mut builder = Body::builder();

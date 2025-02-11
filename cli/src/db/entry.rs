@@ -38,18 +38,18 @@ impl Entry
 	{
 		match self {
 			Instance(_) => {
-				let number=self.get_string("number").unwrap_or("<-->".to_string());
+				let number=self.get_string("Number").unwrap_or("<-->".to_string());
 				format!("Instance {number}")
 			},
 			Series(_) => {
-				let number=self.get_string("number").unwrap_or("<-->".to_string());
-				let desc= self.get_string("description").unwrap_or("<-->".to_string());
+				let number=self.get_string("Number").unwrap_or("<-->".to_string());
+				let desc= self.get_string("Description").unwrap_or("<-->".to_string());
 				format!("S{number}_{desc}")
 			},
 			Study(_) => {
-				let id=self.get_string("name").unwrap_or("<-->".to_string());
-				let mut date=self.get_string("date").unwrap_or("<-->".to_string());
-				let mut time=self.get_string("time").unwrap_or("<-->".to_string());
+				let id=self.get_string("Name").unwrap_or("<-->".to_string());
+				let mut date=self.get_string("Date").unwrap_or("<-->".to_string());
+				let mut time=self.get_string("Time").unwrap_or("<-->".to_string());
 				if date.len()>6 {date=date.split_off(2);}
 				time.truncate(6);
 				format!("{id}/{date}_{time}")

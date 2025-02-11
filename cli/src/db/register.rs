@@ -62,18 +62,18 @@ pub async fn register_instance<'a>(
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>> {
 	pub static INSTANCE_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
-		LazyLock::new(|| dcm::get_attr_list(db::Table::Instances, vec![("number", vec![Tag::from((0x0020,0x0013))])]));//InstanceNumber
+		LazyLock::new(|| dcm::get_attr_list(db::Table::Instances, vec![("Number", vec![Tag::from((0x0020,0x0013))])]));//InstanceNumber
 	pub static SERIES_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
 		LazyLock::new(|| dcm::get_attr_list(db::Table::Series, vec![
-			("description",vec![Tag::from((0x0008,0x103E))]), //SeriesDescription
-			("number",vec![Tag::from((0x0020,0x0011))]) // SeriesNumber
+			("Description",vec![Tag::from((0x0008,0x103E))]), //SeriesDescription
+			("Number",vec![Tag::from((0x0020,0x0011))]) // SeriesNumber
 		])
 	);
 	pub static STUDY_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
 		LazyLock::new(|| dcm::get_attr_list(db::Table::Studies, vec![
-			("name",vec![Tag::from((0x0010,0x0010))]),//PatientName
-			("time", vec![Tag::from((0x0008,0x0030))]), // StudyTime 
-			("date", vec![Tag::from((0x0008,0x0020))]) // StudyDate
+			("Name",vec![Tag::from((0x0010,0x0010))]),//PatientName
+			("Time", vec![Tag::from((0x0008,0x0030))]), // StudyTime 
+			("Date", vec![Tag::from((0x0008,0x0020))]) // StudyDate
 		])
 	);
 

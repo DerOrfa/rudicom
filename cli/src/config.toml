@@ -1,8 +1,8 @@
-#PatientID, StudyTime and StudyDate will always be there they are needed internally
+#StudyTime and StudyDate will always be there they are needed internally
 [study_tags]
-Description = ["StudyDescription"]
-Coil = ["SharedFunctionalGroupsSequence.MRReceiveCoilSequence.ReceiveCoilName","(0051,100F)"]
 Scanner = ["ManufacturerModelName"]
+Date = ["StudyDate"]
+Time = ["StudyTime"]
 
 #SeriesDescription and SeriesNumber will always be there they are needed internally
 [series_tags]

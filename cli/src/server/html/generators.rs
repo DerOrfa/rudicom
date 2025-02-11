@@ -147,8 +147,8 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 				));
 			};
 
-			let instance_text = format!("{} instances",instances.len());
-			let instance_table = table_from_objects(instances, "name".into(), keys, vec![("thumbnail",Box::new(makethumb))]).await?;
+			let instance_text = format!("{} Instances",instances.len());
+			let instance_table = table_from_objects(instances, "Name".into(), keys, vec![("thumbnail",Box::new(makethumb))]).await?;
 			builder.heading_2(|h|h.text(instance_text)).push(instance_table);
 		}
 		Entry::Study((id,study)) => {
@@ -158,8 +158,8 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 			for s in &mut series
 			{
 				let v = s.get_instances_per().await?;
-				s.insert("instances", v.count);
-				s.insert("size",format!("{:.2}",Byte::from(v.size).get_appropriate_unit(Binary)));
+				s.insert("Instances", v.count);
+				s.insert("Size",format!("{:.2}",Byte::from(v.size).get_appropriate_unit(Binary)));
 			}
 
 			builder
@@ -167,14 +167,14 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 				.paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
 
 			series.sort_by_key(|s|s
-				.get_string("number").expect("missing Number in series")
+				.get_string("Number").expect("missing Number in series")
 				.parse::<u64>().expect("Number in Series is not a number")
 			);
 
 			let keys= crate::config::get().series_tags.keys().cloned()
-				.chain(["instances","size"].map(str::to_string)).collect();
+				.chain(["Instances","Size"].map(str::to_string)).collect();
 			let series_text = format!("{} series",series.len());
-			let series_table = table_from_objects(series, "name".into(), keys, vec![]).await?;
+			let series_table = table_from_objects(series, "Name".into(), keys, vec![]).await?;
 			builder.heading_2(|h|h.text(series_text)).push(series_table);
 		}
 	}
