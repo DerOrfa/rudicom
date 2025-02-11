@@ -21,10 +21,29 @@ pub(crate) struct ImportConfig {
 	pub(crate) echo:bool,
 	#[serde(default)]
 	pub(crate) echo_existing:bool,
-	#[serde(default)]
-	pub(crate) store:bool
 }
 
+#[derive(clap::ValueEnum, Clone, Default, Debug, Serialize, Copy)]
+pub enum ImportMode{
+	/// won't touch or own the file, but register it in the DB
+	#[default]
+	Import,
+	/// won't touch the file but create an owned copy inside the configured storage path (which might collide with the source file)
+	Store,
+	/// if the source is inside the configured storage path the DB takes ownership of the existing file, otherwise file will be moved into the configured storage path
+	Move
+}
+
+impl ToString for ImportMode
+{
+	fn to_string(&self) -> String {
+		match self {
+			ImportMode::Import => "import",
+			ImportMode::Store => "store",
+			ImportMode::Move => "move"
+		}.to_string()
+	}
+}
 
 impl Serialize for ImportResult
 {
@@ -70,13 +89,16 @@ impl Serialize for ImportResult
 	}
 }
 
-async fn import_file<T>(path:T, store:bool) -> ImportResult where T:Into<PathBuf>
+async fn import_file<T>(path:T, mode: ImportMode) -> ImportResult where T:Into<PathBuf>
 {
 	let path= path.into();
 	let filename = path.to_string_lossy().to_string();
 	let import = 
-		if store {crate::tools::store::store_file(path.as_path()).await} 
-		else {crate::tools::store::import_file(path.as_path()).await}; 
+		match mode {
+			ImportMode::Import => {crate::tools::store::import_file(path.as_path()).await}
+			ImportMode::Store => {crate::tools::store::store_file(path.as_path()).await}
+			ImportMode::Move => {crate::tools::store::move_file(path.as_path()).await}
+		};
 	match import
 	{
 		Ok(v) => match v {
@@ -95,7 +117,7 @@ async fn import_file<T>(path:T, store:bool) -> ImportResult where T:Into<PathBuf
 }
 
 
-pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
+pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
 {
 	let mut tasks=tokio::task::JoinSet::new();
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
@@ -104,7 +126,7 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 
 	//if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
-		tasks.spawn(import_file(file,config.store));
+		tasks.spawn(import_file(file,mode));
 	} else {
 		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
 	}
@@ -117,7 +139,7 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 				tasks.spawn(async move {
 					match nextfile
 					{
-						Ok(p) => import_file(p, config.store).await,
+						Ok(p) => import_file(p, mode).await,
 						Err(e) => ImportResult::GlobError(e.into())
 					}
 				});
@@ -137,9 +159,9 @@ pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig) -> crate::tools::Re
 	Ok(stream)
 }
 
-pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig) -> crate::tools::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
+pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
 {
-	Ok(import_glob(pattern,config)?
+	Ok(import_glob(pattern, config, mode)?
 		.map_ok(|item| {
 			let register_msg = match item {
 				ImportResult::Registered { filename } => Ok(filename),

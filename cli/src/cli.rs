@@ -5,6 +5,7 @@ use clap::ValueHint::{Hostname,FilePath};
 use tracing::Level;
 
 use clap::ValueHint::DirPath;
+use crate::tools::import::ImportMode;
 
 #[derive(Clone)]
 pub(super) struct LogLevel(Level);
@@ -74,11 +75,10 @@ pub(crate) enum Commands {
 		/// report on imported files
 		#[arg(long="echo",default_value_t=false)]
 		echo_imported:bool,
-		/// instead of importing the files, copy them over (possibly with anonymization) 
-		#[arg(long,default_value_t=false)]
-		store:bool,
+		#[arg(long, default_value_t)]
+		mode:ImportMode,
 		/// file or globbing to import
-		pattern: Vec<String>,
+		pattern:Vec<String>,
 	},
 }
 
