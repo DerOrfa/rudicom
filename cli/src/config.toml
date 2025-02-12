@@ -1,6 +1,5 @@
 #StudyTime and StudyDate will always be there they are needed internally
 [study_tags]
-Scanner = ["ManufacturerModelName"]
 Date = ["StudyDate"]
 Time = ["StudyTime"]
 
@@ -8,7 +7,6 @@ Time = ["StudyTime"]
 [series_tags]
 Date = ["SeriesDate"]
 Time = ["SeriesTime"]
-Protocol = ["ProtocolName"]
 
 # InstanceNumber will always be there as its needed internally
 [instance_tags]

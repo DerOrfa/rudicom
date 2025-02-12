@@ -2,6 +2,7 @@ use crate::db;
 use crate::tools::{entries_for_record, Context};
 use crate::tools::Result;
 use std::path::{Path, PathBuf};
+use surrealdb::err::Error::QueryNotExecutedDetail;
 use tokio::fs::{remove_dir, remove_file};
 use crate::db::DB;
 
@@ -13,15 +14,23 @@ pub async fn remove(id:&db::RecordId) -> Result<()>
 	{
 		jobs.spawn(job);
 	}
-	while let Some(result) = jobs.join_next().await.transpose()? {
-		result?;
-	}
-	Ok(())
+	let res:Result<Vec<_>> = jobs.join_all().await.into_iter().collect();
+	res.map(|v|())
 }
 
 async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 {
-	let res = DB.delete(id).await?;
+	let mut res = Ok(Default::default());
+	loop {
+		res = DB.delete(id.clone()).await;
+		match &res {
+			Err(surrealdb::Error::Db(QueryNotExecutedDetail{message})) => {
+				if message != "Failed to commit transaction due to a read or write conflict. This transaction can be retried" {break}
+			}
+			_ => {break},
+		}
+	}
+	let res = res?; 
 	if res.into_inner_ref().is_none_or_null(){
 		return Ok(None)
 	}

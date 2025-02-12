@@ -105,7 +105,9 @@ impl Entry
 		// get all files in the entry
 		let files=self.get_files().await?;
 		// makes PathBuf of them
-		Ok(reduce_path(files.iter().map(db::File::get_path).collect()))
+		if files.is_empty()	{Ok(PathBuf::default())} 
+		else { Ok(reduce_path(files.iter().map(db::File::get_path).collect())) }
+		
 	}
 }
 

@@ -9,6 +9,7 @@ use crate::dcm;
 use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
+use surrealdb::error::Db::QueryNotExecutedDetail;
 use dcm::AttributeSelector;
 
 #[derive(Default)]
@@ -43,13 +44,26 @@ async fn insert<'a>(
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
-	match record_id.table()
-	{
-		// colliding inserts of instances will result in no insert and Err,
-		"instances" => DB.insert(record_id).content(meta).await,
-		// others will silently overwrite the data (it's the same anyway, and we don't need to know)  
-		_ => 	DB.upsert(record_id).content(meta).await,
-	}.map_err(|e|e.into())
+
+	loop {
+		let r = match record_id.table()
+		{
+			// colliding inserts of instances will result in no insert and Err,
+			"instances" => DB.insert(&record_id).content(meta.clone()).await,
+			// others will silently overwrite the data (it's the same anyway, and we don't need to know)  
+			_ => 	DB.upsert(&record_id).content(meta.clone()).await,
+		};
+		match r { 
+			Err(surrealdb::Error::Db(QueryNotExecutedDetail{message})) => {
+				if message != "Failed to commit transaction due to a read or write conflict. This transaction can be retried"
+				{
+					return Err(surrealdb::Error::Db(QueryNotExecutedDetail{message}).into())
+				}
+			}
+			Err(e) => return Err(e.into()),
+			Ok(v) => return Ok(v),
+		}
+	}
 }
 
 /// register dicom object of an instance
