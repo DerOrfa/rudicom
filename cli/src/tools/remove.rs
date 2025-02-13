@@ -15,7 +15,7 @@ pub async fn remove(id:&db::RecordId) -> Result<()>
 		jobs.spawn(job);
 	}
 	let res:Result<Vec<_>> = jobs.join_all().await.into_iter().collect();
-	res.map(|v|())
+	res.map(|_|())
 }
 
 async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
