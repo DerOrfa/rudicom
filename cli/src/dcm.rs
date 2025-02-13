@@ -1,8 +1,7 @@
-use crate::config;
+use crate::{config, db};
 use crate::db::IntoDbValue;
 use crate::tools::Context;
 use dicom::core::header::HasLength;
-use dicom::core::ops::AttributeSelector;
 use dicom::core::{DataDictionary, Tag};
 use dicom::object::{DefaultDicomObject, StandardDataDictionary};
 use itertools::Itertools;
@@ -12,6 +11,13 @@ use std::ops::Deref;
 use std::str::FromStr;
 use strfmt::{strfmt_map, FmtError};
 
+#[derive(Debug,Clone,Hash,PartialEq,Eq)]
+pub struct AttributeSelector(pub dicom::core::ops::AttributeSelector);
+
+impl From<Tag> for AttributeSelector{
+	fn from(value: Tag) -> Self {AttributeSelector(value.into())}
+}
+
 pub fn find_tag(name:&str) -> Option<Tag>
 {
 	StandardDataDictionary::default()
@@ -20,29 +26,23 @@ pub fn find_tag(name:&str) -> Option<Tag>
 		.or_else(||Tag::from_str(name).ok())
 }
 
-pub fn get_attr_list(config_key:&str, must_have:Vec<(&str,Vec<&str>)>) -> HashMap<String,Vec<AttributeSelector>>
+pub fn get_attr_list(table:db::Table, must_have:Vec<(&str,Vec<Tag>)>) -> HashMap<String,Vec<AttributeSelector>>
 {
-	let dict = StandardDataDictionary::default();
-	let mut attrs = config::get::<HashMap<String,Vec<String>>>(config_key)//get tag list from config
-		.expect(format!(r#"failed getting "{config_key}" from the config"#).as_str());
+	let mut attrs = match table {
+		db::Table::Studies => config::get().study_tags.clone(),
+		db::Table::Series => config::get().series_tags.clone(),
+		db::Table::Instances => config::get().instance_tags.clone()
+	};
+	
 	// add "must have" by taking out each (or default), chain, and put back
 	for (label, need) in must_have 
 	{
-		let need:Vec<_> = need.into_iter()
-			.map(str::to_string)
+		let need:Vec<_> = need.into_iter().map_into::<AttributeSelector>()
 			.chain(attrs.remove(label).unwrap_or(Default::default()))
 			.unique().collect(); 
 		attrs.insert(label.to_string(),need);
 	}
-	let mut ret= HashMap::<String,Vec<AttributeSelector>>::default();
-	for (label, attr) in attrs
-	{
-		let attr:Vec<_> = attr.into_iter().map(|s|
-		   dict.parse_selector(&s).expect(format!("Tag {label} not found in dictionary").as_str())
-		).collect();
-		ret.insert(label,attr);
-	}
-	ret
+	attrs
 }
 
 pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a HashMap<String,Vec<AttributeSelector>>) -> Vec<(&'a str, surrealdb::Value)>
@@ -50,7 +50,7 @@ pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a HashMap<String,Vec<At
 	requested.iter().map(|(k,selectors)|(
 		k.deref(),
 		selectors.iter()
-			.find_map(|s|obj.entry_at(s.clone()).ok())
+			.find_map(|s|obj.entry_at(s.0.clone()).ok())
 			.map(|v|v.clone().into_db_value())
 			.unwrap_or_default()
 		)
@@ -61,8 +61,8 @@ pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a HashMap<String,Vec<At
 
 pub fn gen_filepath(obj:&DefaultDicomObject) -> crate::tools::Result<String>
 {
-	let pattern:String = config::get("paths.filename_pattern").expect(r#""filename_pattern"  missing or invalid in config"#);
-	strfmt_map(pattern.as_str(),|f| format_filepath(f, &obj))
+	let pattern = config::get().paths.filename_pattern.as_str();
+	strfmt_map(pattern,|f| format_filepath(f, &obj))
 		.context(format!("generating filename using pattern '{pattern}'"))
 }
 

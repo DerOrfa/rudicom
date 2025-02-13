@@ -31,9 +31,7 @@ pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 /// as "storage_path" is guaranteed to be absolute already, the result is guaranteed to be absolute
 pub fn complete_filepath<P>(path:&P) -> PathBuf where P:AsRef<Path>
 {
-	crate::config::get::<PathBuf>("paths.storage_path")
-		.expect(r#""storage_path" missing or invalid in config"#)
-		.join(path)
+	crate::config::get().paths.storage_path.join(path)
 }
 pub async fn get_instance_dicom(id:String) -> Result<Option<DefaultDicomObject>>
 {

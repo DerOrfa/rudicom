@@ -1,14 +1,12 @@
-#PatientID, StudyTime and StudyDate will always be there they are needed internally
+#StudyTime and StudyDate will always be there they are needed internally
 [study_tags]
-Description = ["StudyDescription"]
-Coil = ["SharedFunctionalGroupsSequence.MRReceiveCoilSequence.ReceiveCoilName","(0051,100F)"]
-Scanner = ["ManufacturerModelName"]
+Date = ["StudyDate"]
+Time = ["StudyTime"]
 
 #SeriesDescription and SeriesNumber will always be there they are needed internally
 [series_tags]
 Date = ["SeriesDate"]
 Time = ["SeriesTime"]
-"Protocol" = ["ProtocolName"]
 
 # InstanceNumber will always be there as its needed internally
 [instance_tags]
@@ -16,7 +14,7 @@ Date = ["InstanceCreationDate"]
 Time = ["InstanceCreationTime"]
 
 [limits]
-upload_sizelimit_mb = 100
+upload_sizelimit = "50M"
 max_files = 32 # max amount of concurrently processed files
 
 [paths]

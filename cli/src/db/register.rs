@@ -1,6 +1,6 @@
-use dicom::core::ops::AttributeSelector;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
+use dicom::core::Tag;
 use surrealdb::Value;
 
 use crate::db;
@@ -9,6 +9,8 @@ use crate::dcm;
 use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
+use surrealdb::error::Db::QueryNotExecutedDetail;
+use dcm::AttributeSelector;
 
 #[derive(Default)]
 pub struct RegistryGuard(Option<RecordId>);
@@ -42,13 +44,26 @@ async fn insert<'a>(
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
-	match record_id.table()
-	{
-		// colliding inserts of instances will result in no insert and Err,
-		"instances" => DB.insert(record_id).content(meta).await,
-		// others will silently overwrite the data (it's the same anyway, and we don't need to know)  
-		_ => 	DB.upsert(record_id).content(meta).await,
-	}.map_err(|e|e.into())
+
+	loop {
+		let r = match record_id.table()
+		{
+			// colliding inserts of instances will result in no insert and Err,
+			"instances" => DB.insert(&record_id).content(meta.clone()).await,
+			// others will silently overwrite the data (it's the same anyway, and we don't need to know)  
+			_ => 	DB.upsert(&record_id).content(meta.clone()).await,
+		};
+		match r { 
+			Err(surrealdb::Error::Db(QueryNotExecutedDetail{message})) => {
+				if message != "Failed to commit transaction due to a read or write conflict. This transaction can be retried"
+				{
+					return Err(surrealdb::Error::Db(QueryNotExecutedDetail{message}).into())
+				}
+			}
+			Err(e) => return Err(e.into()),
+			Ok(v) => return Ok(v),
+		}
+	}
 }
 
 /// register dicom object of an instance
@@ -61,18 +76,18 @@ pub async fn register_instance<'a>(
 	guard:Option<&mut RegistryGuard>
 ) -> crate::tools::Result<Option<db::Entry>> {
 	pub static INSTANCE_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
-		LazyLock::new(|| dcm::get_attr_list("instance_tags", vec![("number", vec!["InstanceNumber"])]));
+		LazyLock::new(|| dcm::get_attr_list(db::Table::Instances, vec![("Number", vec![Tag::from((0x0020,0x0013))])]));//InstanceNumber
 	pub static SERIES_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
-		LazyLock::new(|| dcm::get_attr_list("series_tags", vec![
-			("description",vec!["SeriesDescription"]),
-			("number",vec!["SeriesNumber"])
+		LazyLock::new(|| dcm::get_attr_list(db::Table::Series, vec![
+			("Description",vec![Tag::from((0x0008,0x103E))]), //SeriesDescription
+			("Number",vec![Tag::from((0x0020,0x0011))]) // SeriesNumber
 		])
 	);
 	pub static STUDY_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> = 
-		LazyLock::new(|| dcm::get_attr_list("study_tags", vec![
-			("name",vec!["PatientName"]),
-			("time", vec!["StudyTime"]),
-			("date", vec!["StudyDate"])
+		LazyLock::new(|| dcm::get_attr_list(db::Table::Studies, vec![
+			("Name",vec![Tag::from((0x0010,0x0010))]),//PatientName
+			("Time", vec![Tag::from((0x0008,0x0030))]), // StudyTime 
+			("Date", vec![Tag::from((0x0008,0x0020))]) // StudyDate
 		])
 	);
 

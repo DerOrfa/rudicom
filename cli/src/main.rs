@@ -45,7 +45,7 @@ async fn main() -> tools::Result<()>
 		Commands::Server{address} => {
 		DB.query(include_str!("db/init.surql")).await?;
 
-		let inf= crate::server::server_info().await;
+		let inf= server::server_info().await;
 		tracing::info!("database version is {}",inf.db_version);
 		tracing::info!("storage path is {}",inf.storage_path);
 			
@@ -56,11 +56,11 @@ async fn main() -> tools::Result<()>
 			}
 			set.join_all().await.into_iter().collect::<Result<Vec<_>,_>>()?;
 		}
-		Commands::Import{ echo_existing, echo_imported, store, pattern } =>	{
-			let config = ImportConfig{ echo: echo_imported, echo_existing, store };
+		Commands::Import{ echo_existing, echo_imported, mode, pattern } =>	{
+			let config = ImportConfig{ echo: echo_imported, echo_existing };
 			DB.query(include_str!("db/init.surql")).await?;
 			for glob in pattern {
-				let stream = import_glob_as_text(glob, config.clone())?;
+				let stream = import_glob_as_text(glob, config.clone(), mode.clone())?;
 				//filter doesn't do unpin, so we have to nail it down here
 				let mut stream = Box::pin(stream);
 				while let Some(result) = stream.next().await {
