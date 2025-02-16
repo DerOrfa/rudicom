@@ -20,7 +20,7 @@ pub async fn remove(id:&db::RecordId) -> Result<()>
 
 async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 {
-	let mut res = Ok(Default::default());
+	let mut res;
 	loop {
 		res = DB.delete(id.clone()).await;
 		match &res {
