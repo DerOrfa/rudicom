@@ -20,6 +20,7 @@ use dicom::pixeldata::PixelDecoder;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Cursor;
+use dicom::dictionary_std::tags;
 use crate::db::lookup_uid;
 use crate::tools::Error::NotFound;
 
@@ -144,6 +145,9 @@ async fn get_instance_png(Path(id):Path<String>, OptionalQuery(size): OptionalQu
 	let not_found = format!("Instance {} not found", id);
 	if let Some(obj)=get_instance_dicom(id).await?
 	{
+		if obj.get(tags::PIXEL_DATA).is_none() && obj.get(tags::DOUBLE_FLOAT_PIXEL_DATA).is_none() && obj.get(tags::FLOAT_PIXEL_DATA).is_some() {
+			return Ok((StatusCode::NOT_FOUND, not_found).into_response())
+		}
 		let mut buffer = Cursor::new(Vec::<u8>::new());
 		let mut image = obj.decode_pixel_data()
 			.and_then(|p|p.to_dynamic_image(0))
