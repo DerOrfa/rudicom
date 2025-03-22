@@ -34,11 +34,10 @@ or (only with feature `embedded`)
 ## /tools
 ### /backup
 generates SureQL snapshot of the database
-### /import (POST)
-`curl http://localhost:3000/tools/import/{text,json}[?<parameters>] -d"<glob>"`
+### /{import,move,store} (POST)
+`curl http://localhost:3000/tools/{import,move,store}/{text,json}[?<parameters>] -d"<glob>"`
 - `echo=true` generate output for successfully registered or stored files (default:false)
 - `echo_existing=true` generate output for already existing (and thus ignored) files (default:false)
-- `store=true` store (aka copy files into storage) instead of just importing the existing files
 
 ## offline import
     rudicom --file /tmp/db import "<glob>"
