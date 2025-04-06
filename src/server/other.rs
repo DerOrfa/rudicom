@@ -32,6 +32,7 @@ pub(super) fn router() -> axum::Router
         .route("/instances",post(store_instance))
         .route("/{table}/{id}",delete(del_entry))
 		.route("/{table}/{id}/verify",get(verify))
+		.route("/{table}/{id}/filepath",get(filepath))
         .route("/instances/{id}/file",get(get_instance_file))
         .route("/instances/{id}/png",get(get_instance_png));
     #[cfg(feature="dicom-json")]
@@ -70,6 +71,14 @@ async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Response,Json
 		if fails.is_empty() { StatusCode::OK.into_response() }
 		else { (StatusCode::INTERNAL_SERVER_ERROR, Json(fails)).into_response() }
 	)
+}
+
+async fn filepath(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
+{
+	let ctx = format!("looking up path of {table}:{id} in the storage");
+	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(&ctx)?;
+	let path = entry.get_path().await.context(ctx)?;
+	Ok(Json(json!({"path":path})).into_response())
 }
 
 async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
