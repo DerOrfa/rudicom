@@ -71,7 +71,7 @@ pub(crate) async fn store_file(filename:&Path) -> crate::tools::Result<Option<db
 /// "conflicting_md5" to the returned data
 pub(crate) async fn import_file(filename:&Path) -> crate::tools::Result<Option<db::Entry>>
 {
-	import_file_impl(filename, false).await	
+	import_file_impl(filename, is_storage(filename)).await	
 }
 
 async fn import_file_impl(path:&Path,own:bool) -> crate::tools::Result<Option<db::Entry>>
