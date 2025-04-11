@@ -32,9 +32,9 @@ async fn main() -> tools::Result<()>
 			.context(format!("Failed connecting to {}", database))?;
 	} else if let Some(file) = args.endpoint.file {
 		let file = file.canonicalize()
-			.context(format!("Failed canonicalize database path {}", file.to_string_lossy()))?;
+			.context(format!("Failed canonicalize database path {}", file.display()))?;
 		db::init_file(file.as_path()).await
-			.context(format!("Failed opening {}", file.to_string_lossy()))?;
+			.context(format!("Failed opening {}", file.display()))?;
 	} else {
 		db::init_local("memory").await
 			.context("Failed opening in-memory db".to_string())?;
@@ -75,7 +75,7 @@ async fn main() -> tools::Result<()>
 			config::write(file)?
 		}
 		Commands::Restore { file } => {
-			tracing::info!("Restoring database from {}", file.to_string_lossy());
+			tracing::info!("Restoring database from {}", file.display());
 			DB.import(file).await?
 		}
 	}

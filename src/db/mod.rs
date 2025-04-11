@@ -122,7 +122,7 @@ pub fn find_down_tree(id:RecordId) -> Result<Vec<RecordId>>
 
 pub async fn init_file(file:&std::path::Path) -> surrealdb::Result<()>
 {
-	let file = file.to_str().expect(format!(r#""{}" is an invalid filename"#,file.to_string_lossy()).as_str());
+	let file = file.to_str().expect(format!(r#""{}" is an invalid filename"#,file.display()).as_str());
 	init_local(format!("surrealkv://{file}").as_str()).await
 }
 pub async fn init_remote(addr:&str) -> surrealdb::Result<()>

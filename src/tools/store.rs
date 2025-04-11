@@ -42,7 +42,7 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 	).await?;
 	if registered.is_none() { //no previous data => normal register => store the file
 		let p = c_path.parent().unwrap();
-		let lossy_cpath= c_path.to_string_lossy();
+		let lossy_cpath= c_path.display();
 		tokio::fs::create_dir_all(p).await.context(format!("Failed creating storage path {:?}",p))?;
 		let mut file = OpenOptions::new().write(true).create_new(true).open(c_path.as_path()).await
 			.context(format!("creating file {lossy_cpath}"))?;

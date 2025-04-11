@@ -138,7 +138,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 
 			builder
 				.heading_2(|t|t.text("Path"))
-				.paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
+				.paragraph(|p|p.text(common_path.display().to_string()));
 
 			let keys:Vec<_>=crate::config::get().instance_tags.keys().cloned().collect();
 			let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
@@ -164,7 +164,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 
 			builder
 				.heading_2(|t|t.text("Path"))
-				.paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
+				.paragraph(|p|p.text(common_path.display().to_string()));
 
 			series.sort_by_key(|s|s
 				.get_string("Number").expect("missing Number in series")

@@ -38,9 +38,9 @@ async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 	let file = removed.get_file()?;
 	if file.owned {
 		let mut path = file.get_path();
-		remove_file(&path).await.context(format!("deleting {}",path.to_string_lossy()))?;
+		remove_file(&path).await.context(format!("deleting {}",path.display()))?;
 		if path.pop(){// if there is a parent path, try to delete it as far as possible
-			let ctx = format!("deleting {}",path.to_string_lossy());
+			let ctx = format!("deleting {}",path.display());
 			remove_path(path,&crate::config::get().paths.storage_path)
 				.await.context(ctx)?;
 		}

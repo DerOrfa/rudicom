@@ -92,7 +92,7 @@ impl Serialize for ImportResult
 async fn import_file<T>(path:T, mode: ImportMode) -> ImportResult where T:Into<PathBuf>
 {
 	let path= path.into();
-	let filename = path.to_string_lossy().to_string();
+	let filename = path.display().to_string();
 	let import = 
 		match mode {
 			ImportMode::Import => {crate::tools::store::import_file(path.as_path()).await}
@@ -167,12 +167,12 @@ pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) 
 				ImportResult::Registered { filename } => Ok(filename),
 				ImportResult::ExistedConflict { filename, existed, .. } => {
 					existed.get_file().map(|f|f.get_path())
-						.map(|p| format!("{filename} already existed as {} but checksum differs", p.to_string_lossy()))
+						.map(|p| format!("{filename} already existed as {} but checksum differs", p.display()))
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},
 				ImportResult::Existed { filename, existed } => {
 					existed.get_file().map(|f|f.get_path())
-						.map(|p| format!("{filename} already existed as {}", p.to_string_lossy()))
+						.map(|p| format!("{filename} already existed as {}", p.display()))
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},
 				ImportResult::Err { filename, error } => {
