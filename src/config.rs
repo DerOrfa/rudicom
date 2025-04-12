@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use config::{Config,ConfigError, File, FileFormat::Toml};
 use std::sync::OnceLock;
 use dicom::core::DataDictionary;
@@ -72,7 +72,7 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	Ok(())
 }
 
-pub fn write(path:PathBuf) -> Result<(),ConfigError>
+pub fn write(path:&Path) -> Result<(),ConfigError>
 {
 	std::fs::write(path,CONFIG_STR).map_err(|e|ConfigError::Foreign(Box::new(e)))
 }
