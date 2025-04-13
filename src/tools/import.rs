@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use std::path::PathBuf;
 use tokio::task::JoinError;
 
-pub(crate) enum ImportResult {
+pub enum ImportResult {
 	Registered{filename:String},
 	Existed{filename:String,existed:Entry},
 	ExistedConflict {filename:String,my_md5:String,existed:Entry},
@@ -16,11 +16,11 @@ pub(crate) enum ImportResult {
 	GlobError(glob::GlobError)
 }
 #[derive(Clone,Deserialize)]
-pub(crate) struct ImportConfig {
+pub struct ImportConfig {
 	#[serde(default)]
-	pub(crate) echo:bool,
+	pub echo:bool,
 	#[serde(default)]
-	pub(crate) echo_existing:bool,
+	pub echo_existing:bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Default, Debug, Serialize, Copy)]
@@ -117,7 +117,7 @@ async fn import_file<T>(path:T, mode: ImportMode) -> ImportResult where T:Into<P
 }
 
 
-pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
+pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
 {
 	let mut tasks=tokio::task::JoinSet::new();
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|

@@ -1,18 +1,14 @@
-#![recursion_limit = "512"]
-mod storage;
-mod db;
-mod dcm;
-mod tools;
-mod server;
-mod config;
 mod cli;
 
 use futures::StreamExt;
-use tools::import::import_glob_as_text;
+use rudicom::tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
 use crate::cli::Commands;
-use crate::db::DB;
-use crate::tools::import::ImportConfig;
+use rudicom::db::DB;
+use rudicom::db;
+use rudicom::tools::import::ImportConfig;
+use rudicom::config;
+use rudicom::server;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]

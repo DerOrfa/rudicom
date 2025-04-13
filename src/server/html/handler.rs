@@ -17,7 +17,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 #[derive(Deserialize)]
-pub(crate) struct ListingConfig {
+pub struct ListingConfig {
     filter:Option<String>,
     sort_by:Option<String>,
     #[serde(default)]
@@ -25,7 +25,7 @@ pub(crate) struct ListingConfig {
 }
 
 
-pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
+pub async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
 {
     let keys:Vec<_> = crate::config::get().study_tags.keys().cloned()
         .chain(["Date", "Time"].map(String::from))
@@ -78,7 +78,7 @@ pub(crate) async fn get_studies_html(Query(config): Query<ListingConfig>) -> Res
     Ok(axum::response::Html(generators::wrap_body(builder.build(), "Studies").to_string()))
 }
 
-pub(crate) async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Result<Response,TextError>
+pub async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Result<Response,TextError>
 {
     if let Some(entry) = db::lookup_uid(table,id).await?
     {

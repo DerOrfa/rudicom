@@ -62,7 +62,7 @@ fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
 	table_builder.build()
 }
 
-pub(crate) async fn table_from_objects(
+pub async fn table_from_objects(
 	objs:Vec<Entry>,
 	id_name:String,
 	keys:Vec<String>,
@@ -107,7 +107,7 @@ pub(crate) async fn table_from_objects(
 	Ok(table_builder.build())
 }
 
-pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
+pub async fn entry_page(entry:Entry) -> Result<Html>
 {
 	let mut builder = Body::builder();
 	builder.push(entry.make_nav().await?);

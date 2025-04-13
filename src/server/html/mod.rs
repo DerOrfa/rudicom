@@ -3,7 +3,7 @@ mod generators;
 
 use axum::routing::get;
 
-pub(crate) fn router() -> axum::Router
+pub fn router() -> axum::Router
 {
 	axum::Router::new()
 		.route("/studies",get(handler::get_studies_html))

@@ -135,18 +135,18 @@ pub enum Error
 }
 
 impl Error {
-	pub(crate) fn context<T>(self, context:T) -> Error where String:From<T>
+	pub fn context<T>(self, context:T) -> Error where String:From<T>
 	{
 		ErrorContext::new(self,context).into()
 	}
-	pub(crate) fn context_from<E,T>(error:E,context:T) -> Error where String:From<T>, Error:From<E>
+	pub fn context_from<E,T>(error:E,context:T) -> Error where String:From<T>, Error:From<E>
 	{
 		Error::from(error).context(context)
 	}
-	pub(crate) fn sources(&self) -> Source<'_> {
+	pub fn sources(&self) -> Source<'_> {
 		Source { current: Some( self ) }
 	}
-	pub(crate) fn root_cause(&self) -> &(dyn std::error::Error + 'static) {
+	pub fn root_cause(&self) -> &(dyn std::error::Error + 'static) {
 		self.sources().last().expect("Error chains can't be empty")
 	}
 

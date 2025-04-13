@@ -7,7 +7,7 @@ use tokio::fs::File;
 use crate::tools::Error::DicomError;
 use crate::tools::{Context, Result};
 
-pub(crate) struct AsyncMd5(md5::Context);
+pub struct AsyncMd5(md5::Context);
 
 impl AsyncMd5
 {

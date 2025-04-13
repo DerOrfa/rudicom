@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::tools;
 
 #[derive(Error,Debug)]
-pub(crate) enum HttpError{
+pub enum HttpError{
     #[error("internal error {0}")]
     Internal(tools::Error),
     #[error("Bad request {message}")]
@@ -32,14 +32,14 @@ impl HttpError
             });
         error_code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
     }
-    pub(crate) fn status_code(&self) -> StatusCode
+    pub fn status_code(&self) -> StatusCode
     {
         match &self {
             HttpError::Internal(e) => Self::internal_status_code(e),
             HttpError::BadRequest { .. } => StatusCode::BAD_REQUEST
         }
     }
-    pub(crate) fn do_trace(&self)
+    pub fn do_trace(&self)
     {
         match self {
             HttpError::Internal(e) => {
@@ -54,7 +54,7 @@ impl HttpError
 }
 
 
-pub(crate) struct TextError(HttpError);
+pub struct TextError(HttpError);
 impl IntoResponse for TextError {
     fn into_response(self) -> Response
     {
@@ -75,7 +75,7 @@ impl<T> From<T> for TextError where HttpError:From<T>
     }
 }
 
-pub(crate) struct JsonError(HttpError);
+pub struct JsonError(HttpError);
 impl IntoResponse for JsonError {
     fn into_response(self) -> Response
     {
