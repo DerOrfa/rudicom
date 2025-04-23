@@ -27,7 +27,7 @@ impl RecordId {
 		big.into_iter()
 	}
 
-	pub(crate) fn from_instance(instance_id: &str, series_id: &str, study_id: &str ) -> RecordId
+	pub fn from_instance(instance_id: &str, series_id: &str, study_id: &str ) -> RecordId
 	{
 		let index:Vec<_> = Self::str_to_vec(study_id)
 			.chain(Self::str_to_vec(series_id))
@@ -36,7 +36,7 @@ impl RecordId {
 			.collect();
 		RecordId(surrealdb::RecordId::from(("instances",index)))
 	}
-	pub(crate) fn from_series(series_id: &str, study_id: &str) -> RecordId
+	pub fn from_series(series_id: &str, study_id: &str) -> RecordId
 	{
 		let index:Vec<_> = Self::str_to_vec(study_id)
 			.chain(Self::str_to_vec(series_id))
@@ -44,14 +44,14 @@ impl RecordId {
 			.collect();
 		RecordId(surrealdb::RecordId::from(("series",index)))
 	}
-	pub(crate) fn from_study(id: &str) -> RecordId
+	pub fn from_study(id: &str) -> RecordId
 	{
 		let index:Vec<_> = Self::str_to_vec(id)
 			.map(RecordIdKey::from).map(surrealdb::Value::from)
 			.collect();
 		RecordId(surrealdb::RecordId::from(("studies",index)))
 	}
-	pub(crate) fn str_key(&self) -> String {
+	pub fn str_key(&self) -> String {
 		let bytes= self.key_vec();
 		// the last 6 numbers in the vector are the actual ID (not parents)
 		let bytes:Vec<_> = bytes.split_at(bytes.len()-6).1.to_vec().into_iter()
@@ -62,7 +62,7 @@ impl RecordId {
 			.trim_end_matches("+").to_string()
 			.replace("+",".")
 	}
-	pub(crate) fn key_vec(&self) -> &[sql::Value] {
+	pub fn key_vec(&self) -> &[sql::Value] {
 		if let Id::Array(key) = self.deref().key().into_inner_ref() {
 			if key.0.len() == 1 { //aggregate ids are arrays of arrays, just flatten that
 				if let sql::Value::Array(array)= &key.0[0]{

@@ -48,7 +48,7 @@ impl AggregateData
 	}
 }
 
-pub(crate) static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
+pub static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
 async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surrealdb::Result<Value>
 {
@@ -59,7 +59,7 @@ async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surreald
 	result.take::<Value>(0usize)
 }
 
-pub(crate) async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where Resource: From<T>
+pub async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where Resource: From<T>
 {
 	let val = DB.select::<Value>(Resource::from(table)).await?.into_inner();
 	let kind = val.kindof();
@@ -70,7 +70,7 @@ pub(crate) async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where Resourc
 	}
 }
 
-pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
+pub async fn lookup(id:RecordId) -> Result<Option<Entry>>
 {
 	let ctx = format!("looking up {id}");
 	let v:Value = DB.select(id).await.context(ctx.clone())?;
@@ -81,7 +81,7 @@ pub(crate) async fn lookup(id:RecordId) -> Result<Option<Entry>>
 	}
 }
 
-pub(crate) async fn lookup_uid<S:AsRef<str>>(table:S, uid:String) -> Result<Option<Entry>>
+pub async fn lookup_uid<S:AsRef<str>>(table:S, uid:String) -> Result<Option<Entry>>
 {
 	let ctx = format!("looking up {uid} in {}",table.as_ref());
 	let value= query(format!("select * from {} where uid == $uid",table.as_ref()), ("uid", uid))
@@ -122,7 +122,7 @@ pub fn find_down_tree(id:RecordId) -> Result<Vec<RecordId>>
 
 pub async fn init_file(file:&std::path::Path) -> surrealdb::Result<()>
 {
-	let file = file.to_str().expect(format!(r#""{}" is an invalid filename"#,file.to_string_lossy()).as_str());
+	let file = file.to_str().expect(format!(r#""{}" is an invalid filename"#,file.display()).as_str());
 	init_local(format!("surrealkv://{file}").as_str()).await
 }
 pub async fn init_remote(addr:&str) -> surrealdb::Result<()>

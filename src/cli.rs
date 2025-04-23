@@ -5,7 +5,7 @@ use clap::ValueHint::{Hostname,FilePath};
 use tracing::Level;
 
 use clap::ValueHint::DirPath;
-use crate::tools::import::ImportMode;
+use rudicom::tools::import::ImportMode;
 
 #[derive(Clone)]
 pub(super) struct LogLevel(Level);
@@ -56,7 +56,7 @@ pub(super) struct Cli {
 }
 
 #[derive(Subcommand)]
-pub(crate) enum Commands {
+pub enum Commands {
 	/// writing the default config out into the given file
 	WriteConfig {file:PathBuf},
 	/// run the server

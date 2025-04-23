@@ -62,7 +62,7 @@ fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
 	table_builder.build()
 }
 
-pub(crate) async fn table_from_objects(
+pub async fn table_from_objects(
 	objs:Vec<Entry>,
 	id_name:String,
 	keys:Vec<String>,
@@ -107,7 +107,7 @@ pub(crate) async fn table_from_objects(
 	Ok(table_builder.build())
 }
 
-pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
+pub async fn entry_page(entry:Entry) -> Result<Html>
 {
 	let mut builder = Body::builder();
 	builder.push(entry.make_nav().await?);
@@ -138,7 +138,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 
 			builder
 				.heading_2(|t|t.text("Path"))
-				.paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
+				.paragraph(|p|p.text(common_path.display().to_string()));
 
 			let keys:Vec<_>=crate::config::get().instance_tags.keys().cloned().collect();
 			let makethumb = |obj:&Entry,cell:&mut TableCellBuilder|{
@@ -164,7 +164,7 @@ pub(crate) async fn entry_page(entry:Entry) -> Result<Html>
 
 			builder
 				.heading_2(|t|t.text("Path"))
-				.paragraph(|p|p.text(common_path.to_string_lossy().to_string()));
+				.paragraph(|p|p.text(common_path.display().to_string()));
 
 			series.sort_by_key(|s|s
 				.get_string("Number").expect("missing Number in series")

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use std::path::PathBuf;
 use tokio::task::JoinError;
 
-pub(crate) enum ImportResult {
+pub enum ImportResult {
 	Registered{filename:String},
 	Existed{filename:String,existed:Entry},
 	ExistedConflict {filename:String,my_md5:String,existed:Entry},
@@ -16,11 +16,11 @@ pub(crate) enum ImportResult {
 	GlobError(glob::GlobError)
 }
 #[derive(Clone,Deserialize)]
-pub(crate) struct ImportConfig {
+pub struct ImportConfig {
 	#[serde(default)]
-	pub(crate) echo:bool,
+	pub echo:bool,
 	#[serde(default)]
-	pub(crate) echo_existing:bool,
+	pub echo_existing:bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Default, Debug, Serialize, Copy)]
@@ -92,7 +92,7 @@ impl Serialize for ImportResult
 async fn import_file<T>(path:T, mode: ImportMode) -> ImportResult where T:Into<PathBuf>
 {
 	let path= path.into();
-	let filename = path.to_string_lossy().to_string();
+	let filename = path.display().to_string();
 	let import = 
 		match mode {
 			ImportMode::Import => {crate::tools::store::import_file(path.as_path()).await}
@@ -117,7 +117,7 @@ async fn import_file<T>(path:T, mode: ImportMode) -> ImportResult where T:Into<P
 }
 
 
-pub(crate) fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
+pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
 {
 	let mut tasks=tokio::task::JoinSet::new();
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
@@ -167,12 +167,12 @@ pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) 
 				ImportResult::Registered { filename } => Ok(filename),
 				ImportResult::ExistedConflict { filename, existed, .. } => {
 					existed.get_file().map(|f|f.get_path())
-						.map(|p| format!("{filename} already existed as {} but checksum differs", p.to_string_lossy()))
+						.map(|p| format!("{filename} already existed as {} but checksum differs", p.display()))
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},
 				ImportResult::Existed { filename, existed } => {
 					existed.get_file().map(|f|f.get_path())
-						.map(|p| format!("{filename} already existed as {}", p.to_string_lossy()))
+						.map(|p| format!("{filename} already existed as {}", p.display()))
 						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
 				},
 				ImportResult::Err { filename, error } => {

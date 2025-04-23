@@ -143,7 +143,7 @@ async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Response,JsonErr
 }
 
 #[derive(Deserialize)]
-pub(crate) struct ImageSize {
+pub struct ImageSize {
 	width: u32,
 	height: u32,
 }

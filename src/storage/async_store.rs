@@ -7,7 +7,7 @@ use tokio::fs::File;
 use crate::tools::Error::DicomError;
 use crate::tools::{Context, Result};
 
-pub(crate) struct AsyncMd5(md5::Context);
+pub struct AsyncMd5(md5::Context);
 
 impl AsyncMd5
 {
@@ -52,7 +52,7 @@ pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Res
 pub async fn compute_md5(filename:&Path) -> Result<md5::Digest>
 {
 	let mut md5_compute = AsyncMd5::new();
-	let mut fileob = File::open(&filename).await.context(format!("opening {}",filename.to_string_lossy()))?;
+	let mut fileob = File::open(&filename).await.context(format!("opening {}",filename.display()))?;
 	tokio::io::copy(&mut fileob,&mut md5_compute).await?;
 	Ok(md5_compute.compute())
 

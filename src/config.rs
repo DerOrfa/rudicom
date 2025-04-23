@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use config::{Config,ConfigError, File, FileFormat::Toml};
 use std::sync::OnceLock;
 use dicom::core::DataDictionary;
@@ -53,7 +53,7 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	if let Some(filename) = config_file {
 		let filename = filename.canonicalize().map_err(|e|ConfigError::Foreign(Box::new(e)))?;
 		let filename = filename.to_str()
-				.ok_or(ConfigError::Foreign(format!("Failed to encode filename {} as UTF-8",filename.to_string_lossy()).into()))?;
+				.ok_or(ConfigError::Foreign(format!("Failed to encode filename {} as UTF-8",filename.display()).into()))?;
 		tracing::info!("loading config from {filename}");
 		builder=builder.add_source(File::new(filename,Toml));
 	} else {
@@ -64,15 +64,15 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 
 	let storage_path = &get().paths.storage_path;
 	if !storage_path.is_absolute(){
-		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must be an absolute path"#,storage_path.to_string_lossy()).into()))
+		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must be an absolute path"#,storage_path.display()).into()))
 	}
 	if !storage_path.exists(){
-		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must exist"#,storage_path.to_string_lossy()).into()))
+		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must exist"#,storage_path.display()).into()))
 	}
 	Ok(())
 }
 
-pub fn write(path:PathBuf) -> Result<(),ConfigError>
+pub fn write(path:&Path) -> Result<(),ConfigError>
 {
 	std::fs::write(path,CONFIG_STR).map_err(|e|ConfigError::Foreign(Box::new(e)))
 }

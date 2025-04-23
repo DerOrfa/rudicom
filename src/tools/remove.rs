@@ -4,6 +4,7 @@ use crate::tools::Result;
 use std::path::{Path, PathBuf};
 use surrealdb::err::Error::QueryNotExecutedDetail;
 use tokio::fs::{remove_dir, remove_file};
+use tracing::log::warn;
 use crate::db::DB;
 
 pub async fn remove(id:&db::RecordId) -> Result<()>
@@ -38,11 +39,15 @@ async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 	let file = removed.get_file()?;
 	if file.owned {
 		let mut path = file.get_path();
-		remove_file(&path).await.context(format!("deleting {}",path.to_string_lossy()))?;
-		if path.pop(){// if there is a parent path, try to delete it as far as possible
-			let ctx = format!("deleting {}",path.to_string_lossy());
-			remove_path(path,&crate::config::get().paths.storage_path)
-				.await.context(ctx)?;
+		if path.exists() {
+			remove_file(&path).await.context(format!("deleting {}", path.display()))?;
+			if path.pop(){// if there is a parent path, try to delete it as far as possible
+			let ctx = format!("deleting {}",path.display());
+				remove_path(path,&crate::config::get().paths.storage_path)
+					.await.context(ctx)?;
+			}
+		} else {
+			warn!("trying to delete file {} but it does not exist",path.to_string_lossy())
 		}
 	}
 	Ok(Some(removed))

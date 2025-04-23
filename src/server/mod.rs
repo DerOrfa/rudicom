@@ -23,11 +23,11 @@ mod http_error;
 pub struct Info
 {
 	version:String,
-	pub(crate) db_version:String,
-	pub(crate) storage_path:String
+	pub db_version:String,
+	pub storage_path:String
 }
 
-pub(crate) async fn server_info() -> Info
+pub async fn server_info() -> Info
 {
 	Info{
 		version:format!("{} v{}",env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),

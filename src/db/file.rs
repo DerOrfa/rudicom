@@ -20,7 +20,7 @@ pub struct File
 }
 
 impl File {
-	pub(crate) fn new<T>(path:T, md5:md5::Digest, owned:bool, size:u64) -> File where PathBuf:From<T>
+	pub fn new<T>(path:T, md5:md5::Digest, owned:bool, size:u64) -> File where PathBuf:From<T>
 	{
 		let path = PathBuf::from(path);
 		File{path,size, owned, md5:format!("{:x}", md5)}
@@ -29,15 +29,15 @@ impl File {
 	/// get the complete path of the file
 	/// - attaches "storage_path" from the config if the file is owned and the path is relative
 	/// - as non-owned files are guaranteed to be absolute already and "storage_path" is guaranteed to be absolute, the result is always guaranteed to be absolute
-	pub(crate) fn get_path(&self) -> PathBuf
+	pub fn get_path(&self) -> PathBuf
 	{
 		if self.owned { complete_filepath(&self.path) }
 		else { self.path.to_path_buf() }
 	}
-	pub(crate) fn get_md5(&self) -> &str { self.md5.as_str() }
+	pub fn get_md5(&self) -> &str { self.md5.as_str() }
 
 	/// creates fileinfo struct and reads dicom object directly from path
-	pub(crate) async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> Result<(File,DefaultDicomObject)>
+	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> Result<(File,DefaultDicomObject)>
 	{
 		let mut buffer = Vec::<u8>::new();
 		let size= tokio::fs::File::open(path.as_ref()).await?.read_to_end(&mut buffer).await?;
@@ -49,7 +49,7 @@ impl File {
 	}
 
 	/// read the file stored at path, check its checksum and return it as dicom object
-	pub(crate) async fn read(&self) -> Result<DefaultDicomObject>
+	pub async fn read(&self) -> Result<DefaultDicomObject>
 	{
 		let (red_info,obj) = Self::new_from_existing(self.get_path(),self.owned).await?;
 		if red_info.md5 != self.md5
@@ -60,7 +60,7 @@ impl File {
 		Ok(obj)
 	}
 
-	pub(crate) async fn verify(&self) -> Result<()>
+	pub async fn verify(&self) -> Result<()>
 	{
 		let md5_stored = &self.md5;
 		let filename = self.get_path();

@@ -17,7 +17,7 @@ async fn read_to_buffer(filename:&Path) -> crate::tools::Result<Vec<u8>>
 }
 
 /// check if a path is a subdirectory of the storage path defined in config
-pub(crate) fn is_storage<T:AsRef<Path>>(path:T) -> bool
+pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
 {
 	path.as_ref().starts_with(&crate::config::get().paths.storage_path)
 }
@@ -26,7 +26,7 @@ pub(crate) fn is_storage<T:AsRef<Path>>(path:T) -> bool
 /// stores given dicom object as file and registers it as owned (might change data)
 /// if the object already exists, the store is aborted and the existing data is returned
 /// None otherwise
-pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::Entry>>
+pub async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::Entry>>
 {
 	let mut guard= RegistryGuard::default();
 	let mut checksum = md5::Context::new();
@@ -42,7 +42,7 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 	).await?;
 	if registered.is_none() { //no previous data => normal register => store the file
 		let p = c_path.parent().unwrap();
-		let lossy_cpath= c_path.to_string_lossy();
+		let lossy_cpath= c_path.display();
 		tokio::fs::create_dir_all(p).await.context(format!("Failed creating storage path {:?}",p))?;
 		let mut file = OpenOptions::new().write(true).create_new(true).open(c_path.as_path()).await
 			.context(format!("creating file {lossy_cpath}"))?;
@@ -58,7 +58,7 @@ pub(crate) async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option
 /// stores given dicom file as file (makes a copy) and registers it as owned (might change data)
 /// if the object already exists, the store is aborted and the existing data is returned
 /// None otherwise
-pub(crate) async fn store_file(filename:&Path) -> crate::tools::Result<Option<db::Entry>>
+pub async fn store_file(filename:&Path) -> crate::tools::Result<Option<db::Entry>>
 {
 	let buffer = read_to_buffer(filename).await?;
 	store(read(buffer)?).await
@@ -69,7 +69,7 @@ pub(crate) async fn store_file(filename:&Path) -> crate::tools::Result<Option<db
 /// as usual and no registration takes place.
 /// Additionally, if the existing data has a different md5, the new md5 is added as
 /// "conflicting_md5" to the returned data
-pub(crate) async fn import_file(filename:&Path) -> crate::tools::Result<Option<db::Entry>>
+pub async fn import_file(filename:&Path) -> crate::tools::Result<Option<db::Entry>>
 {
 	import_file_impl(filename, is_storage(filename)).await	
 }
@@ -90,7 +90,7 @@ async fn import_file_impl(path:&Path,own:bool) -> crate::tools::Result<Option<db
 	reg
 }
 
-pub(crate) async fn move_file(filename: &Path) -> crate::tools::Result<Option<db::Entry>> 
+pub async fn move_file(filename: &Path) -> crate::tools::Result<Option<db::Entry>>
 {
 	if is_storage(filename) { // if the file is already in the storage-path just import it, and take ownership
 		import_file_impl(filename,true).await
