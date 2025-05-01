@@ -23,8 +23,8 @@ pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
 }
 
 
-/// stores given dicom object as file and registers it as owned (might change data)
-/// if the object already exists, the store is aborted and the existing data is returned
+/// stores given a dicom object as a file and registers it as owned (might change data)
+/// if the object already exists, the store is aborted, and the existing data is returned
 /// None otherwise
 pub async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::Entry>>
 {

@@ -1,5 +1,5 @@
-use crate::common::dcm::synthesize_study;
-use crate::common::{dcm, init_db};
+use crate::common::dcm::{synthesize_study,bulk_insert, UidSynthesizer};
+use crate::common::init_db;
 use dicom::dictionary_std::tags;
 use dicom::object::{FileDicomObject, InMemDicomObject};
 use glob::glob;
@@ -7,12 +7,11 @@ use itertools::Itertools;
 use rand::random;
 use rudicom::db::{lookup_uid, AggregateData, DB};
 use rudicom::tools::remove::remove;
-use rudicom::tools::store::store;
 use tokio::task::JoinSet;
 
 mod common;
 
-async fn check_statistics(uid_gen: &dcm::UidSynthesizer, data:&Vec<Vec<FileDicomObject<InMemDicomObject>>>) -> Result<(), Box<dyn std::error::Error>>
+async fn check_statistics(uid_gen: &UidSynthesizer, data:&Vec<Vec<FileDicomObject<InMemDicomObject>>>) -> Result<(), Box<dyn std::error::Error>>
 {
 	// check statistics
 	let study_id = uid_gen.study(111);
@@ -40,15 +39,9 @@ async fn check_statistics(uid_gen: &dcm::UidSynthesizer, data:&Vec<Vec<FileDicom
 async fn study() -> Result<(), Box<dyn std::error::Error>>
 {
 	init_db().await?.health().await?;
-	let uid_gen = dcm::UidSynthesizer::default();
+	let uid_gen = UidSynthesizer::default();
 	let mut instances = synthesize_study(&uid_gen,111,10,100);
-	let mut set = JoinSet::new();
-	for obj in instances.iter().flatten()
-	{
-		set.spawn(store(obj.clone()));
-	}
-	// check that all inserts succeed
-	for stored in set.join_all().await.into_iter().collect::<Result<Vec<_>,_>>()?
+	for stored in bulk_insert(instances.iter().flatten()).await?
 	{
 		assert!(stored.is_none(), "unexpected return from first store");
 	}

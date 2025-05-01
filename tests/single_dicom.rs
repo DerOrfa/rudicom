@@ -2,6 +2,7 @@ use crate::common::dcm;
 use crate::common::init_db;
 use dicom::dictionary_std::tags;
 use rudicom::tools::store::store;
+use crate::common::dcm::cleanup;
 
 mod common;
 
@@ -20,5 +21,5 @@ async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 	
 	rudicom::tools::remove::remove(stored.id()).await?;
 	assert!(!path.exists(), "File should be gone after remove.");
-	Ok(())
+	cleanup().await.map_err(|e| e.into())
 }
