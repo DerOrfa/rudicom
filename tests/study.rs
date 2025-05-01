@@ -99,7 +99,7 @@ async fn study() -> Result<(), Box<dyn std::error::Error>>
 		});
 	}
 	remove_set.join_all().await.into_iter().collect::<Result<Vec<()>,_>>()
-		.map_err(|e| format!("failed to remove instances: {e}"))?;
+		.map_err(|e| format!("failed to remove remaining instances: {e}"))?;
 
 	let store_path = rudicom::config::get().paths.storage_path.display();
 	let files = glob(format!("{}/**/*",store_path).as_str())?.count();

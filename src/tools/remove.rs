@@ -59,10 +59,14 @@ async fn remove_path(mut path:PathBuf, stop_path:&Path) -> std::io::Result<()>
 	loop {
 		if let Err(e) = remove_dir(path.as_path()).await
 		{
-			match e.kind() { 
-				std::io::ErrorKind::NotFound => return Ok(()), //dir is not empty (that's fine, we'll just stop deleting)
-				std::io::ErrorKind::DirectoryNotEmpty => return Ok(()), //dir is gone already (that's fine, some other thread deleted it)
-				_ => return Err(e),
+			return match e.kind() {
+				std::io::ErrorKind::NotFound => Ok(()), //dir is gone already (that's fine, some other thread deleted it)
+				std::io::ErrorKind::DirectoryNotEmpty => Ok(()), //dir is not empty (that's fine, we'll just stop deleting)
+				_ => {
+					// if it is actually gone, just ignore the error. Because:
+					// "if a path does not exist, its removal may fail for a number of reasons, such as insufficient permissions"
+					if path.exists() { Err(e) } else { Ok(()) }
+				}
 			}
 		}
 		if !path.pop() || path == stop_path
