@@ -49,6 +49,10 @@ static CONFIG_STR:&str = include_str!("config.toml");
 
 pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	let mut builder = Config::builder()
+		.set_default(
+			"paths.storage_path",
+			std::env::temp_dir().join("db_store").to_string_lossy().into_owned()
+		)?
 		.add_source(File::from_str(CONFIG_STR,Toml));
 	if let Some(filename) = config_file {
 		let filename = filename.canonicalize().map_err(|e|ConfigError::Foreign(Box::new(e)))?;

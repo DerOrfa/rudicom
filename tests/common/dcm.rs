@@ -59,10 +59,10 @@ pub fn synthesize_dicom_obj(uid_synthesizer: &UidSynthesizer, stdy_num:u16, ser_
 	let str_tags = [
 		(tags::STUDY_DATE, VR::DA, "20250101"),
 		(tags::STUDY_TIME, VR::TM, "000000.000000"),
-		(tags::STUDY_ID, VR::SH, "John_Doe"),
+		(tags::STUDY_ID, VR::SH, "John_Doe_Study"),
 		(tags::SOP_CLASS_UID, VR::UI, uids::MR_IMAGE_STORAGE),
 		(tags::PATIENT_NAME, VR::PN,"Doe^John",),
-		(tags::PATIENT_ID, VR::LO,"John Doe",),
+		(tags::PATIENT_ID, VR::LO,"John_Doe",),
 	].map(|(id,vr,val)|DataElement::new(id,vr,val)).into_iter();
 	let string_tags = [
 		(tags::SOP_INSTANCE_UID, VR::UI, uid_synthesizer.instance(stdy_num,ser_num,image_num)),

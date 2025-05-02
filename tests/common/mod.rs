@@ -4,7 +4,6 @@ pub mod dcm;
 use rudicom::config;
 use rudicom::db;
 use std::ops::Deref;
-use std::path::Path;
 use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
 
@@ -20,7 +19,8 @@ pub async fn init_db() -> Result<&'static Surreal<Any>, Box<dyn std::error::Erro
 }
 
 pub fn init_config() -> Result<(), Box<dyn std::error::Error>> {
-	let storage_path = Path::new("/tmp/db_store");
+	// create a storage path where the default config would expect it
+	let storage_path = std::env::temp_dir().join("db_store");
 	if !storage_path.exists() {
 		std::fs::create_dir(&storage_path)?;
 	};
