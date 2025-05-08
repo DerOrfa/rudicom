@@ -19,7 +19,7 @@ impl Entry {
 		let path= find_down_tree(self.id().clone())
 			.context(format!("Failed finding parents for {}", self.id()))?;
 		for id in path {
-			anchors.push(db::lookup(id).await?.unwrap().get_link());
+			anchors.push(db::lookup(&id).await?.unwrap().get_link());
 		}
 
 		Ok(Navigation::builder().class("crumbs")

@@ -54,7 +54,7 @@ async fn get_entry_parents(Path(path):Path<(String, String)>) -> Result<Response
 	for p_id in parents
 	{
 		let ctx = format!("looking up parent {p_id} of {}:{}",path.0,path.1);
-		let e=db::lookup(p_id.clone()).await
+		let e=db::lookup(&p_id).await
 			.and_then(|e|e.ok_or(IdNotFound {id:p_id.str_key()}))
 			.context(ctx)?;
 		ret.push(e);

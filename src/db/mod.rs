@@ -70,7 +70,7 @@ pub async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where Resource: From
 	}
 }
 
-pub async fn lookup(id:RecordId) -> Result<Option<Entry>>
+pub async fn lookup(id:&RecordId) -> Result<Option<Entry>>
 {
 	let ctx = format!("looking up {id}");
 	let v:Value = DB.select(id).await.context(ctx.clone())?;

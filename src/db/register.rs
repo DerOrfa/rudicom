@@ -9,7 +9,7 @@ use crate::dcm;
 use crate::tools::extract_from_dicom;
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
-use surrealdb::error::Db::QueryNotExecutedDetail;
+use surrealdb::error::Db::{QueryNotExecutedDetail, RecordExists};
 use dcm::AttributeSelector;
 
 #[derive(Default)]
@@ -46,14 +46,16 @@ async fn insert<'a>(
 		.collect();
 
 	loop {
-		let r = match record_id.table()
-		{
-			// colliding inserts of instances will result in no insert and Err,
-			"instances" => DB.insert(&record_id).content(meta.clone()).await,
-			// others will silently overwrite the data (it's the same anyway, and we don't need to know)  
-			_ => 	DB.upsert(&record_id).content(meta.clone()).await,
-		};
+		let r = DB.insert(&record_id).content(meta.clone()).await;
 		match r { 
+			Err(surrealdb::Error::Db(RecordExists {thing})) => {
+				if thing.tb == "instances" {
+					return Err(surrealdb::Error::Db(RecordExists {thing}).into())
+				} else {
+					let existing = DB.select(&record_id).await?;
+					
+				}
+			},
 			Err(surrealdb::Error::Db(QueryNotExecutedDetail{message})) => {
 				if message != "Failed to commit transaction due to a read or write conflict. This transaction can be retried"
 				{
@@ -98,7 +100,7 @@ pub async fn register_instance<'a>(
 	let instance_id = RecordId::from_instance(instance_uid.as_ref(), series_uid.as_ref(), study_uid.as_ref());
 
 	// try to avoid insert operation as much as possible
-	if let Some(existing) = lookup(instance_id.clone()).await?{
+	if let Some(existing) = lookup(&instance_id).await?{
 		Ok(Some(existing)) // return already existing entry
 	} else {
 		let series_id= RecordId::from_series(&series_uid,&study_uid);

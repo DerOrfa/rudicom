@@ -30,7 +30,7 @@ async fn check_statistics(uid_gen: &UidSynthesizer, data:&Vec<Vec<FileDicomObjec
 	let files = glob(format!("{}/**/*",store_path).as_str())?
 		.filter_map_ok(|p| if p.is_file() {Some(p)} else {None})
 		.count();
-	assert_eq!(files,data.iter().flatten().count(), "expected number of files to match number of instances");
+	assert_eq!(files,data.iter().flatten().count(), "expected number of files in {store_path} to match number of instances");
 
 	Ok(())
 }
