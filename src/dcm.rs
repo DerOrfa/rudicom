@@ -9,10 +9,27 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::ops::Deref;
 use std::str::FromStr;
+use std::sync::LazyLock;
 use strfmt::{strfmt_map, FmtError};
 
 #[derive(Debug,Clone,Hash,PartialEq,Eq)]
 pub struct AttributeSelector(pub dicom::core::ops::AttributeSelector);
+
+pub static INSTANCE_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> =
+	LazyLock::new(|| get_attr_list(db::Table::Instances, vec![("Number", vec![Tag::from((0x0020,0x0013))])]));//InstanceNumber
+pub static SERIES_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> =
+	LazyLock::new(|| get_attr_list(db::Table::Series, vec![
+		("Description",vec![Tag::from((0x0008,0x103E))]), //SeriesDescription
+		("Number",vec![Tag::from((0x0020,0x0011))]) // SeriesNumber
+	])
+	);
+pub static STUDY_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> =
+	LazyLock::new(|| get_attr_list(db::Table::Studies, vec![
+		("Name",vec![Tag::from((0x0010,0x0010))]),//PatientName
+		("Time", vec![Tag::from((0x0008,0x0030))]), // StudyTime 
+		("Date", vec![Tag::from((0x0008,0x0020))]) // StudyDate
+	])
+	);
 
 impl From<Tag> for AttributeSelector{
 	fn from(value: Tag) -> Self {AttributeSelector(value.into())}

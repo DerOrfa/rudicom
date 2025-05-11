@@ -8,6 +8,7 @@ use rand::random;
 use rudicom::db::{lookup_uid, AggregateData, DB};
 use rudicom::tools::remove::remove;
 use tokio::task::JoinSet;
+use rudicom::db::RegisterResult;
 
 mod common;
 
@@ -43,7 +44,7 @@ async fn study() -> Result<(), Box<dyn std::error::Error>>
 	let mut instances = synthesize_study(&uid_gen,111,10,100);
 	for stored in bulk_insert(instances.iter().flatten()).await?
 	{
-		assert!(stored.is_none(), "unexpected return from first store");
+		if let RegisterResult::Stored(_) = stored {} else { panic!("unexpected initial store:{:?}",stored); }
 	}
 	// check for all objects to be there
 	for obj in instances.iter().flatten()

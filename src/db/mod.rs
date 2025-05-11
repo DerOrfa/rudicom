@@ -50,6 +50,12 @@ impl AggregateData
 
 pub static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
+#[derive(Debug)]
+pub enum RegisterResult { // @todo unify via implementing Try https://github.com/rust-lang/rust/issues/84277
+	Stored(RecordId),
+	AlreadyStored(RecordId),
+}
+
 async fn query(qry:impl IntoQuery, bindings: impl Serialize+'static) -> surrealdb::Result<Value>
 {
 	let mut result= DB

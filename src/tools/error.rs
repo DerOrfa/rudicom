@@ -1,7 +1,7 @@
 use glob::{GlobError, PatternError};
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
-use crate::db::RecordId;
+use crate::db::{Entry, RecordId};
 
 #[derive(Error,Debug)]
 pub enum DicomError
@@ -132,6 +132,11 @@ pub enum Error
 	GlobPatternError(#[from]PatternError),
 	#[error("Globbing error {0}")]
 	GlobbingError(#[from]GlobError),
+	#[error("Entry already exists with different data")]
+	DataConflict(Entry),
+	#[error("Entry {existing_id} already exists with different data")]
+	Md5Conflict {existing_md5:String, my_md5:String, existing_id:RecordId},
+
 }
 
 impl Error {

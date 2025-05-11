@@ -1,11 +1,13 @@
-use crate::db;
+use crate::db::{lookup_uid, RegisterResult};
 use crate::server::http_error::{HttpError, JsonError, TextError};
 use crate::storage::async_store;
 use crate::tools::remove::remove;
 use crate::tools::store::store;
 use crate::tools::verify::verify_entry;
+use crate::tools::Error::NotFound;
 use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
 use crate::tools::{Context, Error::DicomError};
+use crate::db;
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::Path;
@@ -15,14 +17,12 @@ use axum::routing::{delete, get, post};
 use axum::Json;
 use axum_extra::body::AsyncReadBody;
 use axum_extra::extract::OptionalQuery;
+use dicom::dictionary_std::tags;
 use dicom::pixeldata::image::ImageFormat;
 use dicom::pixeldata::PixelDecoder;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Cursor;
-use dicom::dictionary_std::tags;
-use crate::db::lookup_uid;
-use crate::tools::Error::NotFound;
 
 pub(super) fn router() -> axum::Router
 {
@@ -85,23 +85,38 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 	let bytes = payload.map_err(|e|HttpError::BadRequest {message:format!("failed to receive data {e}")})?;
 	if bytes.is_empty(){return Err(HttpError::BadRequest {message:"Ignoring empty upload".into()}.into())}
 	let obj= async_store::read(bytes)?;
-	match store(obj).await? {
-		None => Ok((
-			StatusCode::CREATED,
-			Json(json!({"Status":"Success"}))
-		).into_response()),
-		Some(ob) => {
-			let path = format!("/{}/{}",ob.id().table(),ob.id().str_key());
-			let ob = serde_json::Value::from(ob);
+	match store(obj).await {
+		Ok(RegisterResult::Stored(_)) => Ok((StatusCode::CREATED,Json(json!({"Status":"Success"}))).into_response()),
+		Ok(RegisterResult::AlreadyStored(id)) => {
 			Ok((
 				StatusCode::FOUND,
 				Json(json!({
 					"Status":"AlreadyStored",
-					"Path":path,
-					"AlreadyStored":ob
+					"Path":id.str_path(),
 				}))
 			).into_response())
 		},
+		Err(Error::DataConflict(e)) => {
+			Ok((
+				StatusCode::CONFLICT,
+				Json(json!({
+					"Status":"ConflictingMetadata",
+					"ExistingData":serde_json::Value::from(e),
+				}))
+			).into_response())
+		}
+		Err(Error::Md5Conflict {existing_md5,my_md5, existing_id })  => {
+			Ok((
+				StatusCode::CONFLICT,
+				Json(json!({
+					"Status":"ConflictingMd5",
+					"Existing Path":existing_id.str_path(),
+					"ExistingMd5":existing_md5,
+					"ReceivedMd5":my_md5,
+				}))
+			).into_response())
+		}
+		Err(e) => Err(e.into())
 	}
 }
 

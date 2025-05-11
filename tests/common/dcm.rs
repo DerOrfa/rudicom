@@ -2,9 +2,10 @@ use chrono::{DateTime, Utc};
 use dicom::core::{DataElement, VR};
 use dicom::dictionary_std::{tags, uids};
 use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
-use rudicom::db;
+use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
 use rudicom::tools::store::store;
+use rudicom::db::RegisterResult;
 use std::time::SystemTime;
 use tokio::task::JoinSet;
 
@@ -89,14 +90,14 @@ pub fn synthesize_study(uid_synthesizer: &UidSynthesizer, stdy_num:u16, series:u
 }
 
 pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDicomObject>>) 
-	-> rudicom::tools::Result<Vec<Option<db::Entry>>>
+	-> tools::Result<Vec<RegisterResult>>
 {
 	let mut set = JoinSet::new();
 	for obj in instances
 	{
 		set.spawn(store(obj.clone()));
 	}
-	set.join_all().await.into_iter().collect::<rudicom::tools::Result<Vec<_>>>()
+	set.join_all().await.into_iter().collect()
 }
 
 pub async fn cleanup() -> rudicom::tools::Result<()>

@@ -2,6 +2,7 @@ use crate::common::dcm::{bulk_insert, cleanup, synthesize_series, UidSynthesizer
 use crate::common::init_db;
 use dicom::core::{DataElement, VR};
 use dicom::dictionary_std::tags;
+use rudicom::db::RegisterResult;
 
 mod common;
 
@@ -15,7 +16,7 @@ async fn invalid_insert() -> Result<(), Box<dyn std::error::Error>>
 	let mut instances = synthesize_series(&uid_gen,111,10,100); 
 	let (ins1, ins2) = instances.split_at_mut(50);
 	for inserted in bulk_insert(ins1.iter()).await?{
-		assert!(inserted.is_none(), "Inserting new instance should result in None.");
+		if let RegisterResult::Stored(_) = inserted {} else { panic!("unexpected return from initial store:{:?}",inserted); }
 	}
 	
 	// mess around with the other half

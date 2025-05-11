@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use self::Entry::{Instance, Series, Study};
 use crate::db;
 use crate::db::{AggregateData, Pickable, RecordId, DB};
@@ -5,7 +6,9 @@ use crate::tools::Error::{NotFound, UnexpectedResult};
 use crate::tools::{entries_for_record, reduce_path, Context, Result};
 use byte_unit::Byte;
 use std::path::PathBuf;
+use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
+use crate::dcm::{extract, INSTANCE_TAGS, SERIES_TAGS};
 
 #[derive(Clone,Debug)]
 pub enum Entry
@@ -108,6 +111,36 @@ impl Entry
 		if files.is_empty()	{Ok(PathBuf::default())} 
 		else { Ok(reduce_path(files.iter().map(db::File::get_path).collect())) }
 		
+	}
+	 /// Compare the Entry to a Dicom object.
+	 /// 
+	 /// The list and mapping of relevant Tags is taken from the configuration.
+	 /// Same as they would for registration.
+	 /// Only values found in the Entry are compared, None is returned for those that don't.  
+	 /// 
+	 /// # Arguments 
+	 /// 
+	 /// * `obj`: dicom object to compare against
+	 /// 
+	 /// returns: Vec<Option<bool>, Global>
+	fn compare(&self, obj: &DefaultDicomObject) -> Vec<Option<bool>> {
+		let tags = match self {
+			Instance(_) => &INSTANCE_TAGS,
+			Series(_) => &SERIES_TAGS,
+			Study(_) => &SERIES_TAGS
+		}.deref();
+		extract(obj,tags).into_iter().map(|(key,obj_val)| {
+			self.get(key).map(|entry_val|*entry_val==obj_val)
+		}).collect()
+	}
+
+}
+
+impl PartialEq<DefaultDicomObject> for Entry {
+	fn eq(&self, obj: &DefaultDicomObject) -> bool {
+		self.compare(obj).into_iter()
+			.filter(Option::is_some) //only values in Entry are considered
+			.any(Option::unwrap)
 	}
 }
 

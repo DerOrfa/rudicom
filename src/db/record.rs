@@ -5,9 +5,9 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::vec::IntoIter;
+use surrealdb::opt::{IntoResource, Resource};
 use surrealdb::sql::Id;
 use surrealdb::{sql, RecordIdKey, Value};
-use surrealdb::opt::{IntoResource, Resource};
 
 #[derive(Deserialize, Debug, PartialEq, PartialOrd, Clone)]
 pub struct RecordId(pub surrealdb::RecordId);
@@ -61,6 +61,9 @@ impl RecordId {
 		general_purpose::STANDARD.encode(bytes)
 			.trim_end_matches("+").to_string()
 			.replace("+",".")
+	}
+	pub fn str_path(&self) -> String {
+		format!("/api/{}/{}",self.table(),self.str_key())
 	}
 	pub fn key_vec(&self) -> &[sql::Value] {
 		if let Id::Array(key) = self.deref().key().into_inner_ref() {

@@ -1,4 +1,4 @@
-use crate::db::Entry;
+use crate::db::{Entry, RecordId, RegisterResult};
 use crate::tools::Error;
 use futures::{Stream, StreamExt, TryStreamExt};
 use glob::glob;
@@ -10,8 +10,9 @@ use tokio::task::JoinError;
 
 pub enum ImportResult {
 	Registered{filename:String},
-	Existed{filename:String,existed:Entry},
-	ExistedConflict {filename:String,my_md5:String,existed:Entry},
+	Existed{filename:String,existing_id:RecordId},
+	DataConflict {filename:String,existed:Entry},
+	Md5Conflict {filename:String,existing_md5:String,my_md5:String, existing_id:RecordId},
 	Err{filename:String,error:Error},
 	GlobError(glob::GlobError)
 }
@@ -54,19 +55,25 @@ impl Serialize for ImportResult
 				s.serialize_field("filename",filename)?;
 				s.end()
 			}
-			ImportResult::ExistedConflict {existed, filename, my_md5  } => {
-				let mut s=s.serialize_struct("existed_with_conflicting_checksum",3)?;
-				let existed = serde_json::Value::from(existed.clone());
+			ImportResult::Existed { filename, existing_id:existed} => {
+				let mut s=s.serialize_struct("existed",2)?;
 				s.serialize_field("filename",filename)?;
-				s.serialize_field("incoming_md5", my_md5)?;
-				s.serialize_field("existing entry", &existed)?;
+				s.serialize_field("existing entry", existed.str_path().as_str())?;
 				s.end()
 			}
-			ImportResult::Existed { filename,existed } => {
-				let mut s=s.serialize_struct("existed",2)?;
-				let existed = serde_json::Value::from(existed.clone());
+			ImportResult::DataConflict { filename, existed } => {
+				let mut s=s.serialize_struct("existed_with_conflicting_data",3)?;
+				s.serialize_field("existing path",existed.id().str_path().as_str())?;
+				s.serialize_field("existing entry", &serde_json::Value::from(existed.clone()))?;
 				s.serialize_field("filename",filename)?;
-				s.serialize_field("existing entry", &existed)?;
+				s.end()
+			}
+			ImportResult::Md5Conflict {filename, existing_id,existing_md5,my_md5} => {
+				let mut s=s.serialize_struct("existed_with_conflicting_checksum",3)?;
+				s.serialize_field("existing_path",existing_id.str_path().as_str())?;
+				s.serialize_field("filename",filename)?;
+				s.serialize_field("incoming md5", my_md5)?;
+				s.serialize_field("existing md5", existing_md5)?;
 				s.end()
 			}
 			ImportResult::Err { filename,error} => {
@@ -101,18 +108,14 @@ async fn import_file<T>(path:T, mode: ImportMode) -> ImportResult where T:Into<P
 		};
 	match import
 	{
-		Ok(v) => match v {
-			None => ImportResult::Registered{ filename },
-			Some(mut existed) => {
-				if let Some(conflicting_md5) = existed.remove("conflicting_md5"){
-					ImportResult::ExistedConflict {
-						filename,existed,
-						my_md5: conflicting_md5.into_inner().as_raw_string().to_string()
-					}
-				} else {ImportResult::Existed { filename, existed }}
-			},
-		},
-		Err(e) => ImportResult::Err{error:e,filename}
+		Ok(RegisterResult::Stored(_)) => ImportResult::Registered{ filename },
+		Ok(RegisterResult::AlreadyStored(existed)) =>
+			ImportResult::Existed {filename,existing_id:existed},
+		Err(Error::Md5Conflict {existing_md5,my_md5, existing_id}) =>  
+			ImportResult::Md5Conflict {filename,existing_md5,my_md5,existing_id},
+		Err(Error::DataConflict(existed)) => 
+			ImportResult::DataConflict { filename, existed },
+		Err(e) => ImportResult::Err{error:e,filename},
 	}
 }
 
@@ -165,16 +168,21 @@ pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) 
 		.map_ok(|item| {
 			let register_msg = match item {
 				ImportResult::Registered { filename } => Ok(filename),
-				ImportResult::ExistedConflict { filename, existed, .. } => {
-					existed.get_file().map(|f|f.get_path())
-						.map(|p| format!("{filename} already existed as {} but checksum differs", p.display()))
-						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
+				ImportResult::Existed { filename, existing_id } => {
+					Ok(format!("{filename} already existed as {}", existing_id.str_path()))
 				},
-				ImportResult::Existed { filename, existed } => {
-					existed.get_file().map(|f|f.get_path())
-						.map(|p| format!("{filename} already existed as {}", p.display()))
-						.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
+				ImportResult::DataConflict { filename, existed } => {
+					match &existed {
+						Entry::Instance(_) => {
+							existed.get_file().map(|f|f.get_path())
+								.map(|p| format!("{filename} was rejected as {} (in file {}) already exists but its values differ", existed.id().str_path(),p.display()))
+								.map_err(|e|e.context(format!("Failed to extract information of existing entry of {filename}")))
+						}
+						_ => Ok(format!("{filename} was rejected as {} already exists but its values differ", existed.id().str_path()))
+					}
 				},
+				ImportResult::Md5Conflict { filename, existing_id,.. } => 
+					Ok(format!("{filename} was rejected as {} already exists but its checksum differs", existing_id.str_path())),
 				ImportResult::Err { filename, error } => {
 					Err(error.context(format!("importing {filename}")))
 				}

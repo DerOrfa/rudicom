@@ -1,8 +1,8 @@
-use crate::db;
-use crate::db::RegistryGuard;
+use crate::db::{lookup, RegisterResult, RegistryGuard};
 use crate::dcm::gen_filepath;
 use crate::storage::async_store::{read, write};
 use crate::tools::Context;
+use crate::{db, tools};
 use dicom::object::DefaultDicomObject;
 use std::path::Path;
 use tokio::fs::{File, OpenOptions};
@@ -23,10 +23,10 @@ pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
 }
 
 
-/// stores given a dicom object as a file and registers it as owned (might change data)
-/// if the object already exists, the store is aborted, and the existing data is returned
-/// None otherwise
-pub async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::Entry>>
+/// Stores given a dicom object as a file and registers it as owned (might change data).
+/// 
+/// If the object already exists, the store is aborted but considered successful if existing data are equal.
+pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 {
 	let mut guard= RegistryGuard::default();
 	let mut checksum = md5::Context::new();
@@ -36,11 +36,8 @@ pub async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::En
 	let c_path = fileinfo.get_path();
 	let fileinfo = surrealdb::Value::try_from(fileinfo)?;
 
-	let registered = db::register_instance(&obj,
-	   vec![("file",fileinfo.into())],
-		Some(&mut guard)
-	).await?;
-	if registered.is_none() { //no previous data => normal register => store the file
+	let registered= db::register_instance(&obj, vec![("file",fileinfo.into())],Some(&mut guard)).await?;
+	if let RegisterResult::Stored(_) = &registered { // normal register => store the file
 		let p = c_path.parent().unwrap();
 		let lossy_cpath= c_path.display();
 		tokio::fs::create_dir_all(p).await.context(format!("Failed creating storage path {:?}",p))?;
@@ -48,57 +45,67 @@ pub async fn store(obj:DefaultDicomObject) -> crate::tools::Result<Option<db::En
 			.context(format!("creating file {lossy_cpath}"))?;
 		file.write_all(buffer.as_slice()).await
 			.context(format!("writing to file {lossy_cpath}"))?;
-		file.flush().await?;
-
-		guard.reset();//all good, file stored, we can drop the guard
-	}
+		file.flush().await.context(format!("closing file {lossy_cpath}"))?;
+		guard.reset();//all good, the file is stored, we can drop the guard
+	} 
 	Ok(registered)
 }
 
-/// stores given dicom file as file (makes a copy) and registers it as owned (might change data)
-/// if the object already exists, the store is aborted and the existing data is returned
-/// None otherwise
-pub async fn store_file(filename:&Path) -> crate::tools::Result<Option<db::Entry>>
+/// Stores given dicom file as file (makes a copy) and registers it as owned (might change data).
+/// 
+/// If the object already exists, the store is aborted but considered successful if existing data are equal.
+pub async fn store_file(filename:&Path) -> tools::Result<RegisterResult>
 {
 	let buffer = read_to_buffer(filename).await?;
 	store(read(buffer)?).await
 }
 
-/// registers an existing file without storing (data won't be changed)
-/// there is a chance the file is already registered if that's the case its information is returned
-/// as usual and no registration takes place.
-/// Additionally, if the existing data has a different md5, the new md5 is added as
-/// "conflicting_md5" to the returned data
-pub async fn import_file(filename:&Path) -> crate::tools::Result<Option<db::Entry>>
+/// Registers an existing file without storing (data won't be changed).
+///
+/// If the data already exists, the store is aborted but considered successful if existing data are equal.
+/// 
+/// If the existing data has a different checksum, an error is returned
+pub async fn import_file(filename:&Path) -> tools::Result<RegisterResult>
 {
 	import_file_impl(filename, is_storage(filename)).await	
 }
 
-async fn import_file_impl(path:&Path,own:bool) -> crate::tools::Result<Option<db::Entry>>
+async fn import_file_impl(path:&Path,own:bool) -> tools::Result<RegisterResult>
 {
 	let (fileinfo,obj) = db::File::new_from_existing(path,own).await?;
 	let my_md5= fileinfo.get_md5().to_string();
-	let mut reg=db::register_instance(&obj,vec![
-		("file", surrealdb::Value::try_from(fileinfo)?.into())
-	],None).await;
-	if let Ok(Some(existing)) = &mut reg
+	let add_meta = vec![("file", surrealdb::Value::try_from(fileinfo)?.into())];
+	let registered=db::register_instance(&obj,add_meta,None).await?;
+	if let RegisterResult::AlreadyStored(existing) = &registered //if register says equal data exist, we check md5sum
 	{
-		if existing.get_file()?.get_md5() != my_md5 {
-			existing.insert("conflicting_md5",my_md5);
-		}
+		let existing_file = lookup(existing).await?
+			.expect("existing entry should exist").get_file()?;
+		let existing_md5 = existing_file.get_md5();
+		if existing_md5 != my_md5 {
+			return Err(tools::Error::Md5Conflict {
+				existing_md5:existing_md5.to_string(),
+				existing_id:existing.clone(),
+				my_md5:my_md5.to_string(),
+			})
+		} 
 	}
-	reg
+	Ok(registered)
 }
 
-pub async fn move_file(filename: &Path) -> crate::tools::Result<Option<db::Entry>>
+/// Registers an existing file without storing (data won't be changed) and moves the file to the storage path.
+///
+/// If the data already exists, the store is aborted but considered successful if existing data are equal.
+///
+/// If the existing data has a different checksum, an error is returned
+pub async fn move_file(filename: &Path) -> tools::Result<RegisterResult>
 {
 	if is_storage(filename) { // if the file is already in the storage-path just import it, and take ownership
 		import_file_impl(filename,true).await
-	} else { // if not, store (aka copy) file and delete source once we're done
-		let existing= store_file(filename).await?;
-		if existing.is_none(){ //no error, and no previously existing file, we can delete the source
-			tokio::fs::remove_file(filename).await?;
+	} else { // if not, store (aka copy) file and delete the source once we're done
+		let stored= store_file(filename).await?;
+		if let RegisterResult::Stored(_) = stored { //no error and no previously existing file, we can delete the source
+			tokio::fs::remove_file(filename).await.context(format!("moving file {:?}",filename))?;
 		}
-		Ok(existing)
+		Ok(stored)
 	}
 }
