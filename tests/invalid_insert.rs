@@ -2,7 +2,8 @@ use crate::common::dcm::{bulk_insert, cleanup, synthesize_series, UidSynthesizer
 use crate::common::init_db;
 use dicom::core::{DataElement, VR};
 use dicom::dictionary_std::tags;
-use rudicom::db::RegisterResult;
+use rudicom::db::{lookup_uid, RegisterResult};
+use rudicom::tools::Error;
 
 mod common;
 
@@ -35,6 +36,16 @@ async fn invalid_insert() -> Result<(), Box<dyn std::error::Error>>
 		}
 	}
 	
-	assert!(bulk_insert(ins2.iter()).await.is_err(), "Inserting conflicting data should fail.");
+	let messy_insert = bulk_insert(ins2.iter()).await;
+	let study_id = uid_gen.study(111);
+	let study_entry = lookup_uid("studies",study_id).await?
+		.expect("expected study entry");
+	let instances_per_study= study_entry.get_instances_per().await?.count;
+	assert_eq!(instances_per_study,ins1.len(),"Only {} instanced should have been inserted, but {} are there",ins1.len(),instances_per_study);
+
+	match messy_insert{
+		Err(Error::DataConflict(_)) => {}
+		_ => panic!("Inserting conflicting data should result in DataConflict-Error, but result was {messy_insert:?}.")	
+	}
 	cleanup().await.map_err(|e| e.into())
 }
