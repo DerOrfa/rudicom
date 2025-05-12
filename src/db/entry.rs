@@ -8,7 +8,7 @@ use byte_unit::Byte;
 use std::path::PathBuf;
 use dicom::object::DefaultDicomObject;
 use surrealdb::sql;
-use crate::dcm::{extract, INSTANCE_TAGS, SERIES_TAGS};
+use crate::dcm::{extract, INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 
 #[derive(Clone,Debug)]
 pub enum Entry
@@ -127,7 +127,7 @@ impl Entry
 		let tags = match self {
 			Instance(_) => &INSTANCE_TAGS,
 			Series(_) => &SERIES_TAGS,
-			Study(_) => &SERIES_TAGS
+			Study(_) => &STUDY_TAGS
 		}.deref();
 		extract(obj,tags).into_iter().map(|(key,obj_val)| {
 			self.get(key).map(|entry_val|*entry_val==obj_val)

@@ -94,7 +94,7 @@ pub async fn register_instance<'a>(
 	// try to avoid insert operation as much as possible
 	if let Some(existing) = lookup(&instance_id).await?{
 		if existing!=*obj {
-			Err(tools::Error::DataConflict(existing))
+			Err(Error::DataConflict(existing))
 		} else { 
 			Ok(RegisterResult::AlreadyStored(instance_id)) 
 		}
