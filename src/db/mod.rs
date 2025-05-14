@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use crate::tools::Error::{ElementMissing, UnexpectedResult};
 use crate::tools::{Context, Error, Result};
 use byte_unit::Byte;
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::opt::{IntoQuery, Resource};
+use surrealdb::opt::{IntoQuery, IntoResource, PatchOp, Resource};
 use surrealdb::sql::Id;
 use surrealdb::{sql, RecordIdKey, Surreal};
 use surrealdb::{Object, Value};
@@ -220,4 +221,15 @@ impl Pickable for Object {
 		self.into_inner_mut().remove(&element).map(Value::from_inner)
 			.ok_or(ElementMissing {element,parent:"object".into()})
 	}
+}
+
+pub async fn set_value(id:impl IntoResource<Value>, name:String, value:Value) -> Result<Value> {
+	let ctx = format!("Updating column {name}");
+	let ob = sql::Object::from(BTreeMap::<String, sql::Value>::from([(name,value.into_inner())]));
+	DB.update(id).merge(Value::from_inner(ob.into())).await.context(ctx)
+}
+pub async fn delete_value(id:impl IntoResource<Value>, name:impl AsRef<str>) -> Result<Value> {
+	let ctx = format!("Deleting column {}",name.as_ref());
+	
+	DB.update(id).patch(PatchOp::remove(name.as_ref())).await.context(ctx)
 }
