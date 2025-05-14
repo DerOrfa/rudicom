@@ -3,6 +3,7 @@ pub mod remove;
 pub mod import;
 pub mod verify;
 mod error;
+pub mod conv;
 
 use crate::db;
 use crate::db::{lookup_uid, Entry, RecordId, DB};

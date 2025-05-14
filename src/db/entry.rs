@@ -133,7 +133,6 @@ impl Entry
 			self.get(key).map(|entry_val|*entry_val==obj_val)
 		}).collect()
 	}
-
 }
 
 impl PartialEq<DefaultDicomObject> for Entry {
@@ -141,28 +140,6 @@ impl PartialEq<DefaultDicomObject> for Entry {
 		self.compare(obj).into_iter()
 			.filter(Option::is_some) //only values in Entry are considered
 			.any(Option::unwrap)
-	}
-}
-
-fn value_to_json(value: sql::Value) -> serde_json::value::Value
-{
-	match value {
-		sql::Value::None | sql::Value::Null => serde_json::Value::Null,
-		sql::Value::Bool(b) => serde_json::Value::Bool(b),
-		sql::Value::Number(num) => {
-			match num {
-				sql::Number::Int(i) => serde_json::Value::Number(i.into()),
-				sql::Number::Float(f) => serde_json::Value::from(f),
-				_ => serde_json::Value::String(num.to_string()),
-			}
-		}
-		sql::Value::Strand(s) => serde_json::Value::String(s.0),
-		sql::Value::Array(a) => a.into_iter().map(value_to_json).collect(),
-		sql::Value::Object(o) => serde_json::Value::Object(
-			o.into_iter().map(|(k,v)| (k, value_to_json(v))).collect()
-		),
-		sql::Value::Thing(id) => RecordId(surrealdb::RecordId::from_inner(id.into())).str_key().into(),
-		_ => serde_json::Value::String(value.to_string()),
 	}
 }
 
@@ -263,6 +240,6 @@ impl From<Entry> for serde_json::Value
 {
 	fn from(entry: Entry) -> Self {
 		let obj = surrealdb::Object::from(entry);
-		value_to_json(obj.into_inner().into()).into()
+		crate::tools::conv::value_to_json(obj.into_inner().into()).into()
 	}
 }
