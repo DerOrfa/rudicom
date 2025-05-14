@@ -14,12 +14,12 @@ Date = ["InstanceCreationDate"]
 Time = ["InstanceCreationTime"]
 
 [limits]
-upload_sizelimit = "50M"
+upload_sizelimit = "200M"
 max_files = 32 # max amount of concurrently processed files
 
 [paths]
 #use dicom tag names in "{}" to generate file names (obviously those should be unique)
 #tag names can be followed by ":<" or ":>" and a number where resulting string will be cropped to the given size by
 #removing caracters from the right or left respectively
-filename_pattern = "{PatientID}/{StudyDate:>6}_{StudyTime:<6}/S{SeriesNumber}_{SeriesDescription}/Mr.{SOPInstanceUID}.ima"
+filename_pattern = "{PatientID}/{StudyDate:>6}_{StudyTime:<6}/S{SeriesNumber}_{SeriesDescription}/{Modality}.{SOPInstanceUID}.ima"
 #storage_path = "/tmp/db_store" #will be used if filename_pattern does not result in an absolute path / uncomment to override dynamic default
