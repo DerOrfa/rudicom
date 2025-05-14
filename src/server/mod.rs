@@ -7,9 +7,10 @@ use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tracing;
-use crate::config;
+use crate::{config, db};
 use crate::db::DB;
 use crate::server::http_error::TextError;
+use crate::tools::Error::IdNotFound;
 use crate::tools::Result;
 
 #[cfg(feature = "html")]
@@ -95,3 +96,9 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 }
+
+pub async fn lookup_or(rec:&(String, String)) -> crate::tools::Result<db::Entry>
+{
+	db::lookup_uid(rec.0.as_str(), rec.1.clone()).await?.ok_or(IdNotFound {id:rec.1.clone()})
+}
+

@@ -6,11 +6,7 @@ use axum::extract::Path;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Json;
-
-async fn lookup_or(rec:&(String, String)) -> crate::tools::Result<db::Entry>
-{
-	db::lookup_uid(rec.0.as_str(), rec.1.clone()).await?.ok_or(IdNotFound {id:rec.1.clone()})
-}
+use crate::server::lookup_or;
 
 pub(super) fn router() -> axum::Router
 {
