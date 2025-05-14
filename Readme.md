@@ -40,5 +40,11 @@ generates SureQL snapshot of the database
 - `echo=true` generate output for successfully registered or stored files (default:false)
 - `echo_existing=true` generate output for already existing (and thus ignored) files (default:false)
 
+#### Modes
+- `import` Won't touch or own the file, but register it in the DB.
+- `store`  Won't touch the original file but create an owned copy inside the configured storage path (which might collide with the source file).
+- `move`  The DB takes ownership of the existing file. If the source is outside the configured storage path it will be moved into it.
+  
+
 ## offline import
     rudicom --file /tmp/db import "<glob>"

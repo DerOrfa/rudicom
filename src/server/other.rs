@@ -86,16 +86,20 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 	if bytes.is_empty(){return Err(HttpError::BadRequest {message:"Ignoring empty upload".into()}.into())}
 	let obj= async_store::read(bytes)?;
 	match store(obj).await {
-		Ok(RegisterResult::Stored(_)) => Ok((StatusCode::CREATED,Json(json!({"Status":"Success"}))).into_response()),
-		Ok(RegisterResult::AlreadyStored(id)) => {
-			Ok((
-				StatusCode::FOUND,
-				Json(json!({
-					"Status":"AlreadyStored",
-					"Path":id.str_path(),
-				}))
-			).into_response())
-		},
+		Ok(RegisterResult::Stored(id)) => Ok((StatusCode::CREATED,
+			Json(json!({
+				"Status":"Success",
+				"Path":id.str_path(),
+				"ID":id.str_key(),
+			}))
+		).into_response()),
+		Ok(RegisterResult::AlreadyStored(id)) => Ok((StatusCode::FOUND,
+			Json(json!({
+				"Status":"AlreadyStored",
+				"Path":id.str_path(),
+				"ID":id.str_key(),
+			}))
+		).into_response()),
 		Err(Error::DataConflict(e)) => {
 			Ok((
 				StatusCode::CONFLICT,
@@ -120,7 +124,8 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 	}
 }
 
-async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> {
+async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> 
+{
 	let filename_for_header = format!(r#"attachment; filename="MR.{}.ima""#, id);
 	let not_found = format!("Instance {} not found", id);
 	if let Some(file)=lookup_instance_file(id).await.context("looking up fileinfo")?
