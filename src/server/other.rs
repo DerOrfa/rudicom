@@ -1,17 +1,17 @@
-use crate::db::{lookup_uid, RegisterResult};
-use crate::server::http_error::{HttpError, JsonError, TextError};
+use crate::db;
+use crate::db::RegisterResult;
+use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
+use crate::server::lookup_or;
 use crate::storage::async_store;
 use crate::tools::remove::remove;
 use crate::tools::store::store;
 use crate::tools::verify::verify_entry;
-use crate::tools::Error::NotFound;
 use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
 use crate::tools::{Context, Error::DicomError};
-use crate::db;
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::Path;
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::Json;
@@ -42,23 +42,21 @@ pub(super) fn router() -> axum::Router
     rtr
 }
 
-async fn get_statistics() -> Result<Json<db::Stats>,JsonError>
+async fn get_statistics(headers: HeaderMap) -> Result<Json<db::Stats>, HttpError>
 {
-	db::statistics().await.map(Json).map_err(|e|e.into())
+	db::statistics().await.map(Json).into_http_error(&headers)
 }
 
-async fn del_entry(Path((table,id)):Path<(String, String)>) -> Result<(),JsonError>
+async fn del_entry(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<(), HttpError>
 {
-	let ctx = format!("deleting {table}:{id}");
-	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(ctx)?;
-	remove(entry.id()).await.map_err(|e|e.into())
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	remove(entry.id()).await.into_http_error(&headers)
 }
 
-async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
+async fn verify(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
 {
-	let ctx = format!("verifying {table}:{id}");
-	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(ctx)?;
-	let fails:Vec<_> = verify_entry(entry).await?.into_iter()
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	let fails:Vec<_> = verify_entry(entry).await.into_http_error(&headers)?.into_iter()
 		.map(|e|if let Error::ChecksumErr { checksum, file } = e
 		{
 			json!({"checksum_error":{"file":file,"actual_checksum":checksum}})
@@ -73,18 +71,20 @@ async fn verify(Path((table,id)):Path<(String, String)>) -> Result<Response,Json
 	)
 }
 
-async fn filepath(Path((table,id)):Path<(String, String)>) -> Result<Response,JsonError>
+async fn filepath(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
 {
-	let ctx = format!("looking up path of {table}:{id} in the storage");
-	let entry = lookup_uid(table, id).await?.ok_or(NotFound).context(&ctx)?;
-	let path = entry.get_path().await.context(ctx)?;
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	let path = entry.get_path().await.into_http_error(&headers)?;
 	Ok(Json(json!({"path":path})).into_response())
 }
 
-async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response,JsonError> {
-	let bytes = payload.map_err(|e|HttpError::BadRequest {message:format!("failed to receive data {e}")})?;
-	if bytes.is_empty(){return Err(HttpError::BadRequest {message:"Ignoring empty upload".into()}.into())}
-	let obj= async_store::read(bytes)?;
+async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>) -> Result<Response, HttpError> {
+	let bytes = payload.map_err(|e|
+		HttpError::new(InnerHttpError::BadRequest {message:format!("failed to receive data {e}")}, &headers))?;
+	if bytes.is_empty(){
+		return Err(HttpError::new(InnerHttpError::BadRequest {message:"Ignoring empty upload".into()}, &headers))
+	}
+	let obj= async_store::read(bytes).into_http_error(&headers)?;
 	match store(obj).await {
 		Ok(RegisterResult::Stored(id)) => Ok((StatusCode::CREATED,
 			Json(json!({
@@ -120,17 +120,18 @@ async fn store_instance(payload:Result<Bytes,BytesRejection>) -> Result<Response
 				}))
 			).into_response())
 		}
-		Err(e) => Err(e.into())
+		Err(e) => Err(HttpError::new(e, &headers))
 	}
 }
 
-async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError> 
+async fn get_instance_file(headers: HeaderMap,Path(id):Path<String>) -> Result<Response, HttpError> 
 {
-	let filename_for_header = format!(r#"attachment; filename="MR.{}.ima""#, id);
-	let not_found = format!("Instance {} not found", id);
-	if let Some(file)=lookup_instance_file(id).await.context("looking up fileinfo")?
+	if let Some(file)=lookup_instance_file(id.clone()).await.into_http_error(&headers)?
 	{
-		let file= tokio::fs::File::open(file.get_path()).await?;
+		let filename_for_header=file.get_path().file_name()
+			.map(|o|o.to_string_lossy().to_string())
+			.unwrap_or(format!("Mr.{}.ima",id));
+		let file= tokio::fs::File::open(file.get_path()).await.into_http_error(&headers)?;
 		Ok((
 			StatusCode::OK,
 			[
@@ -142,23 +143,22 @@ async fn get_instance_file(Path(id):Path<String>) -> Result<Response,JsonError>
 	}
 	else
 	{
-		Ok((StatusCode::NOT_FOUND, not_found).into_response())
+		Err(HttpError::new(Error::IdNotFound {id}, &headers))
 	}
 }
 
 #[cfg(feature = "dicom-json")]
-async fn get_instance_json_ext(Path(id):Path<String>) -> Result<Response,JsonError>
+async fn get_instance_json_ext(headers: HeaderMap,Path(id):Path<String>) -> Result<Response, HttpError>
 {
-	let err = format!("Instance {id} not found");
-	if let Some(obj)=get_instance_dicom(id).await?
+	if let Some(obj)=get_instance_dicom(id.clone()).await.into_http_error(&headers)?
 	{
 		dicom_json::to_value(obj)
 			.map(|v|Json(v).into_response())
-			.map_err(|e|e.into())
+			.into_http_error(&headers)
 	}
 	else
 	{
-		Ok((StatusCode::NOT_FOUND, err).into_response())
+		Err(HttpError::new(Error::IdNotFound {id}, &headers))
 	}
 }
 
@@ -168,11 +168,11 @@ pub struct ImageSize {
 	height: u32,
 }
 
-async fn get_instance_png(Path(id):Path<String>, OptionalQuery(size): OptionalQuery<ImageSize>) -> Result<Response,TextError>
+async fn get_instance_png(headers: HeaderMap,Path(id):Path<String>, OptionalQuery(size): OptionalQuery<ImageSize>) -> Result<Response, HttpError>
 {
 	let ctx = format!("decoding pixel data of {id}");
 	let not_found = format!("Instance {} not found", id);
-	if let Some(obj)=get_instance_dicom(id).await?
+	if let Some(obj)=get_instance_dicom(id).await.into_http_error(&headers)?
 	{
 		if obj.get(tags::PIXEL_DATA).is_none() && obj.get(tags::DOUBLE_FLOAT_PIXEL_DATA).is_none() && obj.get(tags::FLOAT_PIXEL_DATA).is_some() {
 			return Ok((StatusCode::NOT_FOUND, not_found).into_response())
@@ -181,7 +181,7 @@ async fn get_instance_png(Path(id):Path<String>, OptionalQuery(size): OptionalQu
 		let mut image = obj.decode_pixel_data()
 			.and_then(|p|p.to_dynamic_image(0))
 			.map_err(|e|DicomError(e.into()))
-			.context(ctx)?;
+			.context(ctx).into_http_error(&headers)?;
 		if let Some(size) = size{
 			image=image.thumbnail(size.width,size.height);
 		}

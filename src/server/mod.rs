@@ -1,6 +1,7 @@
 use axum::{Json, Router};
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
@@ -9,7 +10,7 @@ use tokio::signal;
 use tracing;
 use crate::{config, db};
 use crate::db::DB;
-use crate::server::http_error::TextError;
+use crate::server::http_error::{HttpError, IntoHttpError};
 use crate::tools::Error::IdNotFound;
 use crate::tools::Result;
 
@@ -37,9 +38,9 @@ pub async fn server_info() -> Info
 	}
 }
 
-pub async fn backup() -> std::result::Result<Response, TextError>
+pub async fn backup(headers: HeaderMap) -> std::result::Result<Response, HttpError>
 {
-	let export = DB.export(()).await?;
+	let export = DB.export(()).await.into_http_error(&headers)?;
 	Ok(Body::from_stream(export).into_response())
 }
 
@@ -97,7 +98,7 @@ async fn shutdown_signal() {
     }
 }
 
-pub async fn lookup_or(rec:&(String, String)) -> crate::tools::Result<db::Entry>
+pub async fn lookup_or(rec:&(String, String)) -> Result<db::Entry>
 {
 	db::lookup_uid(rec.0.as_str(), rec.1.clone()).await?.ok_or(IdNotFound {id:rec.1.clone()})
 }

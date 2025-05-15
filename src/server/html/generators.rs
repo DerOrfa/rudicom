@@ -71,7 +71,7 @@ pub async fn table_from_objects(
 {
 	let addkeys:Vec<_> = additional.iter().map(|(k,_)|k.to_string()).collect();
 
-	//build header from the keys (defaults taken from first object)
+	//build header from the keys (defaults taken from the first object)
 	let mut table_builder =Table::builder();
 	table_builder.table_row(|r|{
 		r.table_header(|c|c.text(id_name));
@@ -81,7 +81,7 @@ pub async fn table_from_objects(
 				r.table_header(|c|c.text(key.to_owned()))
 			)}
 	);
-	//build rest of the table
+	//build the rest of the table
 	for mut entry in objs //rows
 	{
 		let addcells:Vec<_> = additional.iter().map(|(_,func)|{

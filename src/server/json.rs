@@ -1,14 +1,15 @@
 use std::collections::{BTreeMap, HashMap};
 use crate::db;
-use crate::server::http_error::JsonError;
+use crate::server::http_error::{HttpError, IntoHttpError};
 use crate::tools::Error::IdNotFound;
 use crate::tools::{entries_for_record, Context};
 use axum::extract::{FromRequest, Path, Request};
 use axum::extract::rejection::{FormRejection, JsonRejection};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Json;
+use mime::Mime;
 use serde_json::Value;
 use surrealdb::sql;
 use crate::server::lookup_or;
@@ -25,29 +26,15 @@ pub(super) fn router() -> axum::Router
 		.route("/{table}/{id}/series",get(query_series))
 }
 
-fn json_content_type(headers: &HeaderMap) -> bool {
-	let content_type = if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
-		content_type
-	} else {
-		return false;
-	};
-
-	let content_type = if let Ok(content_type) = content_type.to_str() {
-		content_type
-	} else {
-		return false;
-	};
-
-	let mime = if let Ok(mime) = content_type.parse::<mime::Mime>() {
-		mime
-	} else {
-		return false;
-	};
-
-	let is_json_content_type = mime.type_() == "application"
-		&& (mime.subtype() == "json" || mime.suffix().is_some_and(|name| name == "json"));
-
-	is_json_content_type
+pub fn get_mime(headers: &HeaderMap<HeaderValue>) -> Option<Mime>
+{
+	headers.get(header::CONTENT_TYPE)
+		.and_then(|h| h.to_str().ok())
+		.and_then(|h| h.parse::<Mime>().ok())
+}
+pub fn is_json(mime: &Mime) -> bool {
+	mime.type_() == "application" && 
+		(mime.subtype() == "json" || mime.suffix().is_some_and(|name| name == "json"))
 }
 
 #[derive(Default,Debug)]
@@ -76,7 +63,7 @@ impl<S> FromRequest<S> for Content where S: Send + Sync
 
 	async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection>
 	{
-		let inner = if json_content_type(req.headers()){
+		let inner = if get_mime(req.headers()).is_some_and(|m|is_json(&m)){
 			let json_val = Json::<Value>::from_request(req, state).await
 				.map_err(|e|ContentRejection::JsonReject(e))?;
 			crate::tools::conv::json_to_value(json_val.0)
@@ -96,68 +83,70 @@ impl<S> FromRequest<S> for Content where S: Send + Sync
 	}
 }
 
-async fn query_instances(Path(path):Path<(String, String)>) -> Result<Response,JsonError>
+async fn query_instances(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
 {
-	let entry = lookup_or(&path).await?;
-	let instances = entries_for_record(entry.id(),"instances").await?;
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	let instances = entries_for_record(entry.id(),"instances").await.into_http_error(&headers)?;
 	Ok(Json(serde_json::Value::from(instances)).into_response())
 }
-async fn query_series(Path(path):Path<(String, String)>) -> Result<Response,JsonError>
+async fn query_series(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
 {
-	let entry = lookup_or(&path).await?;
-	let instances:Vec<_> = entries_for_record(entry.id(),"series").await?;
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	let instances:Vec<_> = entries_for_record(entry.id(),"series").await.into_http_error(&headers)?;
 	Ok(Json(serde_json::Value::from(instances)).into_response())
 }
-async fn query_table(Path(table):Path<String>) -> Result<Response,JsonError>
+async fn query_table(headers: HeaderMap,Path(table):Path<String>) -> Result<Response, HttpError>
 {
-	let qry = db::list_entries(table).await?;
+	let qry = db::list_entries(table).await.into_http_error(&headers)?;
 	Ok(Json(serde_json::Value::from(qry)).into_response())
 }
 
-async fn query_entry(Path(path):Path<(String, String)>) -> Result<Response,JsonError>
+async fn query_entry(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
 {
-	let entry = lookup_or(&path).await?;
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
 	Ok(Json(serde_json::Value::from(entry)).into_response())
 }
 
-async fn get_entry_parents(Path(path):Path<(String, String)>) -> Result<Response,JsonError>
+async fn get_entry_parents(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
 {
-	let entry = lookup_or(&path).await?;
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
 	let mut ret:Vec<_>=vec![];
-	let parents = db::find_down_tree(entry.id().clone())?;
+	let parents = db::find_down_tree(entry.id().clone()).into_http_error(&headers)?;
 	for p_id in parents
 	{
 		let ctx = format!("looking up parent {p_id} of {}:{}",path.0,path.1);
 		let e=db::lookup(&p_id).await
 			.and_then(|e|e.ok_or(IdNotFound {id:p_id.str_key()}))
-			.context(ctx)?;
+			.context(ctx).into_http_error(&headers)?;
 		ret.push(e);
 	}
 	Ok(Json(serde_json::Value::from(ret)).into_response())
 }
 
 
-async fn get_value(Path((table,uid,name)):Path<(String, String, String)>) -> Result<Response,JsonError>
+async fn get_value(headers: HeaderMap,Path((table,uid,name)):Path<(String, String, String)>) -> Result<Response, HttpError>
 {
 	let path = (table,uid);
-	let value = lookup_or(&path).await?.get(name.as_str()).cloned()
-		.ok_or(IdNotFound {id:format!("'{name}' in existing {}:{}",path.0,path.1)})?;
+	let value = lookup_or(&path).await.into_http_error(&headers)?
+		.get(name.as_str()).cloned()
+		.ok_or(IdNotFound {id:format!("'{name}' in existing {}:{}",path.0,path.1)})
+		.into_http_error(&headers)?;
 
 	Ok((StatusCode::FOUND,Json(value_to_json(value.into_inner()))).into_response())
 }
 
-async fn set_value(Path((table,uid,name)):Path<(String, String, String)>,content:Content) -> Result<Response,JsonError>
+async fn set_value(headers: HeaderMap,Path((table,uid,name)):Path<(String, String, String)>,content:Content) -> Result<Response, HttpError>
 {
-	let entry = lookup_or(&(table,uid)).await?;
+	let entry = lookup_or(&(table,uid)).await.into_http_error(&headers)?;
 	db::set_value(entry.id(),name,content.0).await
 		.map(|v|(StatusCode::ACCEPTED,Json(value_to_json(v.into_inner()))).into_response())
-		.map_err(|e|e.into())
+		.into_http_error(&headers)
 }
 
-async fn delete_value(Path((table,uid,name)):Path<(String, String, String)>) -> Result<Response,JsonError>
+async fn delete_value(headers: HeaderMap,Path((table,uid,name)):Path<(String, String, String)>) -> Result<Response, HttpError>
 {
-	let entry = lookup_or(&(table,uid)).await?;
+	let entry = lookup_or(&(table,uid)).await.into_http_error(&headers)?;
 	db::delete_value(entry.id(),name).await
 		.map(|v|(StatusCode::ACCEPTED,Json(value_to_json(v.into_inner()))).into_response())
-		.map_err(|e|e.into())
+		.into_http_error(&headers)
 }

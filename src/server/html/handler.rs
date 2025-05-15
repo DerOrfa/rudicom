@@ -1,9 +1,9 @@
 use crate::db;
 use crate::db::{list_entries, AggregateData, Entry, RecordId, DB};
 use crate::server::html::generators;
-use crate::server::http_error::TextError;
+use crate::server::http_error::{HttpError, IntoHttpError};
 use axum::extract::{Path, Query};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use byte_unit::Byte;
@@ -25,14 +25,14 @@ pub struct ListingConfig {
 }
 
 
-pub async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>,TextError>
+pub async fn get_studies_html(headers: HeaderMap,Query(config): Query<ListingConfig>) -> Result<axum::response::Html<String>, HttpError>
 {
     let keys:Vec<_> = crate::config::get().study_tags.keys().cloned()
         .chain(["Date", "Time"].map(String::from))
         .unique()//make sure there are no duplicates
         .collect();
 
-    let mut studies = list_entries("studies").await?;
+    let mut studies = list_entries("studies").await.into_http_error(&headers)?;
 
     if let Some(filter) = config.filter
     {
@@ -52,7 +52,8 @@ pub async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axu
     );
 
     // get some aggregated data
-    let aggregate_instances:Vec<AggregateData> = DB.select("instances_per_studies").await?;
+    let aggregate_instances:Vec<AggregateData> = DB.select("instances_per_studies").await
+        .into_http_error(&headers)?;
     // collect results from above
     let instance_count:BTreeMap<RecordId,_> = aggregate_instances.iter()
         .map(|e|(e.get_inner_id(),e.count)).collect();
@@ -70,7 +71,7 @@ pub async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axu
     let table= generators::table_from_objects(
         studies, "Name".to_string(), keys,
         vec![("Instances",Box::new(countinstances)),("Size",Box::new(getfilesize))]
-    ).await.map_err(|e|e.context("Failed generating the table"))?;
+    ).await.map_err(|e|e.context("Failed generating the table")).into_http_error(&headers)?;
 
     let mut builder = Body::builder();
     builder.heading_1(|h|h.text("Studies"));
@@ -78,11 +79,11 @@ pub async fn get_studies_html(Query(config): Query<ListingConfig>) -> Result<axu
     Ok(axum::response::Html(generators::wrap_body(builder.build(), "Studies").to_string()))
 }
 
-pub async fn get_entry_html(Path((table,id)):Path<(String,String)>) -> Result<Response,TextError>
+pub async fn get_entry_html(headers: HeaderMap,Path((table,id)):Path<(String,String)>) -> Result<Response, HttpError>
 {
-    if let Some(entry) = db::lookup_uid(table,id).await?
+    if let Some(entry) = db::lookup_uid(table,id).await.into_http_error(&headers)?
     {
-        let page = generators::entry_page(entry).await?;
+        let page = generators::entry_page(entry).await.into_http_error(&headers)?;
         Ok(axum::response::Html(page.to_string()).into_response())
     }
     else
