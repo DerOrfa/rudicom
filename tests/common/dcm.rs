@@ -62,8 +62,9 @@ pub fn synthesize_dicom_obj(uid_synthesizer: &UidSynthesizer, stdy_num:u16, ser_
 		(tags::STUDY_TIME, VR::TM, "000000.000000"),
 		(tags::STUDY_ID, VR::SH, "John_Doe_Study"),
 		(tags::SOP_CLASS_UID, VR::UI, uids::MR_IMAGE_STORAGE),
-		(tags::PATIENT_NAME, VR::PN,"Doe^John",),
-		(tags::PATIENT_ID, VR::LO,"John_Doe",),
+		(tags::PATIENT_NAME, VR::PN,"Doe^John"),
+		(tags::PATIENT_ID, VR::LO,"John_Doe"),
+		(tags::MODALITY, VR::CS,"MR"),
 	].map(|(id,vr,val)|DataElement::new(id,vr,val)).into_iter();
 	let string_tags = [
 		(tags::SOP_INSTANCE_UID, VR::UI, uid_synthesizer.instance(stdy_num,ser_num,image_num)),
@@ -92,12 +93,25 @@ pub fn synthesize_study(uid_synthesizer: &UidSynthesizer, stdy_num:u16, series:u
 pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDicomObject>>) 
 	-> tools::Result<Vec<RegisterResult>>
 {
-	let mut set = JoinSet::new();
-	for obj in instances
+	let mut tasks = JoinSet::new();
+	let mut ret = Vec::<RegisterResult>::new();
+	let mut instances = instances.cloned();
+	
+	while tasks.len() < rudicom::config::get().limits.max_files as usize
 	{
-		set.spawn(store(obj.clone()));
+		if let Some(obj) = instances.next() {
+			tasks.spawn(store(obj));
+		} else {break} //abort if we already run out of instances
 	}
-	set.join_all().await.into_iter().collect()
+	// take out the next finished import and thus drain the task list
+	while let Some(r) = tasks.join_next().await.transpose()?{
+		ret.push(r?);
+		// we finished one store task, add another one as long as we have them
+		if let Some(obj) = instances.next() {
+			tasks.spawn(store(obj));
+		}
+	}
+	Ok(ret)
 }
 
 pub async fn cleanup() -> rudicom::tools::Result<()>

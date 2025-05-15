@@ -135,7 +135,7 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	}
 	// make a stream that polls tasks and feeds new ones
 	let stream=futures::stream::poll_fn(move |c|{
-		// fill task list up to max_files 
+		// fill the task list up to max_files 
 		while tasks.len() < crate::config::get().limits.max_files as usize
 		{
 			if let Some(nextfile) = files.next() {
@@ -148,7 +148,7 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 				});
 			} else {break} //as long as there are files  
 		}
-		// pass on next finished import and thus drain the task list
+		// pass on the next finished import and thus drain the task list
 		tasks.poll_join_next(c)
 	});
 	let stream= stream.filter(move |item|{
