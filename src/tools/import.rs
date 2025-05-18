@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use crate::db::{Entry, RecordId, RegisterResult};
 use crate::tools::Error;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -35,14 +36,15 @@ pub enum ImportMode{
 	Move
 }
 
-impl ToString for ImportMode
+impl Display for ImportMode
 {
-	fn to_string(&self) -> String {
-		match self {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let str = match self {
 			ImportMode::Import => "import",
 			ImportMode::Store => "store",
 			ImportMode::Move => "move"
-		}.to_string()
+		};
+		f.write_str(str)
 	}
 }
 
