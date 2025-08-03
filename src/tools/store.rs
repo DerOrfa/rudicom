@@ -32,7 +32,7 @@ pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 	let mut checksum = md5::Context::new();
 	let buffer= write(&obj,Some(&mut checksum))?;
 
-	let fileinfo = db::File::new(gen_filepath(&obj)?, checksum.compute(), true, buffer.len() as u64);
+	let fileinfo = db::File::new(gen_filepath(&obj)?, checksum.finalize(), true, buffer.len() as u64);
 	let c_path = fileinfo.get_path();
 	let fileinfo = surrealdb::Value::try_from(fileinfo)?;
 

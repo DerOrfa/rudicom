@@ -1,6 +1,6 @@
 [package]
 name = "rudicom"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.80.0"
 
@@ -20,10 +20,10 @@ clap = { version = "4.5", features = ["derive","color","usage","string"] }
 serde_json = "1.0"
 surrealdb = {version = "=2.1.4", default-features = false, features = ["kv-surrealkv", "kv-mem", "protocol-http"]}
 serde = "1.0"
-tokio = { version = "1.44", features = ["signal", "macros", "rt-multi-thread", "fs"] }
+tokio = { version = "1.47.1", features = ["signal", "macros", "rt-multi-thread", "fs"] }
 glob = "0.3"
 config = {version = "0.15", default-features = false, features = ["toml"]}
-md5 = "0.7"
+md5 = "0.8.0"
 strfmt = "0.2.4"
 axum = {version = "0.8", features = ["tracing","query"]}
 axum-extra = {version = "0.10", features = ["async-read-body","query"]}

@@ -13,7 +13,7 @@ impl AsyncMd5
 {
 	pub fn new() -> Self
 	{Self(md5::Context::new())}
-	pub fn compute(self) -> md5::Digest	{self.0.compute()}
+	pub fn finalize(self) -> md5::Digest	{self.0.finalize()}
 }
 impl tokio::io::AsyncWrite for AsyncMd5{
 	fn poll_write(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>, buf: &[u8]) -> Poll<std::result::Result<usize, Error>> {
@@ -54,6 +54,6 @@ pub async fn compute_md5(filename:&Path) -> Result<md5::Digest>
 	let mut md5_compute = AsyncMd5::new();
 	let mut fileob = File::open(&filename).await.context(format!("opening {}",filename.display()))?;
 	tokio::io::copy(&mut fileob,&mut md5_compute).await?;
-	Ok(md5_compute.compute())
+	Ok(md5_compute.finalize())
 
 }
