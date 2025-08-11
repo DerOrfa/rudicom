@@ -2,6 +2,7 @@ use glob::{GlobError, PatternError};
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 use crate::db::{Entry, RecordId};
+use crate::dimse;
 
 #[derive(Error,Debug)]
 pub enum DicomError
@@ -14,8 +15,22 @@ pub enum DicomError
 	DicomReadError(#[from] dicom::object::ReadError),
 	#[error("dicom io error {0}")]
 	DicomWriteError(#[from] dicom::object::WriteError),
+	#[error("dicom metadata error {0}")]
+	DicomMetaError(#[from] dicom::object::WithMetaError),
 	#[error("error decoding pixel data ({0})")]
-	DicomPixelError(#[from] dicom::pixeldata::Error)
+	DicomPixelError(#[from] dicom::pixeldata::Error),
+	#[error("dicom server error {0}")]
+	DicomSCPError(#[from] dicom_ul::association::server::Error),
+	#[error("dicom server error {0}")]
+	DicomSCUError(#[from] dicom_ul::association::client::Error),
+	#[error("There is no presentation context with id {0}")]
+	DicomInvalidPC(u8),
+	#[error("There is no transfer syntax {0}")]
+	DicomTransferSyntaxNotFound(String),
+	#[error(transparent)]
+	AccessError(dicom::object::AccessError),
+	#[error(transparent)]
+	ConvertValueError(dicom::core::value::ConvertValueError),
 }
 
 #[derive(Debug)]
@@ -91,6 +106,12 @@ pub enum Error
 	#[error("io error {0}")]
 	IoError(#[from] std::io::Error),
 
+	#[error("Pipelining receive error {0}")]
+	ChannelRecvError(#[from] std::sync::mpsc::RecvError),
+
+	#[error("Pipelining receive error {0}")]
+	ChannelSendError(String),
+
 	#[error("string formatting error {0}")]
 	StrFmtError(#[from] strfmt::FmtError),
 
@@ -136,6 +157,8 @@ pub enum Error
 	DataConflict(Entry),
 	#[error("Entry {existing_id} already exists with different data")]
 	Md5Conflict {existing_md5:String, my_md5:String, existing_id:RecordId},
+	#[error("DIMSE error {0}")]
+	DimseError(#[from] dimse::definitions::StatusFailure),
 
 }
 
@@ -192,5 +215,17 @@ impl From<&Error> for serde_json::Value{
 			.map(|e|e.to_string())
 			.map(serde_json::Value::String).collect();
 		ret.into()
+	}
+}
+
+impl<T> From<std::sync::mpsc::SendError<T>> for Error {
+	fn from(value: std::sync::mpsc::SendError<T>) -> Self {
+		Error::ChannelSendError(value.to_string())
+	}
+}
+
+impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
+	fn from(value: tokio::sync::mpsc::error::SendError<T>) -> Self {
+		Error::ChannelSendError(value.to_string())
 	}
 }

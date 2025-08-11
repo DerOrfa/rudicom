@@ -5,3 +5,4 @@ pub mod storage;
 pub mod server;
 pub mod dcm;
 pub mod config;
+pub mod dimse;

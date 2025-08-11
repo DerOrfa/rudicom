@@ -2,7 +2,7 @@ pub mod store;
 pub mod remove;
 pub mod import;
 pub mod verify;
-mod error;
+pub(crate) mod error;
 pub mod conv;
 
 use crate::db;
@@ -15,6 +15,7 @@ use std::ops::Bound::Included;
 use std::path::{Path, PathBuf};
 use surrealdb::opt::Resource;
 use surrealdb::sql;
+use tokio::signal;
 
 pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 {
@@ -88,3 +89,30 @@ pub fn extract_from_dicom(obj:&DefaultDicomObject,tag:dicom::core::Tag) -> Resul
 		.and_then(|v|v.to_str().map_err(|e|DicomError(e.into())))
 		.context(format!("getting {} from dicom object",tag))
 }
+
+pub async fn shutdown_signal() {
+	let ctrl_c = async {
+		signal::ctrl_c()
+			.await
+			.expect("failed to install Ctrl+C handler");
+		eprintln!("Got CTRL+C trying graceful shutdown");
+	};
+
+	#[cfg(unix)]
+	let terminate = async {
+		signal::unix::signal(signal::unix::SignalKind::terminate())
+			.expect("failed to install signal handler")
+			.recv()
+			.await;
+		eprintln!("Got CTRL+C trying graceful shutdown");
+	};
+
+	#[cfg(not(unix))]
+	let terminate = std::future::pending::<()>();
+
+	tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+}
+

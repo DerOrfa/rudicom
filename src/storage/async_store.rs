@@ -4,6 +4,9 @@ use std::pin::Pin;
 use std::task::Poll;
 use dicom::object::{DefaultDicomObject, from_reader};
 use tokio::fs::File;
+use tokio::io::AsyncWrite;
+use tokio::task::spawn_blocking;
+use tokio_util::io::SyncIoBridge;
 use crate::tools::Error::DicomError;
 use crate::tools::{Context, Result};
 
@@ -47,6 +50,15 @@ pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Res
 		std::io::copy(&mut out,md5).unwrap();
 	}
 	Ok(out.into_inner())
+}
+
+pub async fn async_write(obj:DefaultDicomObject, sink:impl AsyncWrite + Unpin + Send + 'static) -> Result<()>
+{
+	let sink = SyncIoBridge::new(sink);
+	spawn_blocking(move || {
+		obj.write_all(sink)
+	})
+	.await?.map_err(|e|DicomError(e.into()))
 }
 
 pub async fn compute_md5(filename:&Path) -> Result<md5::Digest>

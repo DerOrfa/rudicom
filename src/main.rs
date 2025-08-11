@@ -3,6 +3,7 @@ mod cli;
 use futures::StreamExt;
 use rudicom::tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 use crate::cli::Commands;
 use rudicom::db::DB;
 use rudicom::db;
@@ -47,10 +48,30 @@ async fn main() -> Result<(),String>
 		tracing::info!("storage path is {}",inf.storage_path);
 			
 		let mut set= tokio::task::JoinSet::new();
+			// DICOM DIMSE
+			let dicom_listener = TcpListener::bind(&config::get().dimse.address).await
+				.map_err(|e|format!("Binding to {} failed: {e}",config::get().dimse.address))?;
+			let aet= config::get().dimse.aet.clone();
+
+			let (signal_tx, signal_rx) = watch::channel(());
+			tokio::spawn(async move {
+				rudicom::tools::shutdown_signal().await;
+				tracing::debug!("Telling SCP to shutdown");
+				drop(signal_rx);
+			});
+
+			set.spawn(async move {
+				rudicom::dimse::serve(dicom_listener,&aet,signal_tx).await
+					.map(|_|format!("SCP server {aet}"))
+			});
+
+			// axum HTTP
 			for a in address{
 				let bound = TcpListener::bind(&a).await
 					.map_err(|e|format!("Binding to {a} failed: {e}"))?;
-				set.spawn(async {server::serve(bound).await.map(|_|a)});
+				set.spawn(async move {server::serve(bound).await
+					.map(|_|format!("http server {a}"))
+				});
 			}
 			for result in set.join_all().await{
 				match result {

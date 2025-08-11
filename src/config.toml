@@ -17,6 +17,10 @@ Time = ["InstanceCreationTime"]
 upload_sizelimit = "200M"
 max_files = 32 # max amount of concurrently processed files
 
+[dimse]
+aet = "RUDICOM"
+address = "127.0.0.1:8042"
+
 [paths]
 #use dicom tag names in "{}" to generate file names (obviously those should be unique)
 #tag names can be followed by ":<" or ":>" and a number where resulting string will be cropped to the given size by

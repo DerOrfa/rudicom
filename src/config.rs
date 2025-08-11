@@ -14,13 +14,17 @@ pub struct Limits{pub upload_sizelimit:byte_unit::Byte, pub max_files:u16}
 pub struct Paths{pub filename_pattern:String,pub storage_path:PathBuf}
 
 #[derive(Debug,Serialize,Deserialize)]
+pub struct DimseCfg{pub aet:String,pub address:String}
+
+#[derive(Debug,Serialize,Deserialize)]
 pub struct ConfigStruct
 {
 	pub instance_tags:HashMap<String,Vec<AttributeSelector>>,
 	pub series_tags:HashMap<String,Vec<AttributeSelector>>,
 	pub study_tags:HashMap<String,Vec<AttributeSelector>>,
 	pub limits: Limits,
-	pub paths: Paths
+	pub paths: Paths,
+	pub dimse: DimseCfg
 }
 
 impl Serialize for AttributeSelector {
