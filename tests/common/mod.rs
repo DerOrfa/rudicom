@@ -27,5 +27,13 @@ pub fn init_config() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	config::init(None)?;
+
+	let storage_path = &config::get().paths.storage_path;
+	if !storage_path.is_absolute(){
+		return Err(format!(r#""{}" (the storage path) must be an absolute path"#,storage_path.display()).into())
+	}
+	if !storage_path.exists(){
+		return Err(format!(r#""{}" (the storage path) must exist"#,storage_path.display()).into())
+	}
 	Ok(())
 }
