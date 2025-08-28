@@ -1,3 +1,4 @@
+use dicom::object::mem::InMemElement;
 use dicom_dictionary_std::uids::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
@@ -91,49 +92,49 @@ pub enum StatusFailure {
 	#[error("Failed")]
 	Failure = 0x0100, // 01xx (except 0107 and 0116
 	#[error("No such attribute")]
-	FailureNoSuchAttribute = 0x0105,
+	NoSuchAttribute = 0x0105,
 	#[error("Invalid Attribute Value")]
-	FailureInvalidAttributeValue = 0x0106,
+	InvalidAttributeValue = 0x0106,
 	#[error("Processing Failure")]
 	ProcessingFailure = 0x0110,
 	#[error("Duplicate SOP Instance")]
-	FailureDuplicateSOPInstance = 0x0111,
+	DuplicateSOPInstance = 0x0111,
 	#[error("No such SOP Instance")]
-	FailureNoSuchSOPInstance = 0x0112,
+	NoSuchSOPInstance = 0x0112,
 	#[error("No such Event Type")]
-	FailureNoSuchEvent = 0x0113,
+	NoSuchEvent = 0x0113,
 	#[error("No such argument")]
-	FailureNoSuchArgument = 0x0114,
+	NoSuchArgument = 0x0114,
 	#[error("Invalid argument value")]
-	FailureInvalidArgument = 0x0115,
+	InvalidArgument = 0x0115,
 	#[error("Invalid SOP Instance")]
-	FailureInvalidSOPInstance = 0x0117,
+	InvalidSOPInstance = 0x0117,
 	#[error("No such SOP Class")]
-	FailureNoSuchSOPClass = 0x0118,
+	NoSuchSOPClass = 0x0118,
 	#[error("Class-Instance conflict")]
-	FailureClassInstance = 0x0119,
+	ClassInstance = 0x0119,
 	#[error("Missing Attribute")]
-	FailureMissingAttribute = 0x0120,
+	MissingAttribute = 0x0120,
 	#[error("Missing Attribute Value")]
-	FailureMissingAttributeValue = 0x0121,
+	MissingAttributeValue = 0x0121,
 	#[error("SOP Class not supported")]
-	FailureInvalidSOPClass = 0x0122,
+	InvalidSOPClass = 0x0122,
 	#[error("No such Action Type")]
 	NoSuchActionType = 0x0123,
 	#[error("Not authorized")]
 	NotAuthorized = 0x0124,
 	#[error("Duplicate Message ID")]
-	FailureDuplicateOP = 0x0210,
+	DuplicateOP = 0x0210,
 	#[error("Unrecognized operation")]
 	UnrecognizedOperation = 0x0211,
 	#[error("Mistyped argument")]
-	FailureMistypedArgument = 0x0212,
+	MistypedArgument = 0x0212,
 	#[error("Resource limitation")]
 	ResourceLimitation = 0x0213,
 	#[error("Out of resources")]
 	OutOfResourcesA = 0xA100,
 	#[error("Move Destination unknown")]
-	FailureMoveDestination = 0xA201,
+	MoveDestination = 0xA201,
 	#[error("Out of resources")]
 	OutOfResources = 0xA700,
 	#[error("Out of resources for Calculation")]
@@ -143,7 +144,7 @@ pub enum StatusFailure {
 	#[error("Data Set does not match SOP Class")]
 	SOPClassDoesNotMatch = 0xA900, // 0xA9xx
 	#[error("Cannot understand")]
-	FailureCannotUnderstand = 0xC000, // Cxxx
+	CannotUnderstand = 0xC000, // Cxxx
 	#[error("Operation was cancelled")]
 	Canceled = 0xfe00,
 }
@@ -154,8 +155,8 @@ pub fn match_status(code:u16) -> Status<()>{
 		0x0001 ..= 0x00FF => return Ok(StatusOk::Warning(StatusWarning::Warning)),
 		0xFF00 ..= 0xFFFF => return Ok(StatusOk::Pending(())),
 		0xA700 ..= 0xA7ff => return Err(StatusFailure::OutOfResources),
-		0xA900 ..= 0xA9ff => return Err(StatusFailure::FailureInvalidSOPClass),
-		0xC000 ..= 0xCfff => return Err(StatusFailure::FailureCannotUnderstand),
+		0xA900 ..= 0xA9ff => return Err(StatusFailure::InvalidSOPClass),
+		0xC000 ..= 0xCfff => return Err(StatusFailure::CannotUnderstand),
 		_ => {}
 	};
 	if let Ok(warn) = StatusWarning::try_from(code){
@@ -167,11 +168,6 @@ pub fn match_status(code:u16) -> Status<()>{
 		Err(StatusFailure::Failure)
 	}
 }
-
-impl<T> From<StatusOk<T>> for Status<T>{fn from(value: StatusOk<T>) -> Self {Ok(value)}}
-impl<T> From<StatusWarning> for Status<T>{fn from(value: StatusWarning) -> Self {Ok(StatusOk::Warning(value))}}
-impl<T> From<StatusFailure> for Status<T>{fn from(value: StatusFailure) -> Self {Err(value)}}
-
 pub fn get_status<T>(stat:impl Into<Status<T>>) -> u16 {
 	match stat.into() {
 		Ok(StatusOk::Success(_)) => 0x0000,
@@ -180,4 +176,18 @@ pub fn get_status<T>(stat:impl Into<Status<T>>) -> u16 {
 		Err(failure) => failure.into(),
 	}
 }
+impl From<StatusOk<()>> for StatusOk<Vec<InMemElement>> {
+	fn from(value: StatusOk<()>) -> Self {
+		match value {
+			StatusOk::Success(_) => StatusOk::Success(vec![]),
+			StatusOk::Pending(_) => StatusOk::Pending(vec![]),
+			StatusOk::Warning(w) => StatusOk::Warning(w)
+		}
+	}
+}
+impl<T> From<StatusOk<T>> for Status<T>{fn from(value: StatusOk<T>) -> Self {Ok(value)}}
+impl<T> From<StatusWarning> for Status<T>{fn from(value: StatusWarning) -> Self {Ok(StatusOk::Warning(value))}}
+impl<T> From<StatusFailure> for Status<T>{fn from(value: StatusFailure) -> Self {Err(value)}}
+
+
 

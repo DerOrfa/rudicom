@@ -1,31 +1,26 @@
 use std::borrow::Cow;
 use std::default::Default;
-use std::future::Future;
 use std::io::{BufWriter, Cursor, Write};
 use dicom::encoding::TransferSyntaxIndex;
-use dicom::transfer_syntax::{TransferSyntax, TransferSyntaxRegistry};
+use dicom::transfer_syntax::{TransferSyntaxRegistry};
 use dicom_ul::association::server::{ServerAssociationOptions, ServerAssociation};
 use dicom_ul::{AeAddr, FullAeAddr, Pdu};
 use dicom_ul::pdu::{PDataValue, PDataValueType};
 use std::net::SocketAddr;
 use std::sync::{Arc};
-use dicom::core::dictionary::UidDictionary;
 use dicom::object::{open_file, InMemDicomObject};
 use dicom::transfer_syntax::entries::{EXPLICIT_VR_LITTLE_ENDIAN, IMPLICIT_VR_LITTLE_ENDIAN};
 use dicom_dictionary_std::tags;
-use futures::{StreamExt};
 use tokio::sync::{watch::Sender,Mutex};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::{spawn_blocking};
 use tokio_util::io::SyncIoBridge;
 use tracing::{debug, error, info, warn};
-use crate::dimse::message;
 use crate::dimse::message::{to_dicom_err, Message};
 use crate::dimse::payload::{SendAttachment, SendPayload};
 use crate::tools;
 use crate::tools::Result;
 use crate::tools::error::DicomError;
-use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
 
 enum OpenState{
 	Open(Sender<()>),
@@ -127,7 +122,7 @@ impl Dispatcher
 		};
 		Ok(())
 	}
-	async fn fetch_command_obj(&mut self,mut prelude:&Vec<PDataValue>) -> Result<InMemDicomObject>
+	async fn fetch_command_obj(&mut self,prelude:&Vec<PDataValue>) -> Result<InMemDicomObject>
 	{
 		assert!(!prelude.is_empty());
 		let mut buffer = Cursor::<Vec<u8>>::default();

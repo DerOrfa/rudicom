@@ -1,17 +1,16 @@
-use std::future::Future;
-use crate::{db, tools};
-use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
+use crate::tools;
 use crate::tools::Error::DicomError;
-use crate::tools::{lookup_instance_file, Result};
+use crate::tools::Result;
 use dicom::encoding::TransferSyntaxIndex;
 use dicom::object::{FileMetaTableBuilder, InMemDicomObject};
 use dicom::transfer_syntax::TransferSyntaxRegistry;
 use dicom_ul::pdu::{PDataValue, PDataValueType};
 use std::io::{Cursor, Read, Write};
-use std::sync::Arc;
-use dicom_ul::ServerAssociation;
-use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tracing::error;
+use crate::db::RegisterResult;
+use crate::dimse::definitions::{Status, StatusFailure};
+use crate::dimse::definitions::StatusOk::Success;
+use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
 
 pub struct PDataReader<'a>{
 	source: &'a mut tokio::sync::mpsc::UnboundedReceiver<PDataValue>,
@@ -56,11 +55,23 @@ pub async fn read_pipe(mut source:tokio::sync::mpsc::UnboundedReceiver<PDataValu
 	}).await.expect("Reading thread panicked")
 }
 
-pub async fn store_db(obj:InMemDicomObject,ts:impl Into<String>) -> Result<()>
+pub async fn store_db(obj:InMemDicomObject,ts:impl Into<String>) -> Status<()>
 {
 	let file_meta = FileMetaTableBuilder::new().transfer_syntax(ts);
-	let obj = obj.with_meta(file_meta)
-		.map_err(|e|DicomError(e.into()))?;
-	tools::store::store(obj).await?;
-	Ok(())
+	let obj = match obj.with_meta(file_meta){
+		Ok(obj) => obj,
+		Err(e) => {
+			error!("Error {e} when preparing received data for storage");
+			return StatusFailure::ProcessingFailure.into()
+		}
+	};
+	match tools::store::store(obj).await
+	{
+		Ok(RegisterResult::Stored(id)) => Success(()).into(),
+		Ok(RegisterResult::AlreadyStored(id)) => StatusFailure::DuplicateSOPInstance.into(),
+		Err(e) => {
+			error!("Error {e} when storing received data");
+			StatusFailure::Failure.into()
+		}
+	}
 }
