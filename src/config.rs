@@ -56,10 +56,8 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 		.add_source(File::from_str(CONFIG_STR,Toml));
 	if let Some(filename) = config_file {
 		let filename = filename.canonicalize().map_err(|e|ConfigError::Foreign(Box::new(e)))?;
-		let filename = filename.to_str()
-				.ok_or(ConfigError::Foreign(format!("Failed to encode filename {} as UTF-8",filename.display()).into()))?;
-		tracing::info!("loading config from {filename}");
-		builder=builder.add_source(File::new(filename,Toml));
+		tracing::info!("loading config from file {}",filename.display());
+		builder=builder.add_source(File::from(filename).format(Toml));
 	} else {
 		tracing::warn!(r#"no config file given loading defaults (use "write-config" subcommand to write it to a file)"#);
 	}
