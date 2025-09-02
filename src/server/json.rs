@@ -132,7 +132,7 @@ async fn get_value(headers: HeaderMap,Path((table,uid,name)):Path<(String, Strin
 		.ok_or(IdNotFound {id:format!("'{name}' in existing {}:{}",path.0,path.1)})
 		.into_http_error(&headers)?;
 
-	Ok((StatusCode::FOUND,Json(value_to_json(value.into_inner()))).into_response())
+	Ok(Json(value_to_json(value.into_inner())).into_response())
 }
 
 async fn set_value(headers: HeaderMap,Path((table,uid,name)):Path<(String, String, String)>,content:Content) -> Result<Response, HttpError>
