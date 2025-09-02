@@ -3,6 +3,7 @@ mod cli;
 use futures::StreamExt;
 use rudicom::tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
+use tracing::info;
 use crate::cli::Commands;
 use rudicom::db::DB;
 use rudicom::db;
@@ -21,7 +22,21 @@ async fn main() -> Result<(),String>
 	let _profiler = dhat::Profiler::new_heap();
 
 	let args = cli::parse();
+	if let	Commands::WriteConfig{ file } = args.command {
+		config::write(&file)
+			.map_err(|e|format!("Failed writing config file {}:{e}", file.display()))?;
+		info!("Config file written to {}", file.display());
+		return Ok(());
+	}
 	config::init(args.config).map_err(|e|e.to_string())?;
+
+	let storage_path = &config::get().paths.storage_path;
+	if !storage_path.is_absolute(){
+		Err(format!("{} (the storage path) must be an absolute path",storage_path.display()))?;
+	} else if !storage_path.exists(){
+		Err(format!("{} (the storage path) must exist",storage_path.display()))?
+	}
+
 	if let Some(database) = args.endpoint.database{
 		db::init_remote(database.as_str()).await
 			.map_err(|e|format!("Failed connecting to {}: {e}", database))?;
@@ -43,8 +58,8 @@ async fn main() -> Result<(),String>
 			.map_err(|e|format!("database initialisation failed: {e}"))?;
 
 		let inf= server::server_info().await;
-		tracing::info!("database version is {}",inf.db_version);
-		tracing::info!("storage path is {}",inf.storage_path);
+		info!("database version is {}",inf.db_version);
+		info!("storage path is {}",inf.storage_path);
 			
 		let mut set= tokio::task::JoinSet::new();
 			for a in address{
@@ -54,7 +69,7 @@ async fn main() -> Result<(),String>
 			}
 			for result in set.join_all().await{
 				match result {
-					Ok(a) => tracing::info!("{a} closed"),
+					Ok(a) => info!("{a} closed"),
 					Err(e) => Err(format!("Server failed: {e}"))?
 				}
 			}
@@ -76,15 +91,12 @@ async fn main() -> Result<(),String>
 				}
 			}
 		}
-		Commands::WriteConfig { file } => {
-			config::write(&file)
-				.map_err(|e|format!("Failed writing config file {}:{e}",file.display()))?
-		}
 		Commands::Restore { file } => {
-			tracing::info!("Restoring database from {}", file.display());
+			info!("Restoring database from {}", file.display());
 			DB.import(&file).await
 				.map_err(|e|format!("Importing {} failed {e}",file.display()))?
 		}
+		Commands::WriteConfig { .. } => {unreachable!()}
 	}
 	Ok(())
 }

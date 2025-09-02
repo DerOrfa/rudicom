@@ -65,14 +65,6 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 	}
 
 	CONFIG.set(builder.build().unwrap().try_deserialize()?).expect("Failed to set config");
-
-	let storage_path = &get().paths.storage_path;
-	if !storage_path.is_absolute(){
-		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must be an absolute path"#,storage_path.display()).into()))
-	}
-	if !storage_path.exists(){
-		return Err(ConfigError::Foreign(format!(r#""{}" (the storage path) must exist"#,storage_path.display()).into()))
-	}
 	Ok(())
 }
 
