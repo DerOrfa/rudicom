@@ -87,7 +87,21 @@ pub(super) fn parse() -> Cli
 {
 	let ret=Cli::parse();
 
-	tracing_subscriber::fmt().with_max_level(ret.log_level.0).init();
+	#[cfg(target_os = "windows")]
+	let ansi = match ansi_term::enable_ansi_support(){
+		Ok(_) => true,
+		Err(e) => {
+			eprintln!("Failed to enable ansi color support (error code {e})");
+			false
+		},
+	};
+	#[cfg(not(target_os = "windows"))]
+	let ansi = true;
+
+	tracing_subscriber::fmt()
+		.with_max_level(ret.log_level.0)
+		.with_ansi(ansi)
+		.init();
 
 	ret
 }
