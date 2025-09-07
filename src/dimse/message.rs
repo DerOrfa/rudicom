@@ -4,7 +4,7 @@ use std::io::{Cursor, Write};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
 use dicom::encoding::{TransferSyntaxIndex};
-use dicom::object::{AccessError, InMemDicomObject};
+use dicom::object::{AccessError, InMemDicomObject, OpenFileOptions};
 use dicom::transfer_syntax::entries::IMPLICIT_VR_LITTLE_ENDIAN;
 use tracing::{debug, error, warn};
 use dicom::core::{DataElement, Tag, VR};
@@ -153,7 +153,7 @@ impl MessageTask
 				if let Some(file) = lookup_instance_file(instance.to_string()).await?
 				{
 					if file.get_path().exists(){
-						task.c_store(file, cmd.obj, vec![]).await?;
+						task.c_store(file, vec![]).await?;
 						todo!()
 					} else {
 						error!("Entry for {instance} found, but file {} does not exist", file.get_path().display());
@@ -229,31 +229,36 @@ impl MessageTask
 		self.id.1.store(true, Ordering::Release);
 	}
 
-	async fn c_store(&mut self, file: File, source: impl IntoIterator<Item = InMemElement>, attr: impl IntoIterator<Item = InMemElement>) -> Result<()> {
+	async fn c_store(&mut self, file: File, attr: impl IntoIterator<Item = InMemElement>) -> Result<()> {
 
-		// store request
-		let source = InMemDicomObject::from_element_iter(source);
-		let id = source.element(tags::MESSAGE_ID)
-			.or(source.element(tags::MESSAGE_ID_BEING_RESPONDED_TO))
-			.map_err(to_dicom_err).and_then(|id|id.to_int().map_err(to_dicom_err))
-			.context("Required element for C-STORE missing")?;
-		let mut rq =create_request(C_STORE_RQ,Some(id));
-		for e in [tags::AFFECTED_SOP_INSTANCE_UID, tags::AFFECTED_SOP_CLASS_UID]
+		let mut rq =create_request(C_STORE_RQ,Some(rand::random::<u16>()));
+		let mut source = OpenFileOptions::new().read_until(tags::AFFECTED_SOP_INSTANCE_UID)
+			.open_file(file.get_path()).map_err(to_dicom_err)?;
+		for (s_tag,d_tag) in [
+			(tags::SOP_INSTANCE_UID,tags::AFFECTED_SOP_INSTANCE_UID),
+			(tags::SOP_CLASS_UID,tags::AFFECTED_SOP_CLASS_UID)
+		]
 		{
-			source.element(e).map_err(to_dicom_err)
-				.map(|e|rq.put(e.clone()))
-				.context("Required element for C-STORE missing")?;
+			source.take_element(s_tag).map(InMemElement::into_value)
+				.map(|v|rq.put(DataElement::new(d_tag,VR::UI,v)))
+				.map_err(to_dicom_err).context(format!("File {} lacking tag {s_tag}",file.get_path().display()))?;
 		}
 		for attr in attr {rq.put(attr.clone());}
 		self.send_command(rq,SendAttachment::File(file))?;
 
-		// wait for confirmation
-		let reply = self.receive_response(C_STORE_RQ).await?;
-		match reply.status {
-			Ok(_) => {}
-			Err(_) => {}
+		loop {
+			// wait for confirmation
+			match self.receive_response(C_STORE_RQ).await?.status
+			{
+				Ok(StatusOk::Success(_)) => return Ok(()),
+				Ok(StatusOk::Warning(e)) => {
+					warn!("Unexpected Warning reply from c-store {e:?} ");
+					return Ok(())
+				},
+				Ok(StatusOk::Pending(_)) => {},
+				Err(e) => return Err(e.into())
+			}
 		}
-		Ok(())
 	}
 
 	async fn receive_response(&mut self, source_rq:u16) -> Result<Reply>{
