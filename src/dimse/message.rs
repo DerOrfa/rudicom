@@ -15,7 +15,6 @@ use dicom::object::mem::InMemElement;
 use dicom::transfer_syntax::TransferSyntaxRegistry;
 use tokio::task::JoinHandle;
 use crate::db::File;
-use crate::dimse::definitions;
 use crate::dimse::payload::{SendAttachment, SendPayload};
 use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
 use crate::tools::{lookup_instance_file, Context, Result};
@@ -71,26 +70,23 @@ struct Reply{
 	warning:Option<u16>
 }
 
-impl Command
-{
-	pub fn sop_class(&self) -> std::result::Result<&InMemElement, AccessError> {self.obj.element(tags::AFFECTED_SOP_CLASS_UID)}
-	pub fn instance_uid(&self) -> std::result::Result<&InMemElement, AccessError> {self.obj.element(tags::AFFECTED_SOP_CLASS_UID)}
-	pub fn msgid(&self) -> std::result::Result<&InMemElement, AccessError> {self.obj.element(tags::MESSAGE_ID)}
-	pub fn rspid(&self) -> std::result::Result<&InMemElement, AccessError> {self.obj.element(tags::MESSAGE_ID_BEING_RESPONDED_TO)}
-	pub fn send_completed_subop<T>(&self, task:&mut MessageTask, status:impl Into<Status<T>>, succeed:u16, warn:u16, err:u16) -> Result<()>
-	{
+impl Command {
+	pub fn sop_class(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::AFFECTED_SOP_CLASS_UID) }
+	pub fn instance_uid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::AFFECTED_SOP_CLASS_UID) }
+	pub fn msgid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::MESSAGE_ID) }
+	pub fn rspid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::MESSAGE_ID_BEING_RESPONDED_TO) }
+	pub fn send_completed_subop<T>(&self, task: &mut MessageTask, status: impl Into<Status<T>>, succeed: u16, warn: u16, err: u16) -> Result<()> {
 		let attr = [
 			DataElement::new(tags::NUMBER_OF_COMPLETED_SUBOPERATIONS, VR::US, dicom_value!(succeed)),
 			DataElement::new(tags::NUMBER_OF_FAILED_SUBOPERATIONS, VR::US, dicom_value!(err)),
 			DataElement::new(tags::NUMBER_OF_WARNING_SUBOPERATIONS, VR::US, dicom_value!(warn)),
 		];
-		let resp = self.make_response(task,status,attr,vec![])?;
-		task.sink.send(resp).map_err(|e|e.into())
+		let resp = self.make_response(task, status, attr, vec![]).map_err(to_dicom_err)?;
+		task.sink.send(resp).map_err(|e| e.into())
 	}
-	pub fn make_response<T>(&self, task:&mut MessageTask, status:impl Into<Status<T>>, attr:impl IntoIterator<Item = InMemElement>, identifier:impl IntoIterator<Item = InMemElement>)
- 		-> Result<SendPayload>
-	{
-		let identifier:Vec<_> = identifier.into_iter().collect();
+	pub fn make_response<T>(&self, task: &mut MessageTask, status: impl Into<Status<T>>, attr: impl IntoIterator<Item=InMemElement>, identifier: impl IntoIterator<Item=InMemElement>)
+		-> std::result::Result<SendPayload, dicom::object::WriteError> {
+		let identifier: Vec<_> = identifier.into_iter().collect();
 		let identifier = if identifier.is_empty() {
 			SendAttachment::None
 		} else {
@@ -101,15 +97,37 @@ impl Command
 			DataElement::new(tags::STATUS, VR::US, dicom_value!(U16, [get_status(status)]))
 		]);
 		let mut ret = InMemDicomObject::command_from_element_iter(attr);
-		if let Some(msgid) = self.msgid().ok(){
-			ret.put(DataElement::new(tags::MESSAGE_ID_BEING_RESPONDED_TO,VR::US,msgid.value().clone()));
+		if let Some(msgid) = self.msgid().ok() {
+			ret.put(DataElement::new(tags::MESSAGE_ID_BEING_RESPONDED_TO, VR::US, msgid.value().clone()));
 		}
-		if let Some(sop_class) = self.sop_class().ok()	{ret.put(sop_class.clone());}
-		if let Some(sop_instance) = self.instance_uid().ok() {ret.put(sop_instance.clone());}
+		if let Some(sop_class) = self.sop_class().ok() { ret.put(sop_class.clone()); }
+		if let Some(sop_instance) = self.instance_uid().ok() { ret.put(sop_instance.clone()); }
 		make_command(self.pc_id, ret, identifier)
 	}
-
-
+	fn respond<T>(&self, res: Status<T>, task: &mut MessageTask, attr: impl IntoIterator<Item=InMemElement>)
+		-> Result<()> where T:IntoIterator<Item=InMemElement>
+	{
+		match res
+		{
+			Ok(StatusOk::Warning(w)) => {}
+			Ok(StatusOk::Success(attachment)) | Ok(StatusOk::Pending(attachment)) => { // result to be sent is ok
+				match self.make_response(task, StatusOk::Success(()), attr, attachment) {
+					Ok(payload) => task.sink.send(payload)?,
+					Err(e) => { // Making response failed. Will tell receiver something went wrong and return error
+						let payload = self.make_response::<T>(task, StatusFailure::Failure, vec![], vec![]).expect("making an error response shouldn't fail");
+						task.sink.send(payload)?;
+						return Err(to_dicom_err(e).context("when building response"))
+					}
+				}
+			}
+			Err(e) => {
+				// if error is a "dimse-error" send that, otherwise just "Fail"
+				let payload = self.make_response::<T>(task, e, vec![], vec![]).expect("making an error response shouldn't fail");
+				task.sink.send(payload)?;
+			}
+		}
+		Ok(())
+	}
 }
 struct MessageTask{
 	id: Arc<(AtomicU16, AtomicBool)>,
@@ -139,9 +157,9 @@ impl MessageTask
 		match cmd.id {
 			C_STORE_RQ => { //C-STORE-RQ
 				debug!("processing store request {}", id.map(|i|i.to_string()).unwrap_or("NO_ID".to_string()));
-				store_db(task.fetch_obj(vec![],None).await?,task.selected_ts.as_str()).await?;
-				let resp = cmd.make_response(&mut task, StatusOk::Success(()), [], [])?;
-				task.sink.send(resp).map_err(|e|e.into())
+				let stored = store_db(task.fetch_obj(vec![],None).await?,task.selected_ts.as_str()).await
+					.map(|s|StatusOk::<Vec<InMemElement>>::from(s));
+				cmd.respond(stored,&mut task,vec![])
 			}
 			C_GET_RQ => {
 				// https://dicom.nema.org/medical/dicom/current/output/chtml/part07/chapter_9.html#sect_9.1.3.2
@@ -162,7 +180,7 @@ impl MessageTask
 					}
 				} else {
 					warn!("No entry found for {instance}");
-					cmd.send_completed_subop::<()>(&mut task, StatusFailure::FailureNoSuchSOPInstance,0,0,1)
+					cmd.send_completed_subop::<()>(&mut task, StatusFailure::NoSuchSOPInstance,0,0,1)
 				}
 			}
 
@@ -219,7 +237,7 @@ impl MessageTask
 		Ok(cmd)
 	}
 	fn send_command(&mut self, attr:impl IntoIterator<Item = InMemElement>, attachment:SendAttachment) -> Result<()> {
-		self.sink.send(make_command(self.pc_id,attr, attachment)?)?;
+		self.sink.send(make_command(self.pc_id,attr, attachment).map_err(to_dicom_err)?)?;
 		debug!("command is out");
 		Ok(())
 	}
@@ -340,7 +358,7 @@ fn create_request(command:u16,msgid: Option<u16>) -> InMemDicomObject
 }
 
 fn make_command(presentation_context_id:u8, attr:impl IntoIterator<Item = InMemElement>, attachment:SendAttachment)
-				-> Result<SendPayload>
+				-> std::result::Result<SendPayload,dicom::object::WriteError>
 {
 	let mut data = Vec::new();
 	let mut obj= InMemDicomObject::command_from_element_iter(attr);
@@ -351,7 +369,7 @@ fn make_command(presentation_context_id:u8, attr:impl IntoIterator<Item = InMemE
 		obj.put(DataElement::new(tags::COMMAND_DATA_SET_TYPE,VR::US,dicom_value!(U16,0x0000)));
 	}
 
-	obj.write_dataset_with_ts(&mut data, &IMPLICIT_VR_LITTLE_ENDIAN.erased()).map_err(to_dicom_err)?;
+	obj.write_dataset_with_ts(&mut data, &IMPLICIT_VR_LITTLE_ENDIAN.erased())?;
 	let command = PDataValue { presentation_context_id, value_type: PDataValueType::Command, is_last: true, data };
 	Ok(SendPayload{command,attachment})
 }

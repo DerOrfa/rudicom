@@ -109,7 +109,7 @@ pub enum Error
 	#[error("Pipelining receive error {0}")]
 	ChannelRecvError(#[from] std::sync::mpsc::RecvError),
 
-	#[error("Pipelining receive error {0}")]
+	#[error("Pipelining send error {0}")]
 	ChannelSendError(String),
 
 	#[error("string formatting error {0}")]

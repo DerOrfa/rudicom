@@ -4,11 +4,13 @@ use futures::StreamExt;
 use rudicom::tools::import::import_glob_as_text;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
+use tracing::info;
 use crate::cli::Commands;
 use rudicom::db::DB;
 use rudicom::db;
 use rudicom::tools::import::ImportConfig;
 use rudicom::config;
+use rudicom::config::get;
 use rudicom::server;
 
 #[cfg(feature = "dhat-heap")]
@@ -22,7 +24,21 @@ async fn main() -> Result<(),String>
 	let _profiler = dhat::Profiler::new_heap();
 
 	let args = cli::parse();
+	if let	Commands::WriteConfig{ file } = args.command {
+		config::write(&file)
+			.map_err(|e|format!("Failed writing config file {}:{e}", file.display()))?;
+		info!("Config file written to {}", file.display());
+		return Ok(());
+	}
 	config::init(args.config).map_err(|e|e.to_string())?;
+
+	let storage_path = &get().paths.storage_path;
+	if !storage_path.is_absolute(){
+		Err(format!("{} (the storage path) must be an absolute path",storage_path.display()))?;
+	} else if !storage_path.exists(){
+		Err(format!("{} (the storage path) must exist",storage_path.display()))?
+	}
+
 	if let Some(database) = args.endpoint.database{
 		db::init_remote(database.as_str()).await
 			.map_err(|e|format!("Failed connecting to {}: {e}", database))?;
@@ -97,15 +113,12 @@ async fn main() -> Result<(),String>
 				}
 			}
 		}
-		Commands::WriteConfig { file } => {
-			config::write(&file)
-				.map_err(|e|format!("Failed writing config file {}:{e}",file.display()))?
-		}
 		Commands::Restore { file } => {
 			tracing::info!("Restoring database from {}", file.display());
 			DB.import(&file).await
 				.map_err(|e|format!("Importing {} failed {e}",file.display()))?
 		}
+		Commands::WriteConfig { .. } => {unreachable!()}
 	}
 	Ok(())
 }
