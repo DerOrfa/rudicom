@@ -87,7 +87,7 @@ pub(super) fn parse() -> Cli
 {
 	let ret=Cli::parse();
 
-	#[cfg(target_os = "windows")]
+	#[cfg(windows)]
 	let ansi = match ansi_term::enable_ansi_support(){
 		Ok(_) => true,
 		Err(e) => {
@@ -95,7 +95,7 @@ pub(super) fn parse() -> Cli
 			false
 		},
 	};
-	#[cfg(not(target_os = "windows"))]
+	#[cfg(not(windows))]
 	let ansi = true;
 
 	tracing_subscriber::fmt()

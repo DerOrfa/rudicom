@@ -48,5 +48,5 @@ strip = "symbols"
 #lto = "fat"
 #debug = 1
 
-[target.'cfg(target_os = "windows")'.dependencies]
+[target.'cfg(windows)'.dependencies]
 ansi_term = "0.12.1"
