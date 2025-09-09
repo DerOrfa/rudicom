@@ -86,6 +86,7 @@ pub enum StatusWarning {
 	DataSetDoesNotMatch = 0xB007,
 }
 
+// https://dicom.nema.org/medical/dicom/current/output/chtml/part07/chapter_C.html
 #[derive(Debug, Clone, Eq, PartialEq, TryFromPrimitive,IntoPrimitive,Error)]
 #[repr(u16)]
 pub enum StatusFailure {

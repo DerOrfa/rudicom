@@ -1,4 +1,4 @@
-use crate::tools;
+use crate::{db, tools};
 use crate::tools::Error::DicomError;
 use crate::tools::Result;
 use dicom::encoding::TransferSyntaxIndex;
@@ -6,10 +6,13 @@ use dicom::object::{FileMetaTableBuilder, InMemDicomObject};
 use dicom::transfer_syntax::TransferSyntaxRegistry;
 use dicom_ul::pdu::{PDataValue, PDataValueType};
 use std::io::{Cursor, Read, Write};
+use dicom::object::mem::InMemElement;
+use dicom_dictionary_std::tags;
 use tracing::error;
 use crate::db::RegisterResult;
 use crate::dimse::definitions::{Status, StatusFailure};
 use crate::dimse::definitions::StatusOk::Success;
+use crate::dimse::message::to_dicom_err;
 use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
 
 pub struct PDataReader<'a>{
@@ -74,4 +77,40 @@ pub async fn store_db(obj:InMemDicomObject,ts:impl Into<String>) -> Status<()>
 			StatusFailure::Failure.into()
 		}
 	}
+}
+
+//https://dicom.nema.org/medical/dicom/current/output/chtml/part04/sect_C.2.2.2.html
+pub async fn lookup(ident: impl IntoIterator<Item = InMemElement>) -> Result<Vec<db::File>>
+{
+	let ident = InMemDicomObject::from_element_iter(ident);
+	let level = ident.get(tags::QUERY_RETRIEVE_LEVEL)
+		.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Query Retrieve Level is missing in identifier");e})?
+		.to_str().map_err(to_dicom_err)?
+		.to_uppercase();
+	let entry = match level.as_str() {
+		"PATIENT" => todo!(),
+		"STUDY" => {
+			let instance = ident.get(tags::STUDY_INSTANCE_UID)
+				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected Study Instance UID in identifier");e})?
+				.to_str().map_err(to_dicom_err)?.to_string();
+			db::lookup_uid("studies", instance).await?
+		},
+		"SERIES" => {
+			let instance = ident.get(tags::SERIES_INSTANCE_UID)
+				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected Series Instance UID in identifier");e})?
+				.to_str().map_err(to_dicom_err)?.to_string();
+			db::lookup_uid("series", instance).await?
+		},
+		"IMAGE" => {
+			let instance = ident.get(tags::SOP_INSTANCE_UID)
+				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected SOP Instance UID in identifier");e})?
+				.to_str().map_err(to_dicom_err)?.to_string();
+			db::lookup_uid("instances", instance).await?
+		},
+		_ => unreachable!()
+	};
+	if let Some(entry) = entry {
+		entry.get_files().await
+	} else {Ok(vec![])}
+
 }

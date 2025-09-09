@@ -148,7 +148,7 @@ impl Dispatcher
 		let cmd = crate::dimse::message::Command {
 			id: obj.take(tags::COMMAND_FIELD).expect("Could not get command field").uint16().unwrap(),
 			status: obj.take(tags::STATUS).map(|e|e.to_int()).transpose().expect("Could not get command status"),
-			pc_id, obj
+			pc_id, obj,	succeeded: 0, warn: 0, fail: 0,	to_do: 0,
 		};
 		let msgid=cmd.msgid().ok()
 			.and_then(|e|e.to_str().ok())

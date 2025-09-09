@@ -15,6 +15,7 @@ use dicom::object::mem::InMemElement;
 use dicom::transfer_syntax::TransferSyntaxRegistry;
 use tokio::task::JoinHandle;
 use crate::db::File;
+use crate::dimse::io;
 use crate::dimse::payload::{SendAttachment, SendPayload};
 use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
 use crate::tools::{lookup_instance_file, Context, Result};
@@ -44,6 +45,10 @@ pub struct Command{
 	pub status:Option<u16>,
 	pub pc_id:u8,
 	pub obj:InMemDicomObject,
+	pub succeeded:u16,
+	pub warn:u16,
+	pub fail:u16,
+	pub to_do:u16,
 }
 
 // https://dicom.nema.org/medical/dicom/current/output/chtml/part07/chapter_C.html
@@ -75,11 +80,19 @@ impl Command {
 	pub fn instance_uid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::AFFECTED_SOP_CLASS_UID) }
 	pub fn msgid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::MESSAGE_ID) }
 	pub fn rspid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::MESSAGE_ID_BEING_RESPONDED_TO) }
-	pub fn send_completed_subop<T>(&self, task: &mut MessageTask, status: impl Into<Status<T>>, succeed: u16, warn: u16, err: u16) -> Result<()> {
+	pub fn send_completed_subop<T>(&mut self, task: &mut MessageTask, status: impl Into<Status<T>>) -> Result<()> {
+		self.to_do -=1;
+		let status = status.into();
+		match status {
+			Ok(StatusOk::Success(_)) | Ok(StatusOk::Pending(_)) => self.succeeded+=1,
+			Ok(StatusOk::Warning(_)) => self.warn+=1,
+			Err(_) => self.fail+=1
+		}
 		let attr = [
-			DataElement::new(tags::NUMBER_OF_COMPLETED_SUBOPERATIONS, VR::US, dicom_value!(succeed)),
-			DataElement::new(tags::NUMBER_OF_FAILED_SUBOPERATIONS, VR::US, dicom_value!(err)),
-			DataElement::new(tags::NUMBER_OF_WARNING_SUBOPERATIONS, VR::US, dicom_value!(warn)),
+			DataElement::new(tags::NUMBER_OF_COMPLETED_SUBOPERATIONS, VR::US, dicom_value!(self.succeeded)),
+			DataElement::new(tags::NUMBER_OF_FAILED_SUBOPERATIONS, VR::US, dicom_value!(self.fail)),
+			DataElement::new(tags::NUMBER_OF_WARNING_SUBOPERATIONS, VR::US, dicom_value!(self.warn)),
+			DataElement::new(tags::NUMBER_OF_REMAINING_SUBOPERATIONS, VR::US, dicom_value!(self.to_do)),
 		];
 		let resp = self.make_response(task, status, attr, vec![]).map_err(to_dicom_err)?;
 		task.sink.send(resp).map_err(|e| e.into())
@@ -149,7 +162,7 @@ impl MessageTask
 		assert_eq!(data[0].value_type,PDataValueType::Command);
 		let pc_id = data[0].presentation_context_id;
 		let mut task = MessageTask{id, pc_id, selected_ts,source:Some(source),sink};
-		let cmd = task.read_command(data).await?;
+		let mut cmd = task.read_command(data).await?;
 
 		let id= cmd.msgid().ok().map(InMemElement::to_int).transpose().map_err(to_dicom_err)?;
 		id.map(|id|task.set_id(id));
@@ -164,24 +177,23 @@ impl MessageTask
 			C_GET_RQ => {
 				// https://dicom.nema.org/medical/dicom/current/output/chtml/part07/chapter_9.html#sect_9.1.3.2
 				// https://dicom.nema.org/medical/dicom/current/output/chtml/part04/chapter_Z.html
-				let identity = task.fetch_obj(vec![],None).await?;
-				let instance = identity.element(tags::SOP_INSTANCE_UID)
-					.map_err(to_dicom_err)?.to_str().map_err(to_dicom_err)?;
-				debug!("Got GET request for instance {instance}");
-				if let Some(file) = lookup_instance_file(instance.to_string()).await?
-				{
-					if file.get_path().exists(){
-						task.c_store(file, vec![]).await?;
-						todo!()
-					} else {
-						error!("Entry for {instance} found, but file {} does not exist", file.get_path().display());
-						cmd.send_completed_subop::<()>(&mut task,StatusWarning::Warning,0,1,0)
-
-					}
+				let files = io::lookup(task.fetch_obj(vec![],None).await?).await?;
+				debug!("Got GET request for {} instance(s)", files.len());
+				if files.is_empty() {
+					cmd.send_completed_subop::<()>(&mut task, StatusFailure::NoSuchSOPInstance)?;
 				} else {
-					warn!("No entry found for {instance}");
-					cmd.send_completed_subop::<()>(&mut task, StatusFailure::NoSuchSOPInstance,0,0,1)
+					let to_do = files.len();
+					for file in files {
+						if file.get_path().exists(){
+							task.c_store(file, vec![]).await?;
+							cmd.send_completed_subop::<()>(&mut task, StatusOk::Success(()))?;
+						} else {
+							error!("File {} does not exist", file.get_path().display());
+							cmd.send_completed_subop::<()>(&mut task,StatusFailure::ProcessingFailure)?;
+						};
+					}
 				}
+				Ok(())
 			}
 
 			_ => {todo!()}
@@ -224,7 +236,7 @@ impl MessageTask
 		let cmd = Command {
 			id: obj.take(tags::COMMAND_FIELD).expect("Could not get command field").uint16().unwrap(),
 			status: obj.take(tags::STATUS).map(|e|e.to_int()).transpose().expect("Could not get command status"),
-			pc_id, obj
+			pc_id, obj,	succeeded: 0, warn: 0, fail: 0,	to_do: 0,
 		};
 		let sop_class=cmd.sop_class().ok()
 			.and_then(|e|e.to_str().ok())
