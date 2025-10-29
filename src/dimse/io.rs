@@ -1,6 +1,6 @@
 use crate::{db, tools};
 use crate::tools::Error::DicomError;
-use crate::tools::Result;
+use crate::tools::{entries_for_record, Result};
 use dicom::encoding::TransferSyntaxIndex;
 use dicom::object::{FileMetaTableBuilder, InMemDicomObject};
 use dicom::transfer_syntax::TransferSyntaxRegistry;
@@ -9,6 +9,7 @@ use std::io::{Cursor, Read, Write};
 use dicom::object::mem::InMemElement;
 use dicom_dictionary_std::tags;
 use tracing::error;
+use crate::db::Entry::{Instance, Series, Study};
 use crate::db::RegisterResult;
 use crate::dimse::definitions::{Status, StatusFailure};
 use crate::dimse::definitions::StatusOk::Success;
@@ -79,8 +80,23 @@ pub async fn store_db(obj:InMemDicomObject,ts:impl Into<String>) -> Status<()>
 	}
 }
 
+/// Look up instances based on given identifier object
+///
+/// Extracts QUERY_RETRIEVE_LEVEL from the identifier to decide which UID field to extract to collect all instance Entries
+/// - "PATIENT" -> not implemented yet
+/// - "STUDY" -> STUDY_INSTANCE_UID
+/// - "SERIES" -> SERIES_INSTANCE_UID
+/// - "IMAGE" -> SOP_INSTANCE_UID
+///
+/// # returns
+/// * list of found instance Entries
+/// * empty list if nothing was found
+/// * StatusFailure::InvalidArgument if QUERY_RETRIEVE_LEVEL is not one of the above or if expected UID fields from above cannot be extracted from identifier.
+
 //https://dicom.nema.org/medical/dicom/current/output/chtml/part04/sect_C.2.2.2.html
-pub async fn lookup(ident: impl IntoIterator<Item = InMemElement>) -> Result<Vec<db::File>>
+//https://dicom.nema.org/dicom/2013/output/chtml/part04/sect_C.4.html#sect_C.4.3.1.3.1
+//https://dicom.nema.org/dicom/2013/Output/chtml/part04/sect_c.3.html @todo support "Composite Object Instance"
+pub async fn lookup(ident: impl IntoIterator<Item = InMemElement>) -> Result<Vec<db::Entry>>
 {
 	let ident = InMemDicomObject::from_element_iter(ident);
 	let level = ident.get(tags::QUERY_RETRIEVE_LEVEL)
@@ -107,10 +123,18 @@ pub async fn lookup(ident: impl IntoIterator<Item = InMemElement>) -> Result<Vec
 				.to_str().map_err(to_dicom_err)?.to_string();
 			db::lookup_uid("instances", instance).await?
 		},
-		_ => unreachable!()
+		_ => {
+			error!("Invalid QueryRetrieveLevel {level}");
+			Err(StatusFailure::InvalidArgument)?
+		}
 	};
 	if let Some(entry) = entry {
-		entry.get_files().await
+		match &entry {
+			Instance(_) => Ok(vec![entry]),
+			Series((id,_)) | Study((id,_)) =>{
+				entries_for_record(id,"instances").await
+			}
+		}
 	} else {Ok(vec![])}
 
 }
