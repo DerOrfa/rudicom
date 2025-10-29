@@ -80,7 +80,7 @@ impl Command {
 	pub fn instance_uid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::AFFECTED_SOP_CLASS_UID) }
 	pub fn msgid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::MESSAGE_ID) }
 	pub fn rspid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::MESSAGE_ID_BEING_RESPONDED_TO) }
-	pub fn send_completed_subop<T>(&mut self, task: &mut MessageTask, status: impl Into<Status<T>>) -> Result<()> {
+	fn send_completed_subop<T>(&mut self, task: &mut MessageTask, status: impl Into<Status<T>>) -> Result<()> {
 		self.to_do -=1;
 		let status = status.into();
 		match status {
@@ -97,7 +97,7 @@ impl Command {
 		let resp = self.make_response(task, status, attr, vec![]).map_err(to_dicom_err)?;
 		task.sink.send(resp).map_err(|e| e.into())
 	}
-	pub fn make_response<T>(&self, task: &mut MessageTask, status: impl Into<Status<T>>, attr: impl IntoIterator<Item=InMemElement>, identifier: impl IntoIterator<Item=InMemElement>)
+	fn make_response<T>(&self, task: &mut MessageTask, status: impl Into<Status<T>>, attr: impl IntoIterator<Item=InMemElement>, identifier: impl IntoIterator<Item=InMemElement>)
 		-> std::result::Result<SendPayload, dicom::object::WriteError> {
 		let identifier: Vec<_> = identifier.into_iter().collect();
 		let identifier = if identifier.is_empty() {

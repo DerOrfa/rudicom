@@ -1,7 +1,6 @@
 use dicom::object::mem::InMemElement;
 use dicom::object::InMemDicomObject;
 use dicom_ul::pdu::PDataValue;
-use std::path::PathBuf;
 use crate::db;
 
 /// Attachment for Payload can be a file reference, a DICOM object or empty
