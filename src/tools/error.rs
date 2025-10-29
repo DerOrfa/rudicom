@@ -8,8 +8,6 @@ use crate::dimse;
 pub enum DicomError
 {
 	#[error("dicom error {0}")]
-	DicomTypeError(#[from] dicom::core::value::ConvertValueError),
-	#[error("dicom error {0}")]
 	DicomAccessError(#[from] dicom::object::AccessError),
 	#[error("dicom io error {0}")]
 	DicomReadError(#[from] dicom::object::ReadError),
@@ -30,7 +28,9 @@ pub enum DicomError
 	#[error(transparent)]
 	AccessError(dicom::object::AccessError),
 	#[error(transparent)]
-	ConvertValueError(dicom::core::value::ConvertValueError),
+	ConvertValueError(#[from] dicom::core::value::ConvertValueError),
+	#[error(transparent)]
+	CastValueError(#[from] dicom::core::value::CastValueError),
 }
 
 #[derive(Debug)]

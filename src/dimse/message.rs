@@ -175,6 +175,7 @@ impl MessageTask
 				cmd.respond(stored,&mut task,vec![])
 			}
 			C_GET_RQ => {
+				// https://dicom.nema.org/medical/dicom/current/output/chtml/part04/sect_C.4.3.html
 				// https://dicom.nema.org/medical/dicom/current/output/chtml/part07/chapter_9.html#sect_9.1.3.2
 				// https://dicom.nema.org/medical/dicom/current/output/chtml/part04/chapter_Z.html
 				let ident = task.fetch_obj(vec![], None).await?;

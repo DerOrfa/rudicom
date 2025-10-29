@@ -103,38 +103,41 @@ pub async fn lookup(ident: impl IntoIterator<Item = InMemElement>) -> Result<Vec
 		.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Query Retrieve Level is missing in identifier");e})?
 		.to_str().map_err(to_dicom_err)?
 		.to_uppercase();
-	let entry = match level.as_str() {
+	let (table,uids) = match level.as_str() {
 		"PATIENT" => todo!(),
 		"STUDY" => {
-			let instance = ident.get(tags::STUDY_INSTANCE_UID)
-				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected Study Instance UID in identifier");e})?
-				.to_str().map_err(to_dicom_err)?.to_string();
-			db::lookup_uid("studies", instance).await?
+			let instances = ident.get(tags::STUDY_INSTANCE_UID)
+				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected Study Instance UID in identifier");e})?;
+			("studies", instances)
 		},
 		"SERIES" => {
-			let instance = ident.get(tags::SERIES_INSTANCE_UID)
-				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected Series Instance UID in identifier");e})?
-				.to_str().map_err(to_dicom_err)?.to_string();
-			db::lookup_uid("series", instance).await?
+			let instances = ident.get(tags::SERIES_INSTANCE_UID)
+				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected Series Instance UID in identifier");e})?;
+			("series", instances)
 		},
 		"IMAGE" => {
-			let instance = ident.get(tags::SOP_INSTANCE_UID)
-				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected SOP Instance UID in identifier");e})?
-				.to_str().map_err(to_dicom_err)?.to_string();
-			db::lookup_uid("instances", instance).await?
+			let instances = ident.get(tags::SOP_INSTANCE_UID)
+				.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Expected SOP Instance UID in identifier");e})?;
+			("instances", instances)
 		},
 		_ => {
 			error!("Invalid QueryRetrieveLevel {level}");
 			Err(StatusFailure::InvalidArgument)?
 		}
 	};
-	if let Some(entry) = entry {
-		match &entry {
-			Instance(_) => Ok(vec![entry]),
-			Series((id,_)) | Study((id,_)) =>{
-				entries_for_record(id,"instances").await
+
+	let mut ret = vec![];
+	let uids:Vec<_> = uids.to_multi_str().map_err(to_dicom_err)?.iter().cloned().collect();
+	for id in uids {
+		if let Some(entry) = db::lookup_uid(table, id).await? {
+			match entry {
+				Instance(_) => ret.push(entry),
+				Series((id, _)) | Study((id, _)) => {
+					let mut entries = entries_for_record(&id, "instances").await?;
+					ret.append(&mut entries);
+				}
 			}
 		}
-	} else {Ok(vec![])}
-
+	}
+	Ok(ret)
 }
