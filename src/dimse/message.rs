@@ -18,7 +18,7 @@ use crate::db::File;
 use crate::dimse::io;
 use crate::dimse::payload::{SendAttachment, SendPayload};
 use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
-use crate::tools::{lookup_instance_file, Context, Result};
+use crate::tools::{Context, Result};
 use super::io::{store_db};
 use super::definitions::*;
 
@@ -177,21 +177,35 @@ impl MessageTask
 			C_GET_RQ => {
 				// https://dicom.nema.org/medical/dicom/current/output/chtml/part07/chapter_9.html#sect_9.1.3.2
 				// https://dicom.nema.org/medical/dicom/current/output/chtml/part04/chapter_Z.html
-				let files = io::lookup(task.fetch_obj(vec![],None).await?).await?;
-				debug!("Got GET request for {} instance(s)", files.len());
-				if files.is_empty() {
+				let ident = task.fetch_obj(vec![], None).await?;
+				let instances = io::lookup(ident).await?;
+				debug!("Got GET request for {} instance(s)", instances.len());
+				let mut failed = vec![];
+				if instances.is_empty() {
 					cmd.send_completed_subop::<()>(&mut task, StatusFailure::NoSuchSOPInstance)?;
 				} else {
-					let to_do = files.len();
-					for file in files {
-						if file.get_path().exists(){
-							task.c_store(file, vec![]).await?;
-							cmd.send_completed_subop::<()>(&mut task, StatusOk::Success(()))?;
+					cmd.to_do = instances.len() as u16;
+					for instance in instances {
+						let file = instance.get_file()?;
+						let res = if file.get_path().exists(){
+							task.c_store(file, vec![]).await.map_err(|e|e.to_string())
 						} else {
-							error!("File {} does not exist", file.get_path().display());
-							cmd.send_completed_subop::<()>(&mut task,StatusFailure::ProcessingFailure)?;
+							Err(format!("File {} does not exist for instance {}", file.get_path().display(), instance.id().str_key()))
 						};
+						match res {
+							Ok(_) => cmd.send_completed_subop::<()>(&mut task,StatusOk::Success(()))?,
+							Err(e) => {
+								cmd.send_completed_subop::<()>(&mut task,StatusFailure::ProcessingFailure)?;
+								failed.push(instance);
+								error!(e);
+							}
+						}
 					}
+				}
+				if !failed.is_empty() {
+					cmd.respond::<Vec<InMemElement>>(StatusWarning::Warning.into(),&mut task,vec![])?;
+				} else {
+					cmd.respond(StatusOk::Success(vec![]).into(),&mut task,vec![])?;
 				}
 				Ok(())
 			}
