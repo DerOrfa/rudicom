@@ -7,8 +7,9 @@ use dicom::encoding::{TransferSyntaxIndex};
 use dicom::object::{AccessError, InMemDicomObject, OpenFileOptions};
 use dicom::transfer_syntax::entries::IMPLICIT_VR_LITTLE_ENDIAN;
 use tracing::{debug, error, warn};
-use dicom::core::{DataElement, Tag, VR};
+use dicom::core::{DataElement, PrimitiveValue, Tag, VR};
 use dicom::core::dictionary::UidDictionary;
+use dicom::core::smallvec::SmallVec;
 use dicom::dicom_value;
 use dicom::dictionary_std::tags;
 use dicom::object::mem::InMemElement;
@@ -77,7 +78,7 @@ struct Reply{
 
 impl Command {
 	pub fn sop_class(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::AFFECTED_SOP_CLASS_UID) }
-	pub fn instance_uid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::AFFECTED_SOP_CLASS_UID) }
+	pub fn instance_uid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::AFFECTED_SOP_INSTANCE_UID) }
 	pub fn msgid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::MESSAGE_ID) }
 	pub fn rspid(&self) -> std::result::Result<&InMemElement, AccessError> { self.obj.element(tags::MESSAGE_ID_BEING_RESPONDED_TO) }
 	fn send_completed_subop<T>(&mut self, task: &mut MessageTask, status: impl Into<Status<T>>) -> Result<()> {
@@ -197,14 +198,18 @@ impl MessageTask
 							Ok(_) => cmd.send_completed_subop::<()>(&mut task,StatusOk::Success(()))?,
 							Err(e) => {
 								cmd.send_completed_subop::<()>(&mut task,StatusFailure::ProcessingFailure)?;
-								failed.push(instance);
+								failed.push(instance.id().str_key());
 								error!(e);
 							}
 						}
 					}
 				}
 				if !failed.is_empty() {
-					cmd.respond::<Vec<InMemElement>>(StatusWarning::Warning.into(),&mut task,vec![])?;
+					// https://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.4.html
+					let failed = SmallVec::<[_;2]>::from_vec(failed);
+					let failed = PrimitiveValue::Strs(failed);
+					let failed = InMemElement::new(tags::FAILED_SOP_INSTANCE_UID_LIST, VR::UI, failed);
+					cmd.respond::<Vec<InMemElement>>(StatusWarning::Warning.into(),&mut task,vec![failed])?;
 				} else {
 					cmd.respond(StatusOk::Success(vec![]).into(),&mut task,vec![])?;
 				}
