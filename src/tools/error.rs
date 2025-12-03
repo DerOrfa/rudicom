@@ -7,26 +7,24 @@ use crate::dimse;
 #[derive(Error,Debug)]
 pub enum DicomError
 {
-	#[error("dicom error {0}")]
-	DicomAccessError(#[from] dicom::object::AccessError),
-	#[error("dicom io error {0}")]
-	DicomReadError(#[from] dicom::object::ReadError),
-	#[error("dicom io error {0}")]
-	DicomWriteError(#[from] dicom::object::WriteError),
-	#[error("dicom metadata error {0}")]
-	DicomMetaError(#[from] dicom::object::WithMetaError),
-	#[error("error decoding pixel data ({0})")]
-	DicomPixelError(#[from] dicom::pixeldata::Error),
-	#[error("dicom server error {0}")]
-	DicomSCPError(#[from] dicom_ul::association::server::Error),
-	#[error("dicom server error {0}")]
-	DicomSCUError(#[from] dicom_ul::association::client::Error),
-	#[error("There is no presentation context with id {0}")]
-	DicomInvalidPC(u8),
-	#[error("There is no transfer syntax {0}")]
-	DicomTransferSyntaxNotFound(String),
 	#[error(transparent)]
-	AccessError(dicom::object::AccessError),
+	AccessError(#[from] dicom::object::AccessError),
+	#[error(transparent)]
+	ReadError(#[from] dicom::object::ReadError),
+	#[error(transparent)]
+	WriteError(#[from] dicom::object::WriteError),
+	#[error(transparent)]
+	MetaError(#[from] dicom::object::WithMetaError),
+	#[error("error decoding pixel data ({0})")]
+	PixelError(#[from] dicom::pixeldata::Error),
+	#[error("dicom server error {0}")]
+	SCPError(#[from] dicom_ul::association::server::Error),
+	#[error("dicom client error {0}")]
+	SCUError(#[from] dicom_ul::association::client::Error),
+	#[error("There is no presentation context with id {0}")]
+	InvalidPC(u8),
+	#[error("There is no transfer syntax {0}")]
+	TransferSyntaxNotFound(String),
 	#[error(transparent)]
 	ConvertValueError(#[from] dicom::core::value::ConvertValueError),
 	#[error(transparent)]

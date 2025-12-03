@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 use crate::db::File;
 use crate::dimse::io;
 use crate::dimse::payload::{SendAttachment, SendPayload};
-use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
+use crate::tools::error::DicomError::TransferSyntaxNotFound;
 use crate::tools::{Context, Result};
 use super::io::{store_db};
 use super::definitions::*;
@@ -232,7 +232,7 @@ impl MessageTask
 
 		buffer.set_position(0);
 		if last {
-			let ts = TransferSyntaxRegistry.get(ts.as_str()).ok_or(DicomTransferSyntaxNotFound(ts))?;
+			let ts = TransferSyntaxRegistry.get(ts.as_str()).ok_or(TransferSyntaxNotFound(ts))?;
 			InMemDicomObject::read_dataset_with_ts(buffer,ts).map_err(to_dicom_err)
 		} else {
 			debug!("Creating object from multiple pdu");

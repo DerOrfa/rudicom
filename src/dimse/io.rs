@@ -14,7 +14,7 @@ use crate::db::RegisterResult;
 use crate::dimse::definitions::{Status, StatusFailure};
 use crate::dimse::definitions::StatusOk::Success;
 use crate::dimse::message::to_dicom_err;
-use crate::tools::error::DicomError::DicomTransferSyntaxNotFound;
+use crate::tools::error::DicomError::TransferSyntaxNotFound;
 
 pub struct PDataReader<'a>{
 	source: &'a mut tokio::sync::mpsc::UnboundedReceiver<PDataValue>,
@@ -50,7 +50,7 @@ pub async fn read_pipe(mut source:tokio::sync::mpsc::UnboundedReceiver<PDataValu
 					   -> Result<(InMemDicomObject, tokio::sync::mpsc::UnboundedReceiver<PDataValue>)>
 {
 	tokio::task::spawn_blocking(move || {
-		let ts = TransferSyntaxRegistry.get(ts.as_str()).ok_or(DicomTransferSyntaxNotFound(ts))?;
+		let ts = TransferSyntaxRegistry.get(ts.as_str()).ok_or(TransferSyntaxNotFound(ts))?;
 
 		let buffer = prelude.chain(PDataReader::new(&mut source));
 		InMemDicomObject::read_dataset_with_ts(buffer, &ts)

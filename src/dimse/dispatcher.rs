@@ -41,7 +41,7 @@ impl Dispatcher
 	pub async fn lookup_ts(&self, presentation_context_id: u8) -> Result<String> {
 		self.inner.lock().await.presentation_contexts().iter()
 			.find(|pc| pc.id == presentation_context_id)
-			.ok_or(DicomError::DicomInvalidPC(presentation_context_id))
+			.ok_or(DicomError::InvalidPC(presentation_context_id))
 			.map(|pc|
 				pc.transfer_syntax.trim_end_matches('\0').to_string()
 			).map_err(|e|e.into())
