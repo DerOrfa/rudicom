@@ -26,10 +26,11 @@ pub trait IntoDbValue{
 
 impl IntoDbValue for InMemDicomObject{
 	fn into_db_value(self) -> sql::Value {
+		let default_dict = StandardDataDictionary::default();
 		let mut obj = BTreeMap::new();
 		for e in self{
 			let tag = e.header().tag;
-			let name = match StandardDataDictionary::default().by_tag(tag) {
+			let name = match default_dict.by_tag(tag) {
 				None => tag.to_string(),
 				Some(found) => found.alias.to_string()
 			};

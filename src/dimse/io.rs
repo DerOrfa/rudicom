@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
 use crate::{db, tools};
 use crate::tools::Error::DicomError;
 use crate::tools::{entries_for_record, Result};
@@ -6,8 +8,10 @@ use dicom::object::{FileMetaTableBuilder, InMemDicomObject};
 use dicom::transfer_syntax::TransferSyntaxRegistry;
 use dicom_ul::pdu::{PDataValue, PDataValueType};
 use std::io::{Cursor, Read, Write};
+use dicom::core::DataDictionary;
+use dicom::core::header::Header;
 use dicom::object::mem::InMemElement;
-use dicom_dictionary_std::tags;
+use dicom_dictionary_std::{tags, StandardDataDictionary};
 use tracing::error;
 use crate::db::Entry::{Instance, Series, Study};
 use crate::db::RegisterResult;
@@ -140,4 +144,47 @@ pub async fn lookup(ident: impl IntoIterator<Item = InMemElement>) -> Result<Vec
 		}
 	}
 	Ok(ret)
+}
+
+pub async fn find(ident: impl IntoIterator<Item = InMemElement>) -> Result<Vec<db::Entry>>
+{
+	// https://dicom.nema.org/medical/dicom/current/output/chtml/part04/sect_C.2.2.2.html
+	// https://dicom.nema.org/medical/dicom/current/output/chtml/part07/chapter_9.html#sect_9.1.2.1
+	let mut ident = InMemDicomObject::from_element_iter(ident);
+	// https://dicom.nema.org/medical/dicom/current/output/chtml/part04/sect_C.4.html
+	let level = ident.take(tags::QUERY_RETRIEVE_LEVEL)
+		.ok_or(StatusFailure::InvalidArgument).map_err(|e|{error!("Query Retrieve Level is missing in identifier");e})?
+		.to_str().map_err(to_dicom_err)?
+		.to_uppercase();
+	let tz_offset = ident.take(tags::TIMEZONE_OFFSET_FROM_UTC)
+		.map(|e|e.to_str().map(Cow::into_owned))
+		.transpose().map_err(to_dicom_err)?;
+	let known_db_tags = match level.as_str() {
+		"PATIENT" => Default::default(),
+		"STUDY" => crate::config::get().study_tags.clone(),
+		"SERIES" => crate::config::get().series_tags.clone(),
+		"IMAGE" => crate::config::get().instance_tags.clone(),
+		_ => {
+			error!("Invalid QueryRetrieveLevel {level}");
+			Err(StatusFailure::InvalidArgument)?
+		}
+	};
+	let default_dict = StandardDataDictionary::default();
+	let mut search_map:HashMap<_,_> = Default::default();
+	for (k,v) in known_db_tags {
+		for sel in v{
+			search_map.insert(sel.0.last_tag(),k.clone());
+		}
+	}
+	let mut found = Default::default();
+	for search in ident
+	{
+		if let Some(s) = search_map.get(&search.tag()){
+			todo!()
+		} else {
+			error!("Cannot search for {:?}:{:?}", default_dict.by_tag(search.tag()),search.to_raw_str());
+			return Err(StatusFailure::InvalidArgument.into())
+		}
+	}
+	Ok(found)
 }
