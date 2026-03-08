@@ -81,7 +81,7 @@ pub async fn entries_for_record(id:&RecordId,table:&str) -> Result<Vec<db::Entry
 	}
 }
 
-pub fn extract_from_dicom(obj:&DefaultDicomObject,tag:dicom::core::Tag) -> Result<std::borrow::Cow<str>>
+pub fn extract_from_dicom(obj:&'_ DefaultDicomObject,tag:dicom::core::Tag) -> Result<std::borrow::Cow<'_, str>>
 {
 	obj
 		.element(tag).map_err(|e|DicomError(e.into()))
