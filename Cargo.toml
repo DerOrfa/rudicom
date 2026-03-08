@@ -44,8 +44,9 @@ mime = "0.3.17"
 rand = "0.9.1"
 
 [profile.release]
-strip = "symbols"
-#lto = "fat"
+strip = true
+lto = true
+#opt-level = "z"
 #debug = 1
 
 [target.'cfg(windows)'.dependencies]
