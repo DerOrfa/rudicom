@@ -1,14 +1,15 @@
-use crate::db;
 use crate::db::RegisterResult;
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
 use crate::storage::async_store;
 use crate::tools::remove::remove;
 use crate::tools::store::store;
+use crate::tools::tar::TarStream;
 use crate::tools::verify::verify_entry;
 use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
 use crate::tools::{Context, Error::DicomError};
-use axum::body::Bytes;
+use crate::db;
+use axum::body::{Body, Bytes};
 use axum::extract::rejection::BytesRejection;
 use axum::extract::Path;
 use axum::http::{header, HeaderMap, StatusCode};
@@ -20,6 +21,7 @@ use axum_extra::extract::OptionalQuery;
 use dicom::dictionary_std::tags;
 use dicom::pixeldata::image::ImageFormat;
 use dicom::pixeldata::PixelDecoder;
+use mime::IMAGE_PNG;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Cursor;
@@ -32,6 +34,7 @@ pub(super) fn router() -> axum::Router
         .route("/instances",post(store_instance))
         .route("/{table}/{id}",delete(del_entry))
 		.route("/{table}/{id}/verify",get(verify))
+		.route("/{table}/{id}/tar",get(get_tar))
 		.route("/{table}/{id}/filepath",get(filepath))
         .route("/instances/{id}/file",get(get_instance_file))
         .route("/instances/{id}/png",get(get_instance_png));
@@ -168,6 +171,23 @@ pub struct ImageSize {
 	height: u32,
 }
 
+async fn get_tar(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
+{
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+
+	let filename_for_header=format!("{}.tar",entry.name());
+
+	let str = TarStream::new(entry);
+	
+	Ok((
+		StatusCode::OK,
+		[
+			(header::CONTENT_TYPE, "application/tar"),
+			(header::CONTENT_DISPOSITION, filename_for_header.as_str())
+		],
+		Body::from_stream(str)
+	).into_response())
+}
 async fn get_instance_png(headers: HeaderMap,Path(id):Path<String>, OptionalQuery(size): OptionalQuery<ImageSize>) -> Result<Response, HttpError>
 {
 	let ctx = format!("decoding pixel data of {id}");
@@ -188,7 +208,7 @@ async fn get_instance_png(headers: HeaderMap,Path(id):Path<String>, OptionalQuer
 		image.write_to(&mut buffer, ImageFormat::Png).expect("Unexpectedly failed to write png data to memory buffer");
 
 		Ok((
-			[(header::CONTENT_TYPE, "image/png")],
+			[(header::CONTENT_TYPE, IMAGE_PNG.to_string())],
 			buffer.into_inner()
 		).into_response())
 	}
