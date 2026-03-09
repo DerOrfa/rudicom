@@ -25,7 +25,10 @@ use mime::IMAGE_PNG;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Cursor;
-use async_compression::tokio::write::{GzipEncoder,BzEncoder,XzEncoder};
+use std::num::NonZeroU32;
+use std::path::PathBuf;
+use async_compression::Level;
+use async_compression::tokio::write::{GzipEncoder, BzEncoder, XzEncoder};
 
 pub(super) fn router() -> axum::Router
 {
@@ -178,8 +181,10 @@ async fn get_tar(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result
 	let entry = lookup_or(&path).await.into_http_error(&headers)?;
 	get_tar_impl(entry,"".to_string()).await.into_http_error(&headers)
 }
-async fn get_tar_comp(headers: HeaderMap,Path(path):Path<(String, String)>, suffix:String) -> Result<Response, HttpError>
+async fn get_tar_comp(headers: HeaderMap,Path(path):Path<(String, String, String)>) -> Result<Response, HttpError>
 {
+	let suffix = path.2;
+	let path = (path.0,path.1);
 	let entry = lookup_or(&path).await.into_http_error(&headers)?;
 	get_tar_impl(entry, suffix).await.into_http_error(&headers)
 }
@@ -206,7 +211,7 @@ async fn get_tar_impl(entry: Entry,suffix:String) -> Result<Response, InnerHttpE
 			make_tar(entry,BzEncoder::new(tx))
 		}),
 		"xz" => TarStream::new(entry,|entry, tx|{
-			make_tar(entry,XzEncoder::new(tx))
+			make_tar(entry,XzEncoder::parallel(tx, Level::Default,NonZeroU32::new(5).unwrap()))
 		}),
 		_ => return Err(InnerHttpError::BadRequest {message:"invalid suffix".into()})
 	};

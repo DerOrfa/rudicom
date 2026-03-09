@@ -67,14 +67,29 @@ impl Stream for TarStream
 pub(crate) async fn make_tar<W:AsyncWrite + Unpin + Send + Sync>(entry: Entry, sink:W) -> Result<W>
 {
 	let mut sink = Builder::new(sink);
-	let files = entry.get_files().await?;
+	let mut files = entry.get_files().await?.into_iter();
 	let mut md5sum = std::io::Cursor::new(vec![]);
-	for file in files
+
+	let mut tasks=tokio::task::JoinSet::new();
+
+	loop
 	{
-		let path = gen_filepath(&file.read().await?)?;
-		writeln!(&mut md5sum, "{} {}", file.get_md5(), path)?;
-		let mut source = tokio::fs::File::open(file.get_path()).await?;
-		sink.append_file(path,&mut source).await?;
+		// make sure loader is filled up
+		while tasks.len() < crate::config::get().limits.max_files as usize
+		{
+			if let Some(nextfile) = files.next() {
+				tasks.spawn(async move {(nextfile.read().await,nextfile)});
+			} else {break} //as long as there are files
+		}
+
+		// extract next loaded (if there is some)
+		if let Some((r,file)) = tasks.join_next().await.transpose()?
+		{
+			let path = gen_filepath(&r?)?;
+			writeln!(&mut md5sum, "{} {}", file.get_md5(), path)?;
+			let mut source = tokio::fs::File::open(file.get_path()).await?;
+			sink.append_file(path,&mut source).await?;
+		} else { break }
 	}
 	let mut hd=Header::new_gnu();
 	hd.set_mtime(std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs());
