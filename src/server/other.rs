@@ -133,7 +133,7 @@ async fn get_instance_file(headers: HeaderMap,Path(id):Path<String>) -> Result<R
 {
 	if let Some(file)=lookup_instance_file(id.clone()).await.into_http_error(&headers)?
 	{
-		let filename_for_header=file.get_path().file_name()
+		let filename=file.get_path().file_name()
 			.map(|o|o.to_string_lossy().to_string())
 			.unwrap_or(format!("Mr.{}.ima",id));
 		let file= tokio::fs::File::open(file.get_path()).await.into_http_error(&headers)?;
@@ -141,7 +141,7 @@ async fn get_instance_file(headers: HeaderMap,Path(id):Path<String>) -> Result<R
 			StatusCode::OK,
 			[
 				(header::CONTENT_TYPE, "application/dicom"),
-				(header::CONTENT_DISPOSITION, filename_for_header.as_str())
+				(header::CONTENT_DISPOSITION, format!(r#"attachment; filename="{filename}""#).as_str())
 			],
 			AsyncReadBody::new(file)
 		).into_response())
@@ -185,11 +185,17 @@ async fn get_tar_comp(headers: HeaderMap,Path(path):Path<(String, String)>, suff
 }
 async fn get_tar_impl(entry: Entry,suffix:String) -> Result<Response, InnerHttpError>
 {
-	let filename_for_header= if suffix.is_empty(){
-		format!("{}.tar",entry.name())
-	} else {
-		format!("{}.tar.{suffix}",entry.name())
-	};
+
+	let filename = PathBuf::try_from(entry.name()).ok()
+		.and_then(|p|p.file_name().map(|s|s.to_string_lossy().to_string()));
+
+	let disp= if let Some(filename) = filename {
+		if suffix.is_empty(){
+			format!(r#"attachment; filename="{filename}.tar""#)
+		} else {
+			format!(r#"attachment; filename="{filename}.tar.{suffix}""#)
+		}
+	} else { "attachment".into() };
 
 	let str = match suffix.as_str(){
 		"" => TarStream::new(entry,make_tar),
@@ -209,7 +215,7 @@ async fn get_tar_impl(entry: Entry,suffix:String) -> Result<Response, InnerHttpE
 		StatusCode::OK,
 		[
 			(header::CONTENT_TYPE, "application/tar"),
-			(header::CONTENT_DISPOSITION, filename_for_header.as_str())
+			(header::CONTENT_DISPOSITION, disp.as_str())
 		],
 		Body::from_stream(str)
 	).into_response())
