@@ -44,13 +44,14 @@ impl Stream for TarStream
 	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 		let this = self.get_mut();
 
+		if !this.job.is_finished(){
 		match this.job.poll_unpin(cx) {
 			// join error (task panicked or was canceled)
 			Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e.into()))),
 			// task returned an error
 			Poll::Ready(Ok(Err(e))) => return Poll::Ready(Some(Err(e))),
 			_ => {}
-		}
+		}}
 
 		// task is still running extract data
 		Pin::new(&mut this.inner).poll_next(cx).map_err(|e|e.into())
