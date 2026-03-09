@@ -3,39 +3,37 @@ use crate::db::Entry;
 use crate::dcm::gen_filepath;
 use async_tar::{Builder, Header};
 use axum::body::Bytes;
-use futures::{FutureExt, SinkExt, Stream, StreamExt};
-use std::io::{ErrorKind, Write};
+use futures::{FutureExt, Stream};
+use std::future::Future;
+use std::io::Write;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::UNIX_EPOCH;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncWrite, AsyncWriteExt, DuplexStream};
 use tokio::task::JoinHandle;
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::io::{CopyToBytes, SinkWriter};
-use tokio_util::sync::PollSender;
+use tokio_util::io::ReaderStream;
 
 pub struct TarStream
 {
-	inner:ReceiverStream<Bytes>,
+	inner:ReaderStream<DuplexStream>,
 	job:JoinHandle<Result<()>>
 }
 
 impl TarStream
 {
-	pub(crate) fn new(entry: Entry) -> TarStream
+	pub(crate) fn new<F,FT,W>(entry: Entry, f:F) -> TarStream
+		where F:FnOnce(Entry,DuplexStream) -> FT + Send + 'static,
+			  FT:Future<Output=Result<W>>  + Send,
+			  W:AsyncWrite + Unpin + Send + Sync
 	{
-		let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(1);
-		let sink = PollSender::new(tx).sink_map_err(|_| ErrorKind::BrokenPipe);
+		let (tx,rx) = tokio::io::duplex(1024*1024*10);
 
-		// Wrap it in `CopyToBytes` to get a `Sink<&[u8]>`.
-		let writer = SinkWriter::new(CopyToBytes::new(sink));
-		let inner = ReceiverStream::new(rx);
 		let job = tokio::spawn(async {
-			let mut r = make_tar(entry,writer).await?;
+			let mut r = f(entry,tx).await?;
 			r.flush().await.map_err(|e|e.into())
 		});
 
-		TarStream{inner,job}
+		TarStream{inner:ReaderStream::new(rx),job}
 	}
 }
 
@@ -47,21 +45,15 @@ impl Stream for TarStream
 		let this = self.get_mut();
 
 		match this.job.poll_unpin(cx) {
-			// join error (task panicked or was canceled
-			Poll::Ready(Err(e)) => {todo!()},
+			// join error (task panicked or was canceled)
+			Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e.into()))),
 			// task returned an error
 			Poll::Ready(Ok(Err(e))) => return Poll::Ready(Some(Err(e))),
-			// were done here pipe has been flushed and closed
-			Poll::Ready(Ok(Ok(_))) => return Poll::Ready(None),
 			_ => {}
 		}
 
 		// task is still running extract data
-		match this.inner.poll_next_unpin(cx)
-		{
-			Poll::Pending => Poll::Pending,
-			Poll::Ready(d) => Poll::Ready(Ok(d).transpose()),
-		}
+		Pin::new(&mut this.inner).poll_next(cx).map_err(|e|e.into())
 	}
 }
 
@@ -80,7 +72,6 @@ pub(crate) async fn make_tar<W:AsyncWrite + Unpin + Send + Sync>(entry: Entry, s
 	{
 		let path = gen_filepath(&file.read().await?)?;
 		writeln!(&mut md5sum, "{} {}", file.get_md5(), path)?;
-		let meta = tokio::fs::metadata(file.get_path()).await?;
 		let mut source = tokio::fs::File::open(file.get_path()).await?;
 		sink.append_file(path,&mut source).await?;
 	}

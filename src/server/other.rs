@@ -1,10 +1,10 @@
-use crate::db::RegisterResult;
+use crate::db::{Entry, RegisterResult};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
 use crate::storage::async_store;
 use crate::tools::remove::remove;
 use crate::tools::store::store;
-use crate::tools::tar::TarStream;
+use crate::tools::tar::{make_tar, TarStream};
 use crate::tools::verify::verify_entry;
 use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
 use crate::tools::{Context, Error::DicomError};
@@ -25,6 +25,7 @@ use mime::IMAGE_PNG;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Cursor;
+use async_compression::tokio::write::{GzipEncoder,BzEncoder,XzEncoder};
 
 pub(super) fn router() -> axum::Router
 {
@@ -35,6 +36,7 @@ pub(super) fn router() -> axum::Router
         .route("/{table}/{id}",delete(del_entry))
 		.route("/{table}/{id}/verify",get(verify))
 		.route("/{table}/{id}/tar",get(get_tar))
+		.route("/{table}/{id}/tar/{suffix}",get(get_tar_comp))
 		.route("/{table}/{id}/filepath",get(filepath))
         .route("/instances/{id}/file",get(get_instance_file))
         .route("/instances/{id}/png",get(get_instance_png));
@@ -174,11 +176,35 @@ pub struct ImageSize {
 async fn get_tar(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
 {
 	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	get_tar_impl(entry,"".to_string()).await.into_http_error(&headers)
+}
+async fn get_tar_comp(headers: HeaderMap,Path(path):Path<(String, String)>, suffix:String) -> Result<Response, HttpError>
+{
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	get_tar_impl(entry, suffix).await.into_http_error(&headers)
+}
+async fn get_tar_impl(entry: Entry,suffix:String) -> Result<Response, InnerHttpError>
+{
+	let filename_for_header= if suffix.is_empty(){
+		format!("{}.tar",entry.name())
+	} else {
+		format!("{}.tar.{suffix}",entry.name())
+	};
 
-	let filename_for_header=format!("{}.tar",entry.name());
+	let str = match suffix.as_str(){
+		"" => TarStream::new(entry,make_tar),
+		"gz" => TarStream::new(entry,|entry, tx|{
+			make_tar(entry,GzipEncoder::new(tx))
+		}),
+		"bz2" => TarStream::new(entry,|entry, tx|{
+			make_tar(entry,BzEncoder::new(tx))
+		}),
+		"xz" => TarStream::new(entry,|entry, tx|{
+			make_tar(entry,XzEncoder::new(tx))
+		}),
+		_ => return Err(InnerHttpError::BadRequest {message:"invalid suffix".into()})
+	};
 
-	let str = TarStream::new(entry);
-	
 	Ok((
 		StatusCode::OK,
 		[
@@ -188,6 +214,7 @@ async fn get_tar(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result
 		Body::from_stream(str)
 	).into_response())
 }
+
 async fn get_instance_png(headers: HeaderMap,Path(id):Path<String>, OptionalQuery(size): OptionalQuery<ImageSize>) -> Result<Response, HttpError>
 {
 	let ctx = format!("decoding pixel data of {id}");
