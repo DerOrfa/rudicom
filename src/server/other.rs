@@ -23,7 +23,7 @@ use dicom::pixeldata::image::ImageFormat;
 use dicom::pixeldata::PixelDecoder;
 use mime::IMAGE_PNG;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::io::Cursor;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -69,7 +69,7 @@ async fn verify(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<
 		{
 			json!({"checksum_error":{"file":file,"actual_checksum":checksum}})
 		}else {
-			json!({"error":Value::from(&e)})
+			json!({"error":serde_json::Value::from(&e)})
 		})
 		.collect();
 
@@ -98,14 +98,14 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 			Json(json!({
 				"Status":"Success",
 				"Path":id.str_path(),
-				"ID":id.str_key(),
+				"uid":id.str_key(),
 			}))
 		).into_response()),
 		Ok(RegisterResult::AlreadyStored(id)) => Ok((StatusCode::FOUND,
 			Json(json!({
 				"Status":"AlreadyStored",
 				"Path":id.str_path(),
-				"ID":id.str_key(),
+				"uid":id.str_key(),
 			}))
 		).into_response()),
 		Err(Error::DataConflict(e)) => {
@@ -113,6 +113,7 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 				StatusCode::CONFLICT,
 				Json(json!({
 					"Status":"ConflictingMetadata",
+					"ExistingPath":e.id().str_path(),
 					"ExistingData":serde_json::Value::from(e),
 				}))
 			).into_response())
@@ -122,7 +123,7 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 				StatusCode::CONFLICT,
 				Json(json!({
 					"Status":"ConflictingMd5",
-					"Existing Path":existing_id.str_path(),
+					"ExistingPath":existing_id.str_path(),
 					"ExistingMd5":existing_md5,
 					"ReceivedMd5":my_md5,
 				}))
