@@ -1,9 +1,17 @@
-# run the server
+# quickstart
 
-    rudicom --database "ws://localhost:8000"  server
-or (only with feature `embedded`)
-
-    rudicom --file /tmp/db server 
+1. write the default configuration file
+   `rudicom write-config /tmp/config.toml`
+2. edit that config file, pay special attention to the last entry `storage_path`. That is where the files will be stored. Don't forget to create that directory.
+3. import some data
+   `rudicom --config /tmp/config.toml --file /tmp/db.index import --mode import "/data/**/*.ima"`
+   - make sure the storage path from the config above exists as well as the `/tmp/db.index` from here.
+   - add `--echo` if you want to see feedback from the import
+   - the import mode `import` won't touch or own the original data, so you won't have to worry about them
+4. run the server
+   `rudicom --config /tmp/config.toml --file /tmp/db_index server`
+   - this defaults to http://localhost:3000
+5. access the HTML "landing page" via http://localhost/html/studies
 
 # interfaces
 

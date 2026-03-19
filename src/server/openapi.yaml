@@ -2,17 +2,17 @@ openapi: 3.1.0
 info:
   title: rudicom
   version: 0.4.0
-  contact: {}
+  contact: { }
   description: Indexing dicom file server.
 servers:
   - url: http://localhost:3000
     description: ""
-    variables: {}
+    variables: { }
 paths:
   /api/info:
     get:
       summary: basic status and configuration
-      parameters: []
+      parameters: [ ]
       operationId: info
       responses:
         "200":
@@ -32,7 +32,7 @@ paths:
     get:
       summary: statistics
       description: get database statistics
-      parameters: []
+      parameters: [ ]
       operationId: statistics
       responses:
         "200":
@@ -43,27 +43,22 @@ paths:
                 properties:
                   studies:
                     type: integer
-                    example: 0
                   instances:
                     type: integer
-                    example: 0
                   stored_size:
                     type: string
-                    example: 0 B
                   db_version:
                     type: string
-                    example: 2.1.4
                   health:
                     type: string
-                    example: good
                   version:
                     type: string
-                    example: 0.4.0
+          description: Some statistics on the status of the DB
   /api/instances:
     post:
       summary: DICOM upload
       description: upload a dicom file
-      parameters: []
+      parameters: [ ]
       operationId: dicomUpload
       responses:
         "201":
@@ -292,7 +287,7 @@ paths:
             application/json:
               schema:
                 type: object
-                properties: {}
+                properties: { }
         "404":
           $ref: "#/components/responses/IdNotFound"
   /api/instances/{id}/file:
@@ -312,6 +307,102 @@ paths:
         "404":
           $ref: "#/components/responses/IdNotFound"
       description: Download a dicom instance as a file.
+  /api/{table}/{id}/instances:
+    get:
+      operationId: tableEntryInstances
+      summary: table entry-instances
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: The request was successful, and the server has returned the
+            requested resource in the response body.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/dbentry"
+  /api/{table}/{id}/series:
+    get:
+      operationId: tableEntrySeries
+      summary: table entry-series
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/dbentry"
+  /api/{table}/{id}/parents:
+    get:
+      operationId: tableEntryParents
+      summary: table entry-parents
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/dbentry"
+  /{table}/{id}/col/{name}:
+    get:
+      operationId: tableEntryAttachmentGet
+      summary: get table entry-attachment
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/name"
+      responses:
+        "200":
+          description: The current attachment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                required:
+                  - data
+    post:
+      operationId: tableEntryAttachmentAdd
+      summary: add to entry-attachment
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/attachname"
+      responses:
+        "200":
+          description: The new merged attachment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                required:
+                  - data
+    delete:
+      operationId: tableEntryAttachmentDelete
+      summary: delete table entry-attachment
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/attachname"
+      responses:
+        "200":
+
   /tools/{import-mode}:
     post:
       description: Directly imports files from a path into the database.
@@ -332,27 +423,22 @@ paths:
                     type: string
                   existing entry:
                     type: string
-                required: []
       parameters:
         - in: query
           name: echo
           required: false
           style: form
           description: toggle echo on succesfull import.
-          explode: true
           schema:
             type: boolean
-          allowReserved: false
         - in: query
           name: echo_existing
           required: false
           style: form
           description: toggle echo on files **not** imported because they're already
             registered.
-          explode: true
           schema:
             type: boolean
-          allowReserved: false
         - name: import-mode
           in: path
           required: true
@@ -363,11 +449,11 @@ paths:
 
               - import: Won't touch or own the file, but register it in the DB.
 
-              - Won't touch the original file but create an owned copy inside
+              - store: Won't touch the original file but create an owned copy inside
               the configured storage path (which might collide with the source
               file).
 
-              - The DB takes ownership of the existing file. If the source is
+              - move: The DB takes ownership of the existing file. If the source is
               outside the configured storage path it will be moved into it.
             enum:
               - import
@@ -378,7 +464,6 @@ paths:
           required: false
           style: simple
           description: Ask for formatted feedback.
-          explode: false
           schema:
             type: string
             examples:
@@ -387,7 +472,6 @@ paths:
             enum:
               - text/plain
               - application/json
-          allowReserved: false
       summary: import
       requestBody:
         required: true
@@ -397,9 +481,22 @@ paths:
             schema:
               type: string
               format: text
+  /tools/backup:
+    get:
+      operationId: backup
+      summary: backup
+      responses:
+        "200":
+          description: OK
+          content:
+            plain/text:
+              schema:
+                type: string
+                title: GetBackupOk
+
 components:
-  links: {}
-  callbacks: {}
+  links: { }
+  callbacks: { }
   schemas:
     storereply:
       type: object
@@ -439,7 +536,6 @@ components:
           examples:
             - "104249.315000"
       required:
-        - id
         - uid
       description: |-
         A database entry object.
@@ -448,7 +544,7 @@ components:
       type: string
       examples:
         - 1.3.12.2.1107.5.2.0.19951.30000024040906041304600000004
-      description: A dicom uniqe identifier (VR:UI)
+      description: A dicom unique identifier (VR:UI)
   parameters:
     table:
       name: table
@@ -465,13 +561,18 @@ components:
     id:
       name: id
       in: path
-      description: A dicom uniqe identifier (VR:UI)
       schema:
         $ref: "#/components/schemas/uid"
       style: simple
       required: true
     feedback:
       name: feedback
+      in: path
+      required: true
+      schema:
+        type: string
+    attachname:
+      name: attachname
       in: path
       required: true
       schema:
@@ -486,5 +587,5 @@ components:
         text/plain:
           example: internal error 1.3.12.2.1107.5.2.0.19951.3000002404090604130460000000
             not found
-security: []
-tags: []
+security: [ ]
+tags: [ ]
