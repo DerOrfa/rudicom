@@ -4,6 +4,7 @@ pub mod import;
 pub mod verify;
 mod error;
 pub mod conv;
+pub mod tar;
 
 use crate::db;
 use crate::db::{lookup_uid, Entry, RecordId, DB};

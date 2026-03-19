@@ -1,14 +1,15 @@
-use crate::db;
-use crate::db::RegisterResult;
+use crate::db::{Entry, RegisterResult};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
 use crate::storage::async_store;
 use crate::tools::remove::remove;
 use crate::tools::store::store;
+use crate::tools::tar::{make_tar, TarStream};
 use crate::tools::verify::verify_entry;
 use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
 use crate::tools::{Context, Error::DicomError};
-use axum::body::Bytes;
+use crate::db;
+use axum::body::{Body, Bytes};
 use axum::extract::rejection::BytesRejection;
 use axum::extract::Path;
 use axum::http::{header, HeaderMap, StatusCode};
@@ -20,9 +21,14 @@ use axum_extra::extract::OptionalQuery;
 use dicom::dictionary_std::tags;
 use dicom::pixeldata::image::ImageFormat;
 use dicom::pixeldata::PixelDecoder;
+use mime::IMAGE_PNG;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::io::Cursor;
+use std::num::NonZeroU32;
+use std::path::PathBuf;
+use async_compression::Level;
+use async_compression::tokio::write::{GzipEncoder, BzEncoder, XzEncoder};
 
 pub(super) fn router() -> axum::Router
 {
@@ -32,6 +38,8 @@ pub(super) fn router() -> axum::Router
         .route("/instances",post(store_instance))
         .route("/{table}/{id}",delete(del_entry))
 		.route("/{table}/{id}/verify",get(verify))
+		.route("/{table}/{id}/tar",get(get_tar))
+		.route("/{table}/{id}/tar/{suffix}",get(get_tar_comp))
 		.route("/{table}/{id}/filepath",get(filepath))
         .route("/instances/{id}/file",get(get_instance_file))
         .route("/instances/{id}/png",get(get_instance_png));
@@ -61,7 +69,7 @@ async fn verify(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<
 		{
 			json!({"checksum_error":{"file":file,"actual_checksum":checksum}})
 		}else {
-			json!({"error":Value::from(&e)})
+			json!({"error":serde_json::Value::from(&e)})
 		})
 		.collect();
 
@@ -90,14 +98,14 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 			Json(json!({
 				"Status":"Success",
 				"Path":id.str_path(),
-				"ID":id.str_key(),
+				"uid":id.str_key(),
 			}))
 		).into_response()),
 		Ok(RegisterResult::AlreadyStored(id)) => Ok((StatusCode::FOUND,
 			Json(json!({
 				"Status":"AlreadyStored",
 				"Path":id.str_path(),
-				"ID":id.str_key(),
+				"uid":id.str_key(),
 			}))
 		).into_response()),
 		Err(Error::DataConflict(e)) => {
@@ -105,6 +113,7 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 				StatusCode::CONFLICT,
 				Json(json!({
 					"Status":"ConflictingMetadata",
+					"ExistingPath":e.id().str_path(),
 					"ExistingData":serde_json::Value::from(e),
 				}))
 			).into_response())
@@ -114,7 +123,7 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 				StatusCode::CONFLICT,
 				Json(json!({
 					"Status":"ConflictingMd5",
-					"Existing Path":existing_id.str_path(),
+					"ExistingPath":existing_id.str_path(),
 					"ExistingMd5":existing_md5,
 					"ReceivedMd5":my_md5,
 				}))
@@ -128,7 +137,7 @@ async fn get_instance_file(headers: HeaderMap,Path(id):Path<String>) -> Result<R
 {
 	if let Some(file)=lookup_instance_file(id.clone()).await.into_http_error(&headers)?
 	{
-		let filename_for_header=file.get_path().file_name()
+		let filename=file.get_path().file_name()
 			.map(|o|o.to_string_lossy().to_string())
 			.unwrap_or(format!("Mr.{}.ima",id));
 		let file= tokio::fs::File::open(file.get_path()).await.into_http_error(&headers)?;
@@ -136,7 +145,7 @@ async fn get_instance_file(headers: HeaderMap,Path(id):Path<String>) -> Result<R
 			StatusCode::OK,
 			[
 				(header::CONTENT_TYPE, "application/dicom"),
-				(header::CONTENT_DISPOSITION, filename_for_header.as_str())
+				(header::CONTENT_DISPOSITION, format!(r#"attachment; filename="{filename}""#).as_str())
 			],
 			AsyncReadBody::new(file)
 		).into_response())
@@ -168,6 +177,56 @@ pub struct ImageSize {
 	height: u32,
 }
 
+async fn get_tar(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Response, HttpError>
+{
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	get_tar_impl(entry,"".to_string()).await.into_http_error(&headers)
+}
+async fn get_tar_comp(headers: HeaderMap,Path(path):Path<(String, String, String)>) -> Result<Response, HttpError>
+{
+	let suffix = path.2;
+	let path = (path.0,path.1);
+	let entry = lookup_or(&path).await.into_http_error(&headers)?;
+	get_tar_impl(entry, suffix).await.into_http_error(&headers)
+}
+async fn get_tar_impl(entry: Entry,suffix:String) -> Result<Response, InnerHttpError>
+{
+
+	let filename = PathBuf::try_from(entry.name()).ok()
+		.and_then(|p|p.file_name().map(|s|s.to_string_lossy().to_string()));
+
+	let disp= if let Some(filename) = filename {
+		if suffix.is_empty(){
+			format!(r#"attachment; filename="{filename}.tar""#)
+		} else {
+			format!(r#"attachment; filename="{filename}.tar.{suffix}""#)
+		}
+	} else { "attachment".into() };
+
+	let str = match suffix.as_str(){
+		"" => TarStream::new(entry,make_tar),
+		"gz" => TarStream::new(entry,|entry, tx|{
+			make_tar(entry,GzipEncoder::new(tx))
+		}),
+		"bz2" => TarStream::new(entry,|entry, tx|{
+			make_tar(entry,BzEncoder::new(tx))
+		}),
+		"xz" => TarStream::new(entry,|entry, tx|{
+			make_tar(entry,XzEncoder::parallel(tx, Level::Default,NonZeroU32::new(5).unwrap()))
+		}),
+		_ => return Err(InnerHttpError::BadRequest {message:"invalid suffix".into()})
+	};
+
+	Ok((
+		StatusCode::OK,
+		[
+			(header::CONTENT_TYPE, "application/tar"),
+			(header::CONTENT_DISPOSITION, disp.as_str())
+		],
+		Body::from_stream(str)
+	).into_response())
+}
+
 async fn get_instance_png(headers: HeaderMap,Path(id):Path<String>, OptionalQuery(size): OptionalQuery<ImageSize>) -> Result<Response, HttpError>
 {
 	let ctx = format!("decoding pixel data of {id}");
@@ -188,7 +247,7 @@ async fn get_instance_png(headers: HeaderMap,Path(id):Path<String>, OptionalQuer
 		image.write_to(&mut buffer, ImageFormat::Png).expect("Unexpectedly failed to write png data to memory buffer");
 
 		Ok((
-			[(header::CONTENT_TYPE, "image/png")],
+			[(header::CONTENT_TYPE, IMAGE_PNG.to_string())],
 			buffer.into_inner()
 		).into_response())
 	}

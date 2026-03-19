@@ -57,11 +57,11 @@ async fn main() -> Result<(),String>
 			DB.query(include_str!("db/init.surql")).await
 				.map_err(|e|format!("database initialisation failed: {e}"))?;
 
-		let inf= server::server_info().await;
-		info!("database version is {}",inf.db_version);
-		info!("storage path is {}",inf.storage_path);
+			let inf= server::server_info().await;
+			info!("database version is {}",inf.db_version);
+			info!("storage path is {}",inf.storage_path);
 
-		let mut set= tokio::task::JoinSet::new();
+			let mut set= tokio::task::JoinSet::new();
 			for a in address{
 				let bound = TcpListener::bind(&a).await
 					.map_err(|e|format!("Binding to {a} failed: {e}"))?;

@@ -1,0 +1,490 @@
+openapi: 3.1.0
+info:
+  title: rudicom
+  version: 0.4.0
+  contact: {}
+  description: Indexing dicom file server.
+servers:
+  - url: http://localhost:3000
+    description: ""
+    variables: {}
+paths:
+  /api/info:
+    get:
+      summary: basic status and configuration
+      parameters: []
+      operationId: info
+      responses:
+        "200":
+          description: A JSON array of basic configuration info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  db_version:
+                    type: string
+                  storage_path:
+                    type: string
+  /api/statistics:
+    get:
+      summary: statistics
+      description: get database statistics
+      parameters: []
+      operationId: statistics
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  studies:
+                    type: integer
+                    example: 0
+                  instances:
+                    type: integer
+                    example: 0
+                  stored_size:
+                    type: string
+                    example: 0 B
+                  db_version:
+                    type: string
+                    example: 2.1.4
+                  health:
+                    type: string
+                    example: good
+                  version:
+                    type: string
+                    example: 0.4.0
+  /api/instances:
+    post:
+      summary: DICOM upload
+      description: upload a dicom file
+      parameters: []
+      operationId: dicomUpload
+      responses:
+        "201":
+          description: file was stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/storereply"
+        "302":
+          description: the same file already exists, upload ignored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/storereply"
+        "409":
+          description: the file already exists but differs, upload ignored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Status:
+                    type: string
+                    enum:
+                      - ConflictingMetadata
+                      - ConflictingMd5
+                  ExistingData:
+                    $ref: "#/components/schemas/dbentry"
+                  ExistingPath:
+                    type: string
+                  ExistingMd5:
+                    type: string
+                  ReceivedMd5:
+                    type: string
+                required:
+                  - Status
+                  - ExistingPath
+      requestBody:
+        required: true
+        description: a dicom file
+        content:
+          application/dicom:
+            schema:
+              type: string
+              format: binary
+  /api/{table}:
+    get:
+      operationId: listTable
+      summary: list table
+      parameters:
+        - $ref: "#/components/parameters/table"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/dbentry"
+  /api/{table}/{id}:
+    get:
+      operationId: tableEntry
+      summary: table entry
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/dbentry"
+          description: Response 200
+        "404":
+          $ref: "#/components/responses/IdNotFound"
+  /api/{table}/{id}/verify:
+    get:
+      operationId: verifyData
+      summary: verify data
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: The data behind this entry do all exist and their checksum is
+            correct.
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          $ref: "#/components/responses/IdNotFound"
+        "500":
+          description: Either some data behind this entry are missing or the checksum
+            failed. See reply.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      type: object
+                      properties:
+                        checksum_error:
+                          type: object
+                          properties:
+                            file:
+                              type: string
+                            actual_checksum:
+                              type: string
+                          required:
+                            - file
+                            - actual_checksum
+                      required:
+                        - checksum_error
+                  - type: object
+                    properties:
+                      error:
+                        type: string
+                    required:
+                      - error
+  /api/{table}/{id}/tar:
+    get:
+      summary: archive
+      operationId: getArchive
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: Successfully started generation of a tar stream from the entry.
+          content:
+            application/tar:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/IdNotFound"
+  /api/{table}/{id}/tar/{suffix}:
+    get:
+      summary: compressed archive
+      operationId: getCompressedArchive
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+        - in: path
+          name: suffix
+          required: true
+          description: A compression algorithm
+          schema:
+            type: string
+            enum:
+              - gz
+              - xz
+              - bz2
+      responses:
+        "200":
+          description: Successfully started generation of a tar stream from the entry.
+          content:
+            application/tar:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/IdNotFound"
+  /api/{table}/{id}/filepath:
+    get:
+      operationId: filesystemPath
+      summary: filesystem path
+      parameters:
+        - $ref: "#/components/parameters/table"
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: |-
+            A dicom object with a single element describing the filesystem path.
+            Which is directory path for all entries except instances.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path:
+                    type: string
+        "404":
+          $ref: "#/components/responses/IdNotFound"
+  /api/instances/{id}/png:
+    get:
+      operationId: pngSnapshot
+      summary: png snapshot
+      parameters:
+        - in: query
+          name: width
+          description: scale image to given width
+          required: false
+          schema:
+            type: number
+        - in: query
+          name: height
+          description: scale image to given height
+          required: false
+          schema:
+            type: number
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+          description: A PNG image.
+        "404":
+          $ref: "#/components/responses/IdNotFound"
+  /api/instances/{id}/json-ext:
+    get:
+      operationId: getJsonEncodedDicomInstance
+      summary: get json encoded dicom instance
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+        "404":
+          $ref: "#/components/responses/IdNotFound"
+  /api/instances/{id}/file:
+    get:
+      operationId: dicomDownload
+      summary: dicom download
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/IdNotFound"
+      description: Download a dicom instance as a file.
+  /tools/{import-mode}:
+    post:
+      description: Directly imports files from a path into the database.
+      operationId: import
+      responses:
+        "200":
+          description: Import is going, see body for feedback.
+          content:
+            application/json:
+              example:
+                - filename: /tmp/1.3.12.2.1107.5.2.43.67037.2024092511184717582710023.dcm
+                - filename: /tmp/1.3.12.2.1107.5.2.43.67037.2024092511184269068309161.dcm
+                - existing entry: /tmp/1.3.12.2.1107.5.2.43.67037.2024092511184567948409741.dcm
+              schema:
+                type: object
+                properties:
+                  filename:
+                    type: string
+                  existing entry:
+                    type: string
+                required: []
+      parameters:
+        - in: query
+          name: echo
+          required: false
+          style: form
+          description: toggle echo on succesfull import.
+          explode: true
+          schema:
+            type: boolean
+          allowReserved: false
+        - in: query
+          name: echo_existing
+          required: false
+          style: form
+          description: toggle echo on files **not** imported because they're already
+            registered.
+          explode: true
+          schema:
+            type: boolean
+          allowReserved: false
+        - name: import-mode
+          in: path
+          required: true
+          schema:
+            type: string
+            description: >-
+              Import mode. Valied values are:
+
+              - import: Won't touch or own the file, but register it in the DB.
+
+              - Won't touch the original file but create an owned copy inside
+              the configured storage path (which might collide with the source
+              file).
+
+              - The DB takes ownership of the existing file. If the source is
+              outside the configured storage path it will be moved into it.
+            enum:
+              - import
+              - store
+              - move
+        - in: header
+          name: Content-Type
+          required: false
+          style: simple
+          description: Ask for formatted feedback.
+          explode: false
+          schema:
+            type: string
+            examples:
+              - application/json
+            default: text/plain
+            enum:
+              - text/plain
+              - application/json
+          allowReserved: false
+      summary: import
+      requestBody:
+        required: true
+        description: a filesystem glob describing the files to be imported
+        content:
+          text/plain:
+            schema:
+              type: string
+              format: text
+components:
+  links: {}
+  callbacks: {}
+  schemas:
+    storereply:
+      type: object
+      properties:
+        Path:
+          type: string
+          description: relative URL to the stored entry
+        Status:
+          type: string
+          enum:
+            - AlreadyStored
+            - Success
+        uid:
+          $ref: "#/components/schemas/uid"
+      required:
+        - Status
+        - Path
+        - uid
+      description: status reply for store operations
+    dbentry:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/uid"
+        uid:
+          $ref: "#/components/schemas/uid"
+        Name:
+          type: string
+        Date:
+          type: string
+          description: A dicom formatted date (VR:DA)
+          examples:
+            - "20070119"
+        Time:
+          type: string
+          description: Dicom formatted time (VR:TM)
+          examples:
+            - "104249.315000"
+      required:
+        - id
+        - uid
+      description: |-
+        A database entry object.
+        Its exact content depends on the configuration
+    uid:
+      type: string
+      examples:
+        - 1.3.12.2.1107.5.2.0.19951.30000024040906041304600000004
+      description: A dicom uniqe identifier (VR:UI)
+  parameters:
+    table:
+      name: table
+      in: path
+      description: the table to query
+      schema:
+        type: string
+        enum:
+          - series
+          - instances
+          - studies
+      style: simple
+      required: true
+    id:
+      name: id
+      in: path
+      description: A dicom uniqe identifier (VR:UI)
+      schema:
+        $ref: "#/components/schemas/uid"
+      style: simple
+      required: true
+    feedback:
+      name: feedback
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    IdNotFound:
+      description: The server cannot find the requested entry.
+      content:
+        application/json:
+          example:
+            - 1.3.12.2.1107.5.2.0.19951.3000002404090604130460000000 not found
+        text/plain:
+          example: internal error 1.3.12.2.1107.5.2.0.19951.3000002404090604130460000000
+            not found
+security: []
+tags: []
