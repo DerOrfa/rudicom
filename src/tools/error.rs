@@ -1,5 +1,6 @@
 use glob::{GlobError, PatternError};
 use std::fmt::{Debug, Display, Formatter};
+use dimse::error::DimseError;
 use thiserror::Error;
 use crate::db::{Entry, RecordId};
 
@@ -102,6 +103,8 @@ pub enum Error
 
 	#[error(transparent)] // we use our own impl Display above
 	Context(#[from]ErrorContext),
+	#[error(transparent)] // we use our own impl Display above
+	Dimse(#[from]DimseError),
 	
 	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
 	UnexpectedResult{

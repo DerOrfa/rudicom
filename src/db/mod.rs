@@ -22,6 +22,7 @@ mod register;
 mod entry;
 mod file;
 mod record;
+pub mod dimse_access;
 
 #[derive(Deserialize,Debug)]
 pub struct AggregateData
