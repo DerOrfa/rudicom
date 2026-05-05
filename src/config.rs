@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use config::{Config,ConfigError, File, FileFormat::Toml};
 use std::sync::OnceLock;
 use dicom::core::DataDictionary;
 use dicom::dictionary_std::StandardDataDictionary;
+use dicom::ul::FullAeAddr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::dcm::AttributeSelector;
 
@@ -12,6 +14,12 @@ use crate::dcm::AttributeSelector;
 pub struct Limits{pub upload_sizelimit:byte_unit::Byte, pub max_files:u16}
 #[derive(Debug,Serialize,Deserialize)]
 pub struct Paths{pub filename_pattern:String,pub storage_path:PathBuf}
+#[derive(Debug,Serialize,Deserialize)]
+pub struct DimseCfg{
+	pub aet:String,
+	pub address:String,
+	pub peers:HashMap<String,SocketAddr>,
+}
 
 #[derive(Debug,Serialize,Deserialize)]
 pub struct ConfigStruct
@@ -20,7 +28,9 @@ pub struct ConfigStruct
 	pub series_tags:HashMap<String,Vec<AttributeSelector>>,
 	pub study_tags:HashMap<String,Vec<AttributeSelector>>,
 	pub limits: Limits,
-	pub paths: Paths
+	pub paths: Paths,
+	pub dimse: DimseCfg
+
 }
 
 impl Serialize for AttributeSelector {
