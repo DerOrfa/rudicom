@@ -7,9 +7,7 @@ use dimse::identifier::Identifier;
 use dimse::io::ItemResult;
 use dimse::status::{failure, success, Comment, Offending, Status, StatusFailure};
 use dimse::RetrieveLevel;
-use futures::stream::BoxStream;
-use futures::StreamExt;
-use futures::{stream, FutureExt, TryFutureExt};
+use futures::{StreamExt,stream, stream::BoxStream};
 use std::path::PathBuf;
 
 #[derive(Clone)]

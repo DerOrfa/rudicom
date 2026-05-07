@@ -6,7 +6,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
 use tokio::net::TcpListener;
-use tokio::signal;
 use tracing;
 use crate::{config, db};
 use crate::db::DB;

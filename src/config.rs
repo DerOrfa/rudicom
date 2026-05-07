@@ -6,7 +6,6 @@ use config::{Config,ConfigError, File, FileFormat::Toml};
 use std::sync::OnceLock;
 use dicom::core::DataDictionary;
 use dicom::dictionary_std::StandardDataDictionary;
-use dicom::ul::FullAeAddr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::dcm::AttributeSelector;
 
