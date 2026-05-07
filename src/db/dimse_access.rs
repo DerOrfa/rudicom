@@ -1,14 +1,17 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
 use crate::{db, tools};
 use crate::db::{lookup_uid, Entry};
-use dicom::dictionary_std::tags;
+use dicom::dictionary_std::{tags, StandardDataDictionary};
 use dicom::object::{FileDicomObject, InMemDicomObject};
 use dimse::definitions::FailureCode;
 use dimse::identifier::Identifier;
 use dimse::io::ItemResult;
 use dimse::status::{failure, success, Comment, Offending, Status, StatusFailure};
 use dimse::RetrieveLevel;
-use futures::{StreamExt,stream, stream::BoxStream};
+use futures::{StreamExt, stream, stream::BoxStream};
 use std::path::PathBuf;
+use dicom::core::VR;
 
 #[derive(Clone)]
 pub struct Accessor {}
@@ -69,6 +72,40 @@ impl dimse::io::FileAccess for Accessor {
 	}
 
 	async fn find<'a>(&self, ident: impl Into<Identifier> + Send) -> Result<BoxStream<'a, ItemResult<InMemDicomObject>>, StatusFailure> {
-		todo!()
+		let ident = ident.into();
+		let tz_offset = ident.contains(tags::TIMEZONE_OFFSET_FROM_UTC)
+			.map(|e|e.to_str().map(Cow::into_owned)).transpose()
+			.map_err(|e|failure(FailureCode::InvalidArgument).offending([tags::TIMEZONE_OFFSET_FROM_UTC]).comment(e))?;
+
+		let (table,known_db_tags) = match ident.level {
+			Some(RetrieveLevel::IMAGE) => Ok(("instances",crate::config::get().instance_tags.clone())),
+			Some(RetrieveLevel::SERIES) => Ok(("series",crate::config::get().series_tags.clone())),
+			Some(RetrieveLevel::STUDY) => Ok(("studies",crate::config::get().study_tags.clone())),
+			Some(RetrieveLevel::PATIENT) => return Err(failure(FailureCode::InvalidArgument).comment("Cannot do patient level find")),
+			None => Err(tags::QUERY_RETRIEVE_LEVEL)
+		}.map_err(|e|failure(FailureCode::MissingAttribute).offending([e]))?;
+
+		let default_dict = StandardDataDictionary::default();
+		let mut search_map:HashMap<_,_> = Default::default();
+		for (db_key,dicom_attrs) in known_db_tags {
+			for attr in dicom_attrs
+			{
+				search_map.insert(attr.0.last_tag(),db_key.clone());
+			}
+		}
+
+		let entries:Vec<_>= db::list_entries(table).await.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))?
+			.into_iter().filter_map(|entry|{
+				let mut matcher = InMemDicomObject::new_empty();
+				for (tag, db) in &search_map {
+					if let Some(found) = entry.get(db){
+						matcher.put_str(tag.to_owned(),VR::LO,found.to_string());
+					}
+				}
+				ident.matches_all(&matcher).then_some(Ok(matcher))
+			}
+		).collect();
+		Ok(stream::iter(entries).boxed())
+
 	}
 }
