@@ -6,73 +6,30 @@ use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::vec::IntoIter;
 use surrealdb::types as db_types;
-use surrealdb::types::{SurrealValue, Value};
+use surrealdb::types::{RecordIdKey, SurrealValue, ToSql, Value};
 
 #[derive(Deserialize, Debug, PartialEq, PartialOrd, Clone)]
 pub struct RecordId(pub db_types::RecordId);
 
 impl RecordId {
-	fn str_to_vec(s: &str) -> IntoIter<i64>
+	pub fn from_instance(instance_id: impl Into<RecordIdKey>) -> RecordId
 	{
-		let s = format!("{s:+<64}").replace(".","+");
-		let bytes = general_purpose::STANDARD.decode(s).unwrap();
-		let mut bytes = bytes.as_slice();
-		let mut big:Vec<i64>=vec![];
-		while !bytes.is_empty() {
-			let (head,rest) = bytes.split_at(size_of::<i64>());
-			bytes = rest;
-			big.push(i64::from_ne_bytes(head.try_into().unwrap()));
-		}
-		big.into_iter()
+		RecordId(db_types::RecordId::new("instances",instance_id))
 	}
-
-	pub fn from_instance(instance_id: &str, series_id: &str, study_id: &str ) -> RecordId
+	pub fn from_series(series_id: impl Into<RecordIdKey>) -> RecordId
 	{
-		let index = Self::str_to_vec(study_id)
-			.chain(Self::str_to_vec(series_id))
-			.chain(Self::str_to_vec(instance_id))
-			.map(|v|v.into_value());
-		RecordId(db_types::RecordId::new("instances",db_types::Array::from_iter(index)))
+		RecordId(db_types::RecordId::new("series",series_id))
 	}
-	pub fn from_series(series_id: &str, study_id: &str) -> RecordId
+	pub fn from_study(id: impl Into<RecordIdKey>) -> RecordId
 	{
-		let index= Self::str_to_vec(study_id)
-			.chain(Self::str_to_vec(series_id))
-			.map(|v|v.into_value());
-		RecordId(db_types::RecordId::new("series",db_types::Array::from_iter(index)))
-	}
-	pub fn from_study(id: &str) -> RecordId
-	{
-		let index = Self::str_to_vec(id)
-			.map(|v|v.into_value());
-		RecordId(db_types::RecordId::new("studies",db_types::Array::from_iter(index)))
+		RecordId(db_types::RecordId::new("studies",id))
 	}
 	pub fn str_key(&self) -> String {
-		let bytes= self.key_vec();
-		// the last 6 numbers in the vector are the actual ID (not parents)
-		let bytes:Vec<_> = bytes.split_at(bytes.len()-6).1.to_vec().into_iter()
-			.map(|v|v.as_i64().unwrap().to_owned())
-			.map(|v|v.to_ne_bytes())
-			.flatten().collect();
-		general_purpose::STANDARD.encode(bytes)
-			.trim_end_matches("+").to_string()
-			.replace("+",".")
+		self.0.key.to_sql_pretty()
 	}
 	pub fn str_path(&self) -> String {
 		format!("/api/{}/{}",self.table,self.str_key())
 	}
-	pub fn key_vec(&self) -> &[db_types::Value] {
-		if let db_types::RecordIdKey::Array(key) = &self.deref().key {
-			if key.len() == 1 { //aggregate ids are arrays of arrays, just flatten that
-				if let db_types::Value::Array(array)= &key[0]{
-					return array.as_slice()
-				}
-			}
-			key.as_slice()
-		}
-		else  {panic!("Only vector IDs are allowed")}
-	}
-
 	pub fn to_aggregate(&self) -> db_types::RecordId {
 		let me = db_types::Array::from(vec![self.0.clone()]);
 		match self.table.as_str() {

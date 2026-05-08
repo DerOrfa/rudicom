@@ -64,21 +64,22 @@ pub async fn entries_for_record(id:&RecordId,table:&str) -> Result<Vec<db::Entry
 		_ => unreachable!()
 	};
 	let ctx = format!("listing children of {}",id);
-	let id_vec= id.key_vec().to_vec();
-	let max_gen = repeat(i64::MAX).map(i64::into_value).take(size-id_vec.len());
-	let min_gen = repeat(i64::MIN).map(i64::into_value).take(size-id_vec.len());
-
-	
-	let begin = RecordIdKey::Array(id_vec.iter().map(|v|v.clone()).chain(min_gen).collect());
-	let end = RecordIdKey::Array(id_vec.into_iter().chain(max_gen).collect());
-	let results = DB.select::<db_types::Value>(Resource::Table(table.into()))
-		.range(RecordIdKeyRange{start:Included(begin),end:Included(end)}).await?;
-	if let db_types::Value::Array(instances) = results {
-		instances.into_iter().map(Entry::try_from)
-			.collect::<Result<Vec<_>>>().context(ctx)
-	} else {
-		Err(Error::UnexpectedResult {expected:"list of entries".into(),found: results.kind().to_string()})
-	}
+	todo!()
+	// let id_vec= id.key_vec().to_vec();
+	// let max_gen = repeat(i64::MAX).map(i64::into_value).take(size-id_vec.len());
+	// let min_gen = repeat(i64::MIN).map(i64::into_value).take(size-id_vec.len());
+	//
+	//
+	// let begin = RecordIdKey::Array(id_vec.iter().map(|v|v.clone()).chain(min_gen).collect());
+	// let end = RecordIdKey::Array(id_vec.into_iter().chain(max_gen).collect());
+	// let results = DB.select::<db_types::Value>(Resource::Table(table.into()))
+	// 	.range(RecordIdKeyRange{start:Included(begin),end:Included(end)}).await?;
+	// if let db_types::Value::Array(instances) = results {
+	// 	instances.into_iter().map(Entry::try_from)
+	// 		.collect::<Result<Vec<_>>>().context(ctx)
+	// } else {
+	// 	Err(Error::UnexpectedResult {expected:"list of entries".into(),found: results.kind().to_string()})
+	// }
 }
 
 pub fn extract_from_dicom(obj:&'_ DefaultDicomObject,tag:dicom::core::Tag) -> Result<std::borrow::Cow<'_, str>>

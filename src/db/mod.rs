@@ -108,26 +108,27 @@ pub async fn lookup_uid<S:AsRef<str>>(table:S, uid:String) -> Result<Option<Entr
 pub fn find_down_tree(id:RecordId) -> Result<Vec<RecordId>>
 {
 	let query_context = format!("looking for parents of {id}");
-	let key_vec:Vec<_> = id.key_vec().to_vec().into_iter().collect();
-	match id.table.as_str() {
-		"instances" => {
-			let (study,_) = key_vec.split_at(6); // just study
-			let (series, _) = key_vec.split_at(12); // study + series
-			Ok(vec![
-				id,
-				("series", series).into(),
-				("studies",study).into()
-			])
-		},
-		"series" => {
-			let (study,_) = key_vec.split_at(6);
-			Ok(vec![
-				id,("studies",study).into()
-			])
-		},
-		"studies" => Ok(vec![id]),
-		_ => {Err(Error::InvalidTable {table:id.table.to_string()}.context(query_context))}
-	}
+	todo!()
+	// let key_vec:Vec<_> = id.key_vec().to_vec().into_iter().collect();
+	// match id.table.as_str() {
+	// 	"instances" => {
+	// 		let (study,_) = key_vec.split_at(6); // just study
+	// 		let (series, _) = key_vec.split_at(12); // study + series
+	// 		Ok(vec![
+	// 			id,
+	// 			("series", series).into(),
+	// 			("studies",study).into()
+	// 		])
+	// 	},
+	// 	"series" => {
+	// 		let (study,_) = key_vec.split_at(6);
+	// 		Ok(vec![
+	// 			id,("studies",study).into()
+	// 		])
+	// 	},
+	// 	"studies" => Ok(vec![id]),
+	// 	_ => {Err(Error::InvalidTable {table:id.table.to_string()}.context(query_context))}
+	// }
 }
 
 pub async fn init_file(file:&std::path::Path) -> surrealdb::Result<()>

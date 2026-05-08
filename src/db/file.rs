@@ -78,11 +78,12 @@ impl TryFrom<db_types::Value> for File
 	type Error = Error;
 
 	fn try_from(obj: db_types::Value) -> std::result::Result<Self, Self::Error> {
-		let context=format!("parsing database object {} as File object",obj.as_string().unwrap());
+		let context=format!("parsing database object {obj:?} as File object");
 		let kind = obj.kind().to_string();
 		match obj {
 			db_types::Value::Object(obj) => obj.try_into(),
-			_ => Err(Error::UnexpectedResult {expected:"object".into(),found:kind})
+			_ =>
+				Err(Error::UnexpectedResult {expected:"object".into(),found:kind})
 		}.context(context)
 	}
 }
