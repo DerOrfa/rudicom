@@ -8,7 +8,7 @@ use dcm::AttributeSelector;
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
 use surrealdb::types as db_types;
-use surrealdb::types::{AlreadyExistsError, ErrorDetails, SurrealValue};
+use surrealdb::types::{AlreadyExistsError, SurrealValue};
 
 #[derive(Default)]
 pub struct RegistryGuard(Option<RecordId>);
@@ -47,22 +47,20 @@ async fn insert<'a>(
 	loop {
 		match DB.insert::<Option<db_types::Value>>(&record_id.0).content(meta.clone()).await {
 			Err(e) => {
-				match e.details() {
-					ErrorDetails::Query(Some(e)) => {
-						todo!()
-					}
-					ErrorDetails::AlreadyExists(Some(AlreadyExistsError::Record { id })) => {
-						if let Some(existing) = lookup(
-							&RecordId(db_types::RecordId::new(record_id.table.to_owned(),id.to_owned())
-						)).await?{
-							return if existing == *obj {Ok(false)}
-							else {Err(Error::DataConflict(existing))}
-						} // gone again??, try to repeat insert
-					}
-					_ => return Err(e.into())
+				if e.kind_str() == "Transaction conflict"{
+					tokio::time::sleep(tokio::time::Duration::from_millis(rand::random_range(10..100))).await;
+					continue // try again
+				} else if let Some(AlreadyExistsError::Record {id}) = e.already_exists_details(){
+					if let Some(existing) = lookup(
+						&RecordId(db_types::RecordId::new(record_id.table.to_owned(),id.to_owned())
+					)).await?{
+						return if existing == *obj {Ok(false)}
+						else {Err(Error::DataConflict(existing))}
+					} // gone again??, try to repeat insert
+				} else {
+					return Err(e.into())
 				}
 			},
-			Err(e) => return Err(e.into()),
 			Ok(_) => return Ok(true),
 		}
 	}

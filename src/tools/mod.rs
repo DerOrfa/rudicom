@@ -7,16 +7,11 @@ pub mod conv;
 pub mod tar;
 
 use crate::db;
-use crate::db::{lookup_uid, Entry, RecordId, DB};
+use crate::db::{lookup_uid, RecordId};
 use crate::tools::Error::DicomError;
 use dicom::object::DefaultDicomObject;
 pub use error::{Context, Error, Result, Source};
-use std::iter::repeat;
-use std::ops::Bound::Included;
 use std::path::{Path, PathBuf};
-use surrealdb::opt::Resource;
-use surrealdb::types as db_types;
-use surrealdb::types::{RecordIdKey, RecordIdKeyRange, SurrealValue};
 
 pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 {

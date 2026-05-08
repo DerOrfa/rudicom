@@ -1,12 +1,9 @@
-use base64::engine::general_purpose;
-use base64::Engine;
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
-use std::vec::IntoIter;
 use surrealdb::types as db_types;
-use surrealdb::types::{RecordIdKey, SurrealValue, ToSql, Value};
+use surrealdb::types::{RecordIdKey, SurrealValue, Value};
 
 #[derive(Deserialize, Debug, PartialEq, PartialOrd, Clone)]
 pub struct RecordId(pub db_types::RecordId);
@@ -25,7 +22,7 @@ impl RecordId {
 		RecordId(db_types::RecordId::new("studies",id))
 	}
 	pub fn str_key(&self) -> String {
-		self.0.key.to_sql_pretty()
+		self.0.key.clone().into_value().into_string().unwrap()
 	}
 	pub fn str_path(&self) -> String {
 		format!("/api/{}/{}",self.table,self.str_key())

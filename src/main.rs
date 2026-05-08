@@ -89,6 +89,7 @@ async fn main() -> Result<(),String>
 						Err(e) => eprintln!("{e}")
 					}
 				}
+				info!("{glob} done..")
 			}
 		}
 		Commands::Restore { file } => {

@@ -2,7 +2,7 @@ use crate::db;
 use crate::tools::{entries_for_record, Context};
 use crate::tools::Result;
 use std::path::{Path, PathBuf};
-use surrealdb::types::ErrorDetails;
+use surrealdb::types::{ErrorDetails, QueryError};
 use tokio::fs::{remove_dir, remove_file};
 use tracing::log::warn;
 use crate::db::DB;
@@ -26,12 +26,13 @@ async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 	loop {
 		res = DB.delete::<Option<db_types::Value>>(id.0.clone()).await;
 		match &res {
-			Err(e) => {
-				match e.details() {
-					ErrorDetails::Query(Some(e)) => {
-						todo!()
-					}
-					_ => return Err(e.clone().into()),
+			Err(e) =>
+			{
+				if e.kind_str() == "Transaction conflict" {
+					tokio::time::sleep(tokio::time::Duration::from_millis(rand::random_range(10..100))).await;
+					continue // try again
+				} else {
+					return Err(e.clone().into())
 				}
 			}
 			_ => {break},
