@@ -102,11 +102,11 @@ pub enum Error
 
 	#[error(transparent)] // we use our own impl Display above
 	Context(#[from]ErrorContext),
-	
+
 	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
 	UnexpectedResult{
 		expected: String,
-		found: &'static str,
+		found: String,
 	},
 	#[error("Entry {id} is not an {expected}")]
 	UnexpectedEntry {

@@ -2,10 +2,11 @@ use crate::db;
 use crate::tools::{entries_for_record, Context};
 use crate::tools::Result;
 use std::path::{Path, PathBuf};
-use surrealdb::err::Error::QueryNotExecutedDetail;
+use surrealdb::types::ErrorDetails;
 use tokio::fs::{remove_dir, remove_file};
 use tracing::log::warn;
 use crate::db::DB;
+use surrealdb::types as db_types;
 
 pub async fn remove(id:&db::RecordId) -> Result<()>
 {
@@ -23,16 +24,21 @@ async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 {
 	let mut res;
 	loop {
-		res = DB.delete(id.clone()).await;
+		res = DB.delete::<Option<db_types::Value>>(id.0.clone()).await;
 		match &res {
-			Err(surrealdb::Error::Db(QueryNotExecutedDetail{message})) => {
-				if message != "Failed to commit transaction due to a read or write conflict. This transaction can be retried" {break}
+			Err(e) => {
+				match e.details() {
+					ErrorDetails::Query(Some(e)) => {
+						todo!()
+					}
+					_ => return Err(e.clone().into()),
+				}
 			}
 			_ => {break},
 		}
 	}
-	let res = res?; 
-	if res.into_inner_ref().is_none_or_null(){
+	let res = res?.unwrap(); 
+	if res.is_nullish(){
 		return Ok(None)
 	}
 	let removed= db::Entry::try_from(res)?;

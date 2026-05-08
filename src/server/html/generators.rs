@@ -6,8 +6,8 @@ use html::root::{Body, Html};
 use html::tables::builders::TableCellBuilder;
 use html::tables::{Table, TableCell, TableRow};
 use std::collections::BTreeMap;
-use surrealdb::sql;
-
+use surrealdb::types as db_types;
+use surrealdb::types::SurrealValue;
 use crate::db;
 use crate::db::{find_down_tree, Entry};
 use crate::tools::{entries_for_record, Context, Result};
@@ -38,13 +38,13 @@ impl Entry {
 	{
 		let id = self.id();
 		Anchor::builder()
-			.href(format!("/html/{}/{}",id.table(),id.str_key()))
+			.href(format!("/html/{}/{}",id.table,id.str_key()))
 			.text(self.name())
 			.build()
 	}
 }
 
-fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
+fn table_from_map(map:BTreeMap<String, db_types::Value>) -> Table{
 	let mut table_builder = Table::builder();
 	for (k,v) in map
 	{
@@ -52,8 +52,8 @@ fn table_from_map(map:BTreeMap<String, sql::Value>) -> Table{
 			.table_cell(|c|c.text(k))
 			.table_cell(|c| {
 				match v {
-					sql::Value::Object(o) => c.push(table_from_map(o.0)),
-					_ => c.text(v.as_raw_string())
+					db_types::Value::Object(o) => c.push(table_from_map(o.into_inner())),
+					_ => c.text(v.into_string().unwrap())
 				}
 
 			})
@@ -97,7 +97,7 @@ pub async fn table_from_objects(
 			let mut cellbuilder=TableCell::builder();
 			if let Some(value) = item
 			{
-				cellbuilder.text(value.into_inner().to_raw_string());
+				cellbuilder.text(value.into_string()?);
 			} else {cellbuilder.text("----------");}
 			row_builder.push(cellbuilder.build());
 		}
@@ -119,7 +119,7 @@ pub async fn entry_page(entry:Entry) -> Result<Html>
 		Entry::Instance((id,mut instance)) => {
 			instance.remove("series");
 			builder.heading_2(|h|h.text("Attributes"))
-				.push(table_from_map(instance.into_inner().0));
+				.push(table_from_map(instance.into_inner()));
 			builder.heading_2(|h|h.text("Image"))
 				.paragraph(|p|
 					p.image(|i|i.src(format!("/api/instances/{}/png",id.str_key())))
@@ -127,7 +127,7 @@ pub async fn entry_page(entry:Entry) -> Result<Html>
 		}
 		Entry::Series((id,mut series)) => {
 			series.remove("study");
-			builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.into_inner().0));
+			builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.into_inner()));
 			let mut instances= entries_for_record(&id,"instances").await?;
 			instances.sort_by_key(|s|s
 				.get_string("number")
@@ -152,14 +152,14 @@ pub async fn entry_page(entry:Entry) -> Result<Html>
 			builder.heading_2(|h|h.text(instance_text)).push(instance_table);
 		}
 		Entry::Study((id,study)) => {
-			builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.into_inner().0));
+			builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.into_inner()));
 
 			let mut series= entries_for_record(&id, "series").await?;
 			for s in &mut series
 			{
 				let v = s.get_instances_per().await?;
-				s.insert("Instances", v.count);
-				s.insert("Size",format!("{:.2}",Byte::from(v.size).get_appropriate_unit(Binary)));
+				s.insert("Instances", v.count.into_value());
+				s.insert("Size",format!("{:.2}",Byte::from(v.size).get_appropriate_unit(Binary)).into_value());
 			}
 
 			builder

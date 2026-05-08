@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use surrealdb::Value;
 
 use crate::db::{lookup, RecordId, RegisterResult, DB};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
@@ -8,7 +7,8 @@ use crate::{dcm, tools};
 use dcm::AttributeSelector;
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
-use surrealdb::error::Db::{QueryNotExecutedDetail, RecordExists};
+use surrealdb::types as db_types;
+use surrealdb::types::{AlreadyExistsError, ErrorDetails, SurrealValue};
 
 #[derive(Default)]
 pub struct RegistryGuard(Option<RecordId>);
@@ -22,7 +22,7 @@ impl Drop for RegistryGuard
 {
 	fn drop(&mut self) {
 		if let Some(ref id)=self.0{
-			let del = DB.delete(id);
+			let del = DB.delete::<Option<db_types::Value>>(id.0.clone());
 			tokio::spawn(async { del.await });//todo https://github.com/tokio-rs/tokio/issues/2289
 		}
 		self.0=None;
@@ -32,31 +32,35 @@ impl Drop for RegistryGuard
 async fn insert<'a>(
 	obj:&DefaultDicomObject,
 	record_id: RecordId,
-	add_meta:Vec<(&'a str,Value)>,
+	add_meta:Vec<(&'a str,db_types::Value)>,
 	tags:&HashMap<String,Vec<AttributeSelector>>
 ) -> tools::Result<bool>
 {
 	let meta: BTreeMap<_, _> = 
 		dcm::extract(&obj, &tags).into_iter()
-		.chain([("uid", Value::from_inner(record_id.str_key().into()))])
+		.chain([("uid", record_id.str_key().into_value())])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect();
 
 	loop {
-		match DB.insert(&record_id).content(meta.clone()).await { 
-			Err(surrealdb::Error::Db(RecordExists {thing})) => {
-				if let Some(existing) = lookup(&RecordId(surrealdb::RecordId::from_inner(thing))).await?{
-					return if existing == *obj {Ok(false)} 
-						else {Err(Error::DataConflict(existing))}
-				} // gone again??, try to repeat insert
+		match DB.insert::<Option<db_types::Value>>(&record_id.0).content(meta.clone()).await {
+			Err(e) => {
+				match e.details() {
+					ErrorDetails::Query(Some(e)) => {
+						todo!()
+					}
+					ErrorDetails::AlreadyExists(Some(AlreadyExistsError::Record { id })) => {
+						if let Some(existing) = lookup(&RecordId(
+							db_types::RecordId::new(record_id.table.to_owned(),id.to_owned())
+						)).await?{
+							return if existing == *obj {Ok(false)}
+							else {Err(Error::DataConflict(existing))}
+						} // gone again??, try to repeat insert
+					}
+					_ => return Err(e.into())
+				}
 			},
-			Err(surrealdb::Error::Db(QueryNotExecutedDetail{message})) => {
-				if message != "Failed to commit transaction due to a read or write conflict. This transaction can be retried"
-				{
-					return Err(surrealdb::Error::Db(QueryNotExecutedDetail{message}).into())
-				} // race condition, try again
-			}
 			Err(e) => return Err(e.into()),
 			Ok(_) => return Ok(true),
 		}
@@ -81,7 +85,7 @@ async fn insert<'a>(
 /// 
 pub async fn register_instance<'a>(
 	obj:&DefaultDicomObject,
-	add_meta:Vec<(&'a str,Value)>,
+	add_meta:Vec<(&'a str,db_types::Value)>,
 	guard:Option<&mut RegistryGuard>
 ) -> tools::Result<RegisterResult> {
 

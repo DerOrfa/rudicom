@@ -7,8 +7,8 @@ use crate::tools::{complete_filepath, Context, Error, Result};
 use dicom::object::{from_reader, DefaultDicomObject};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use surrealdb::sql;
 use tokio::io::AsyncReadExt;
+use surrealdb::types as db_types;
 
 #[derive(Deserialize)]
 pub struct File
@@ -73,33 +73,32 @@ impl File {
 	}
 }
 
-impl TryFrom<surrealdb::Value> for File
+impl TryFrom<db_types::Value> for File
 {
 	type Error = Error;
 
-	fn try_from(obj: surrealdb::Value) -> std::result::Result<Self, Self::Error> {
-		let context=format!("parsing database object {obj} as File object");
-		let obj = obj.into_inner();
-		let kind = obj.kindof();
+	fn try_from(obj: db_types::Value) -> std::result::Result<Self, Self::Error> {
+		let context=format!("parsing database object {} as File object",obj.as_string().unwrap());
+		let kind = obj.kind().to_string();
 		match obj {
-			sql::Value::Object(obj) => surrealdb::Object::from_inner(obj).try_into(),
+			db_types::Value::Object(obj) => obj.try_into(),
 			_ => Err(Error::UnexpectedResult {expected:"object".into(),found:kind})
 		}.context(context)
 	}
 }
 
-impl TryFrom<File> for surrealdb::Value
+impl TryFrom<File> for db_types::Value
 {
 	type Error = Error;
 
 	fn try_from(file: File) -> std::result::Result<Self, Self::Error> {
-		let mut ret=sql::Object::default();
+		let mut ret=db_types::Object::default();
 		let file_path = file.path.to_str().ok_or(Error::InvalidFilename {name:file.path.clone()})?;
-		ret.insert("path".into(),file_path.into());
-		ret.insert("owned".into(),file.owned.into());
-		ret.insert("md5".into(),file.md5.into());
-		ret.insert("size".into(),file.size.into());
-		Ok(surrealdb::Value::from_inner(ret.into()))
+		ret.insert("path",file_path.to_string());
+		ret.insert("owned",file.owned);
+		ret.insert("md5",file.md5);
+		ret.insert("size",file.size);
+		Ok(ret.into())
 	}
 }
 
@@ -118,16 +117,16 @@ impl Serialize for File
     }
 }
 
-impl TryFrom<surrealdb::Object> for File
+impl TryFrom<db_types::Object> for File
 {
 	type Error = Error;
 
-	fn try_from(mut obj: surrealdb::Object) -> std::result::Result<Self, Self::Error> {
-		let path = obj.pick_remove("path").map(|v| v.into_inner().as_raw_string())?;
-		let owned = obj.pick_remove("owned").map(|v|v.into_inner().is_true())?;
-		let md5 = obj.pick_remove("md5").map(|v|v.into_inner().as_raw_string())?;
+	fn try_from(mut obj: db_types::Object) -> std::result::Result<Self, Self::Error> {
+		let path = obj.pick_remove("path")?.into_string()?;
+		let owned = obj.pick_remove("owned")?.is_true();
+		let md5 = obj.pick_remove("md5")?.into_string()?;
 		let size = obj.pick_remove("size")
-			.map(|v|if let sql::Value::Number(num) = v.into_inner() { num.to_int()} else {0})?;
+			.map(|v|if let db_types::Value::Number(num) = v { num.to_int().unwrap_or_default()} else {0})?;
 		Ok(File{path:path.into(),owned,md5,size:size as u64})
 	}
 }

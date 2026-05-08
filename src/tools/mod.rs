@@ -15,7 +15,8 @@ use std::iter::repeat;
 use std::ops::Bound::Included;
 use std::path::{Path, PathBuf};
 use surrealdb::opt::Resource;
-use surrealdb::sql;
+use surrealdb::types as db_types;
+use surrealdb::types::{RecordIdKey, RecordIdKeyRange, SurrealValue};
 
 pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 {
@@ -64,21 +65,19 @@ pub async fn entries_for_record(id:&RecordId,table:&str) -> Result<Vec<db::Entry
 	};
 	let ctx = format!("listing children of {}",id);
 	let id_vec= id.key_vec().to_vec();
-	let max_gen = repeat(i64::MAX).map(sql::Value::from).take(size-id_vec.len());
-	let min_gen = repeat(i64::MIN).map(sql::Value::from).take(size-id_vec.len());
+	let max_gen = repeat(i64::MAX).map(i64::into_value).take(size-id_vec.len());
+	let min_gen = repeat(i64::MIN).map(i64::into_value).take(size-id_vec.len());
 
 	
-	let begin:Vec<_> = id_vec.iter().map(|v|v.clone()).chain(min_gen)
-		.map(surrealdb::Value::from_inner).collect();
-	let end:Vec<_> = id_vec.into_iter().chain(max_gen)
-		.map(surrealdb::Value::from_inner).collect();
-	let results = DB.select::<surrealdb::Value>(Resource::Table(table.to_string()))
-		.range((Included(begin),Included(end))).await?.into_inner();
-	if let sql::Value::Array(instances) = results {
-		instances.0.into_iter().map(surrealdb::Value::from_inner).map(Entry::try_from)
+	let begin = RecordIdKey::Array(id_vec.iter().map(|v|v.clone()).chain(min_gen).collect());
+	let end = RecordIdKey::Array(id_vec.into_iter().chain(max_gen).collect());
+	let results = DB.select::<db_types::Value>(Resource::Table(table.into()))
+		.range(RecordIdKeyRange{start:Included(begin),end:Included(end)}).await?;
+	if let db_types::Value::Array(instances) = results {
+		instances.into_iter().map(Entry::try_from)
 			.collect::<Result<Vec<_>>>().context(ctx)
 	} else {
-		Err(Error::UnexpectedResult {expected:"list of entries".into(),found: results.kindof()})
+		Err(Error::UnexpectedResult {expected:"list of entries".into(),found: results.kind().to_string()})
 	}
 }
 

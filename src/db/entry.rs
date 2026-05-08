@@ -7,27 +7,28 @@ use crate::tools::{entries_for_record, reduce_path, Context, Result};
 use byte_unit::Byte;
 use std::path::PathBuf;
 use dicom::object::DefaultDicomObject;
-use surrealdb::sql;
 use crate::dcm::{extract, INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
+use surrealdb::types as db_types;
+use surrealdb::types::ToSql;
 
 #[derive(Clone,Debug)]
 pub enum Entry
 {
-	Instance((RecordId,surrealdb::Object)),
-	Series((RecordId,surrealdb::Object)),
-	Study((RecordId,surrealdb::Object))
+	Instance((RecordId,db_types::Object)),
+	Series((RecordId,db_types::Object)),
+	Study((RecordId,db_types::Object))
 }
 
 impl Entry
 {
-	pub fn get(&self, key:&str) -> Option<&surrealdb::Value>
+	pub fn get(&self, key:&str) -> Option<&db_types::Value>
 	{
-		let obj:&surrealdb::Object = self.as_ref();
+		let obj:&db_types::Object = self.as_ref();
 		obj.get(key)
 	}
-	pub fn get_string(&self, key:&str) -> Option<String>
+	pub fn get_string(&self, key:&str) -> Option<&str>
 	{
-		self.get(key).map(|v|v.into_inner_ref().to_raw_string())
+		self.get(key).and_then(|v|v.as_string()).map(|s| s.as_str())
 	}
 	pub fn id(&self) -> &RecordId {&self.as_ref()}
 	
@@ -41,20 +42,20 @@ impl Entry
 	{
 		match self {
 			Instance(_) => {
-				let number=self.get_string("Number").unwrap_or("<-->".to_string());
+				let number=self.get_string("Number").unwrap_or("<-->");
 				format!("Instance {number}")
 			},
 			Series(_) => {
-				let number=self.get_string("Number").unwrap_or("<-->".to_string());
-				let desc= self.get_string("Description").unwrap_or("<-->".to_string());
+				let number=self.get_string("Number").unwrap_or("<-->");
+				let desc= self.get_string("Description").unwrap_or("<-->");
 				format!("S{number}_{desc}")
 			},
 			Study(_) => {
-				let id=self.get_string("Name").unwrap_or("<-->".to_string());
-				let mut date=self.get_string("Date").unwrap_or("<-->".to_string());
-				let mut time=self.get_string("Time").unwrap_or("<-->".to_string());
-				if date.len()>6 {date=date.split_off(2);}
-				time.truncate(6);
+				let id=self.get_string("Name").unwrap_or("<-->");
+				let mut date=self.get_string("Date").unwrap_or("<-->");
+				let mut time=self.get_string("Time").unwrap_or("<-->");
+				if date.len()>6 {date=&date[2..];}
+				let time = &time[..6];
 				format!("{id}/{date}_{time}")
 			}
 		}
@@ -85,13 +86,13 @@ impl Entry
 		}
 	}
 
-	pub fn remove(&mut self,key:&str) -> Option<surrealdb::Value>
+	pub fn remove(&mut self,key:&str) -> Option<db_types::Value>
 	{
 		self.as_mut().remove(key)
 	}
-	pub fn insert<T,K>(&mut self,key:K,value:T) -> Option<surrealdb::Value> where T:Into<sql::Value>,K:Into<String>
+	pub fn insert<T,K>(&mut self,key:K,value:T) -> Option<db_types::Value> where T:Into<db_types::Value>,K:Into<String>
 	{
-		self.as_mut().insert(key.into(),surrealdb::Value::from_inner(value.into()))
+		self.as_mut().insert(key.into(),value.into())
 	}
 
 	pub fn get_file(&self) -> Result<db::File>
@@ -152,86 +153,84 @@ impl AsRef<RecordId> for Entry
 	}
 }
 
-impl AsRef<surrealdb::Object> for Entry
+impl AsRef<db_types::Object> for Entry
 {
-	fn as_ref(&self) -> &surrealdb::Object {
+	fn as_ref(&self) -> &db_types::Object {
 		match self {
 			Instance(data)| Series(data) | Study(data) => &data.1
 		}
 	}
 }
-impl AsMut<surrealdb::Object> for Entry
+impl AsMut<db_types::Object> for Entry
 {
-	fn as_mut(&mut self) -> &mut surrealdb::Object {
+	fn as_mut(&mut self) -> &mut db_types::Object {
 		match self {
 			Instance(data)| Series(data) | Study(data) => &mut data.1
 		}
 	}
 }
 
-impl From<Entry> for surrealdb::Object {
+impl From<Entry> for db_types::Object {
 	fn from(entry: Entry) -> Self {
 		match entry {
 			Instance(mut data)| Series(mut data) | Study(mut data) => {
-				data.1.insert("id".into(),data.0.0);
+				data.1.insert("id",data.0.0);
 				data.1
 			}
 		}
 	}
 }
-impl From<Entry> for surrealdb::Value {
+impl From<Entry> for db_types::Value {
 	fn from(entry: Entry) -> Self {
-		surrealdb::Value::from_inner(surrealdb::Object::from(entry).into_inner().into())	
+		db_types::Object::from(entry).into()
 	}
 }
 
-impl TryFrom<surrealdb::Value> for Entry
+impl TryFrom<surrealdb::types::Value> for Entry
 {
 	type Error = crate::tools::Error;
 
-	fn try_from(value: surrealdb::Value) -> std::result::Result<Self, Self::Error>
+	fn try_from(value: db_types::Value) -> std::result::Result<Self, Self::Error>
 	{
-		let value = value.into_inner();
-		let kind = value.kindof();
+		let kind = value.kind().to_string();
 		let err = UnexpectedResult {expected:"single object".into(),found:kind};
 		match value {
-			sql::Value::Array(mut array) => { //@todo probably unnecessary
+			db_types::Value::Array(mut array) => { //@todo probably unnecessary
 				if array.len() == 1 {
 					let last = array.drain(..1).last().unwrap();
-					Entry::try_from(surrealdb::Value::from_inner(last)) 
+					Entry::try_from(last)
 				} else {
 					Err(err)
 				}
 			}
-			sql::Value::Object(obj) => 
-				Entry::try_from(surrealdb::Object::from_inner(obj)),
+			db_types::Value::Object(obj) =>
+				Entry::try_from(obj),
 			_ => Err(err),
 		}.context("trying to convert database value into an Entry")
 	}
 }
-impl TryFrom<surrealdb::Object> for Entry
+impl TryFrom<db_types::Object> for Entry
 {
 	type Error = crate::tools::Error;
 
-	fn try_from(mut obj: surrealdb::Object) -> std::result::Result<Self, Self::Error>
+	fn try_from(mut obj: db_types::Object) -> std::result::Result<Self, Self::Error>
 	{
 		let ctx = "trying to convert database object into an Entry";
 		let id = obj.remove("id")
-			.ok_or(Self::Error::ElementMissing{element:"id".into(),parent:obj.to_string()})
-			.map(surrealdb::Value::into_inner).context(ctx)?;
+			.ok_or(Self::Error::ElementMissing{element:"id".into(),parent:obj.to_sql_pretty()})
+			.context(ctx)?;
 		match id
 		{
-			sql::Value::Thing(id) => 
+			db_types::Value::RecordId(id) =>
 			{
-				let id = RecordId(surrealdb::RecordId::from_inner(id));
-				match id.table() {
-					"instances" => Ok(Instance((id, obj))),
-					"series" => Ok(Series((id, obj))),
-					"studies" => Ok(Study((id, obj))),
-					_ => Err(Self::Error::InvalidTable{table:id.table().to_string()})
+				match id.table.as_str() {
+					"instances" => Ok(Instance((RecordId(id), obj))),
+					"series" => Ok(Series((RecordId(id), obj))),
+					"studies" => Ok(Study((RecordId(id), obj))),
+					_ => Err(Self::Error::InvalidTable{table:id.table.to_string()})
 				}
 			}
-			_ => Err(UnexpectedResult{expected:"id".into(),found:id.kindof()})
+			_ => Err(UnexpectedResult{expected:"id".into(),found:id.kind().to_string()})
 		}.context(ctx)
 	}
 }
@@ -239,7 +238,7 @@ impl TryFrom<surrealdb::Object> for Entry
 impl From<Entry> for serde_json::Value
 {
 	fn from(entry: Entry) -> Self {
-		let obj = surrealdb::Object::from(entry);
-		crate::tools::conv::value_to_json(obj.into_inner().into()).into()
+		let obj = db_types::Object::from(entry);
+		crate::tools::conv::value_to_json(db_types::Value::Object(obj)).into()
 	}
 }

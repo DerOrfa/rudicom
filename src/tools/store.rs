@@ -7,8 +7,9 @@ use dicom::object::DefaultDicomObject;
 use std::path::Path;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use surrealdb::types as db_types;
 
-async fn read_to_buffer(filename:&Path) -> crate::tools::Result<Vec<u8>>
+async fn read_to_buffer(filename:&Path) -> tools::Result<Vec<u8>>
 {
 	let mut buffer = Vec::<u8>::new();
 	let mut file = File::open(filename).await?;
@@ -34,7 +35,7 @@ pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 
 	let fileinfo = db::File::new(gen_filepath(&obj)?, checksum.finalize(), true, buffer.len() as u64);
 	let c_path = fileinfo.get_path();
-	let fileinfo = surrealdb::Value::try_from(fileinfo)?;
+	let fileinfo = db_types::Value::try_from(fileinfo)?;
 
 	let registered= db::register_instance(&obj, vec![("file",fileinfo.into())],Some(&mut guard)).await?;
 	if let RegisterResult::Stored(_) = &registered { // normal register => store the file
@@ -74,7 +75,7 @@ async fn import_file_impl(path:&Path,own:bool) -> tools::Result<RegisterResult>
 {
 	let (fileinfo,obj) = db::File::new_from_existing(path,own).await?;
 	let my_md5= fileinfo.get_md5().to_string();
-	let add_meta = vec![("file", surrealdb::Value::try_from(fileinfo)?.into())];
+	let add_meta = vec![("file", db_types::Value::try_from(fileinfo)?.into())];
 	let registered=db::register_instance(&obj,add_meta,None).await?;
 	if let RegisterResult::AlreadyStored(existing) = &registered //if register says equal data exist, we check md5sum
 	{

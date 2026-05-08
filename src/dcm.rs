@@ -11,6 +11,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::LazyLock;
 use strfmt::{strfmt_map, FmtError};
+use surrealdb::types as db_types;
 
 #[derive(Debug,Clone,Hash,PartialEq,Eq)]
 pub struct AttributeSelector(pub dicom::core::ops::AttributeSelector);
@@ -62,7 +63,7 @@ pub fn get_attr_list(table:db::Table, must_have:Vec<(&str,Vec<Tag>)>) -> HashMap
 	attrs
 }
 
-pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a HashMap<String,Vec<AttributeSelector>>) -> Vec<(&'a str, surrealdb::Value)>
+pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a HashMap<String,Vec<AttributeSelector>>) -> Vec<(&'a str, db_types::Value)>
 {
 	requested.iter().map(|(k,selectors)|(
 		k.deref(),
@@ -72,7 +73,6 @@ pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a HashMap<String,Vec<At
 			.unwrap_or_default()
 		)
 	)
-	.map(|(k,v)|(k,surrealdb::Value::from_inner(v)))
 	.collect()
 }
 
