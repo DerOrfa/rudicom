@@ -52,13 +52,15 @@ pub async fn get_studies_html(headers: HeaderMap,Query(config): Query<ListingCon
     );
 
     // get some aggregated data
-    let aggregate_instances:Vec<AggregateData> = DB.select("instances_per_studies").await
+    let aggregate_instances:Vec<AggregateData> = DB
+        .query("select id, count(array::flatten(series.instances)) as count, math::sum(array::flatten(series.instances.file.size)) as size from studies").await
+        .and_then(|mut r|r.take(0))
         .into_http_error(&headers)?;
     // collect results from above
     let instance_count:BTreeMap<RecordId,_> = aggregate_instances.iter()
-        .map(|e|(e.get_inner_id(),e.count)).collect();
+        .map(|e|(RecordId(e.id.clone()),e.count)).collect();
     let filesizes:BTreeMap<RecordId,_> =aggregate_instances.into_iter()
-        .map(|e|(e.get_inner_id(),Byte::from(e.size))).collect();
+        .map(|e|(RecordId(e.id),Byte::from(e.size))).collect();
 
     let countinstances = move |obj:&Entry,cell:&mut TableCellBuilder| {
         let inst_cnt= instance_count[obj.id()];

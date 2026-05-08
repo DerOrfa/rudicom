@@ -40,7 +40,7 @@ async fn invalid_insert() -> Result<(), Box<dyn std::error::Error>>
 	let study_id = uid_gen.study(111);
 	let study_entry = lookup_uid("studies",study_id).await?
 		.expect("expected study entry");
-	let instances_per_study= study_entry.get_instances_per().await?.count;
+	let instances_per_study= study_entry.get_aggregate().await?.count;
 	assert_eq!(instances_per_study,ins1.len(),"Only {} instanced should have been inserted, but {} are there",ins1.len(),instances_per_study);
 
 	match messy_insert{

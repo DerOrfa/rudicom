@@ -7,7 +7,7 @@ use html::tables::builders::TableCellBuilder;
 use html::tables::{Table, TableCell, TableRow};
 use std::collections::BTreeMap;
 use surrealdb::types as db_types;
-use surrealdb::types::SurrealValue;
+use surrealdb::types::{SurrealValue, ToSql};
 use crate::db;
 use crate::db::{find_down_tree, Entry};
 use crate::tools::{entries_for_record, Context, Result};
@@ -16,10 +16,11 @@ impl Entry {
 	pub async fn make_nav(&self) -> Result<Navigation>
 	{
 		let mut anchors = Vec::<Anchor>::new();
-		let path= find_down_tree(self.id().clone())
-			.context(format!("Failed finding parents for {}", self.id()))?;
+		let path= find_down_tree(&self.id()).await;
+		let path = path.context(format!("Failed finding parents for {}", self.id()))?;
 		for id in path {
-			anchors.push(db::lookup(&id).await?.unwrap().get_link());
+			let entry = db::lookup(&id).await?.unwrap();
+			anchors.push(entry.get_link());
 		}
 
 		Ok(Navigation::builder().class("crumbs")
@@ -53,7 +54,7 @@ fn table_from_map(map:BTreeMap<String, db_types::Value>) -> Table{
 			.table_cell(|c| {
 				match v {
 					db_types::Value::Object(o) => c.push(table_from_map(o.into_inner())),
-					_ => c.text(v.into_string().unwrap())
+					_ => c.text(v.into_string().unwrap_or("### Unprintable ###".to_string()))
 				}
 
 			})
@@ -97,7 +98,7 @@ pub async fn table_from_objects(
 			let mut cellbuilder=TableCell::builder();
 			if let Some(value) = item
 			{
-				cellbuilder.text(value.into_string()?);
+				cellbuilder.text(value.as_string().cloned().unwrap_or(value.to_sql()));
 			} else {cellbuilder.text("----------");}
 			row_builder.push(cellbuilder.build());
 		}
@@ -127,6 +128,7 @@ pub async fn entry_page(entry:Entry) -> Result<Html>
 		}
 		Entry::Series((id,mut series)) => {
 			series.remove("study");
+			series.remove("instances");
 			builder.heading_2(|h|h.text("Attributes")).push(table_from_map(series.into_inner()));
 			let mut instances= entries_for_record(&id,"instances").await?;
 			instances.sort_by_key(|s|s
@@ -151,13 +153,14 @@ pub async fn entry_page(entry:Entry) -> Result<Html>
 			let instance_table = table_from_objects(instances, "Name".into(), keys, vec![("thumbnail",Box::new(makethumb))]).await?;
 			builder.heading_2(|h|h.text(instance_text)).push(instance_table);
 		}
-		Entry::Study((id,study)) => {
+		Entry::Study((id,mut study)) => {
+			study.remove("series");
 			builder.heading_2(|h|h.text("Attributes")).push(table_from_map(study.into_inner()));
 
 			let mut series= entries_for_record(&id, "series").await?;
 			for s in &mut series
 			{
-				let v = s.get_instances_per().await?;
+				let v = s.get_aggregate().await?;
 				s.insert("Instances", v.count.into_value());
 				s.insert("Size",format!("{:.2}",Byte::from(v.size).get_appropriate_unit(Binary)).into_value());
 			}

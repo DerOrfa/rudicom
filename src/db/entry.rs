@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use dicom::object::DefaultDicomObject;
 use crate::dcm::{extract, INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use surrealdb::types as db_types;
-use surrealdb::types::ToSql;
+use surrealdb::types::{ToSql, Value};
 
 #[derive(Clone,Debug)]
 pub enum Entry
@@ -31,11 +31,31 @@ impl Entry
 		self.get(key).and_then(|v|v.as_string()).map(|s| s.as_str())
 	}
 	pub fn id(&self) -> &RecordId {&self.as_ref()}
-	
-	pub async fn get_instances_per(&self) -> Result<AggregateData>
+
+	pub async fn get_aggregate(&self) -> Result<AggregateData>
 	{
-		let res:Option<AggregateData>=DB.select(self.id().to_aggregate()).await?;
-		res.ok_or(NotFound)
+		match self {
+			Instance((_,_)) => {
+				let file = self.get_file()?;
+				Ok(AggregateData{
+					id: self.id().0.clone(),
+					count: 1,
+					size: file.size,
+				})
+			}
+			Series((_,_)) => {
+				let res:Option<AggregateData>=DB.query("select id,math::sum(instances.file.size) as size, count(instances) as count from $rec")
+					.bind(("rec", self.id().0.clone()))
+					.await?.take(0)?;
+				res.ok_or(NotFound)
+			}
+			Study(_) => {
+				let res:Option<AggregateData>=DB.query("select id, count(array::flatten(series.instances)) as count, math::sum(array::flatten(series.instances.file.size)) as size from $rec")
+					.bind(("rec", self.id().0.clone()))
+					.await?.take(0)?;
+				res.ok_or(NotFound)
+			}
+		}
 	}
 
 	pub fn name(&self) -> String
@@ -53,7 +73,7 @@ impl Entry
 			Study(_) => {
 				let id=self.get_string("Name").unwrap_or("<-->");
 				let mut date=self.get_string("Date").unwrap_or("<-->");
-				let mut time=self.get_string("Time").unwrap_or("<-->");
+				let time=self.get_string("Time").unwrap_or("<-->");
 				if date.len()>6 {date=&date[2..];}
 				let time = &time[..6];
 				format!("{id}/{date}_{time}")
@@ -80,7 +100,7 @@ impl Entry
 			Instance(_) => self.get_file().map(|f|Byte::from(f.size)),
 			Series(_) | Study(_) => {
 				let ctx = format!("extracting size of {}",self.id().str_key());
-				self.get_instances_per().await.context(ctx.as_str())
+				self.get_aggregate().await.context(ctx.as_str())
 					.map(|d|Byte::from(d.size))
 			}
 		}
@@ -217,7 +237,7 @@ impl TryFrom<db_types::Object> for Entry
 	{
 		let ctx = "trying to convert database object into an Entry";
 		let id = obj.remove("id")
-			.ok_or(Self::Error::ElementMissing{element:"id".into(),parent:obj.to_sql_pretty()})
+			.ok_or(Self::Error::ElementMissing{element:"id".into(),parent:obj.to_sql_pretty()}) // @todo find something better
 			.context(ctx)?;
 		match id
 		{
@@ -240,5 +260,18 @@ impl From<Entry> for serde_json::Value
 	fn from(entry: Entry) -> Self {
 		let obj = db_types::Object::from(entry);
 		crate::tools::conv::value_to_json(db_types::Value::Object(obj)).into()
+	}
+}
+
+impl Pickable for Entry {
+	fn pick_ref<Q>(&self, element: Q) -> Result<&Value>	where String: From<Q>
+	{
+		let obj:&db_types::Object = self.as_ref();
+		obj.pick_ref(element)
+	}
+
+	fn pick_remove<Q>(&mut self, element: Q) -> Result<Value> where String: From<Q>
+	{
+		self.as_mut().pick_remove(element)
 	}
 }

@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::collections::BTreeMap;
 use crate::tools::Error::{ElementMissing, UnexpectedResult};
 use crate::tools::{Context, Error, Result};
 use byte_unit::Byte;
@@ -7,18 +5,19 @@ use byte_unit::UnitType::Binary;
 pub use entry::Entry;
 pub use file::File;
 pub use into_db_value::IntoDbValue;
-pub use register::{register_instance, RegistryGuard};
 pub use record::RecordId;
+pub use register::{register_instance, RegistryGuard};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use surrealdb::engine::any::Any;
+use surrealdb::method::IntoVariables;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::{IntoResource, PatchOp, Resource};
-use surrealdb::Surreal;
-use surrealdb::method::IntoVariables;
-use surrealdb::types::{RecordIdKey, SurrealValue, Value};
 use surrealdb::types as db_types;
-
+use surrealdb::types::{SurrealValue, Value};
+use surrealdb::Surreal;
 
 mod into_db_value;
 mod register;
@@ -29,27 +28,11 @@ mod record;
 #[derive(Deserialize,Debug,SurrealValue)]
 pub struct AggregateData
 {
-	id:surrealdb::types::RecordId,
+	pub id:db_types::RecordId,
 	pub count:usize,
-	pub size:u64, 
+	pub size:u64,
 }
 
-impl AggregateData
-{
-	pub fn get_inner_id(&self) -> RecordId
-	{
-		let ret = if let RecordIdKey::Array(array) = &self.id.key
-		{
-			let inner_id_value= array.get(0)
-				.expect("aggregate RecordIdKeys must be arrays with one element");
-			if let Value::RecordId(id) = inner_id_value {
-				let inner_key = &id.key;
-				surrealdb::types::RecordId{table:id.table.to_owned(),key:inner_key.to_owned()}
-			} else {panic!("aggregate RecordIdKeys must be arrays of RecordIds")}
-		} else {panic!("aggregate RecordIdKeys must be arrays")};
-		RecordId(ret)
-	}
-}
 
 pub static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
@@ -105,30 +88,29 @@ pub async fn lookup_uid<S:AsRef<str>>(table:S, uid:String) -> Result<Option<Entr
 }
 
 /// returns [me,parent,parents_parent]
-pub fn find_down_tree(id:RecordId) -> Result<Vec<RecordId>>
+pub async fn find_down_tree(id:&RecordId) -> Result<Vec<RecordId>>
 {
 	let query_context = format!("looking for parents of {id}");
-	todo!()
-	// let key_vec:Vec<_> = id.key_vec().to_vec().into_iter().collect();
-	// match id.table.as_str() {
-	// 	"instances" => {
-	// 		let (study,_) = key_vec.split_at(6); // just study
-	// 		let (series, _) = key_vec.split_at(12); // study + series
-	// 		Ok(vec![
-	// 			id,
-	// 			("series", series).into(),
-	// 			("studies",study).into()
-	// 		])
-	// 	},
-	// 	"series" => {
-	// 		let (study,_) = key_vec.split_at(6);
-	// 		Ok(vec![
-	// 			id,("studies",study).into()
-	// 		])
-	// 	},
-	// 	"studies" => Ok(vec![id]),
-	// 	_ => {Err(Error::InvalidTable {table:id.table.to_string()}.context(query_context))}
-	// }
+	match id.table.as_str() {
+		"instances" => {
+			let series:Option<db_types::RecordId> = DB.query("SELECT series FROM $rec").bind(("rec", id.0.clone())).await?.take("series")?;
+			let series = series.expect("no series field");
+			let study:Option<db_types::RecordId> = DB.query("SELECT study FROM $rec").bind(("rec", series.clone())).await?.take("study")?;
+			Ok(vec![
+				id.clone(),
+				RecordId(series),
+				RecordId(study.expect("no study field"))
+			])
+		},
+		"series" => {
+			let study:Option<db_types::RecordId> = DB.query("SELECT study FROM $rec").bind(("rec", id.0.clone())).await?.take("study")?;
+			Ok(vec![
+				id.clone(), RecordId(study.expect("no study field"))
+			])
+		},
+		"studies" => Ok(vec![id.clone()]),
+		_ => { Err(Error::InvalidTable { table: id.table.to_string() }.context(query_context))}
+	}
 }
 
 pub async fn init_file(file:&std::path::Path) -> surrealdb::Result<()>
@@ -184,7 +166,7 @@ pub async fn statistics() -> Result<Stats>
 	})
 }
 
-trait Pickable
+pub trait Pickable
 {
 	fn pick_ref<Q>(&self, element:Q) -> Result<&Value> where String: From<Q>;
 	fn pick_remove<Q>(&mut self, element:Q) -> Result<Value> where String: From<Q>;

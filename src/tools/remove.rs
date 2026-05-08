@@ -2,7 +2,6 @@ use crate::db;
 use crate::tools::{entries_for_record, Context};
 use crate::tools::Result;
 use std::path::{Path, PathBuf};
-use surrealdb::types::{ErrorDetails, QueryError};
 use tokio::fs::{remove_dir, remove_file};
 use tracing::log::warn;
 use crate::db::DB;

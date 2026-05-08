@@ -27,14 +27,6 @@ impl RecordId {
 	pub fn str_path(&self) -> String {
 		format!("/api/{}/{}",self.table,self.str_key())
 	}
-	pub fn to_aggregate(&self) -> db_types::RecordId {
-		let me = db_types::Array::from(vec![self.0.clone()]);
-		match self.table.as_str() {
-			"series" => db_types::RecordId::new("instances_per_series", me),
-			"studies" => db_types::RecordId::new("instances_per_studies",me),
-			_ => panic!("cannot get aggregate data for {self}")
-		}
-	}
 }
 
 impl Eq for RecordId {}

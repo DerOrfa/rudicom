@@ -7,11 +7,12 @@ pub mod conv;
 pub mod tar;
 
 use crate::db;
-use crate::db::{lookup_uid, RecordId};
-use crate::tools::Error::DicomError;
+use crate::db::{lookup_uid, Pickable, RecordId, DB};
+use crate::tools::Error::{DicomError, NotFound};
 use dicom::object::DefaultDicomObject;
 pub use error::{Context, Error, Result, Source};
 use std::path::{Path, PathBuf};
+use surrealdb::types as db_types;
 
 pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 {
@@ -53,28 +54,27 @@ pub async fn lookup_instance_file(id:String) -> Result<Option<db::File>>
 
 pub async fn entries_for_record(id:&RecordId,table:&str) -> Result<Vec<db::Entry>>
 {
-	let size = match table { 
-		"instances" => 18,
-		"series" => 12,
-		_ => unreachable!()
-	};
 	let ctx = format!("listing children of {}",id);
-	todo!()
-	// let id_vec= id.key_vec().to_vec();
-	// let max_gen = repeat(i64::MAX).map(i64::into_value).take(size-id_vec.len());
-	// let min_gen = repeat(i64::MIN).map(i64::into_value).take(size-id_vec.len());
-	//
-	//
-	// let begin = RecordIdKey::Array(id_vec.iter().map(|v|v.clone()).chain(min_gen).collect());
-	// let end = RecordIdKey::Array(id_vec.into_iter().chain(max_gen).collect());
-	// let results = DB.select::<db_types::Value>(Resource::Table(table.into()))
-	// 	.range(RecordIdKeyRange{start:Included(begin),end:Included(end)}).await?;
-	// if let db_types::Value::Array(instances) = results {
-	// 	instances.into_iter().map(Entry::try_from)
-	// 		.collect::<Result<Vec<_>>>().context(ctx)
-	// } else {
-	// 	Err(Error::UnexpectedResult {expected:"list of entries".into(),found: results.kind().to_string()})
-	// }
+	let my_table = id.table.as_str();
+	let mut me= db::lookup(id).await?.ok_or(NotFound)?;
+	let mut ret = vec![];
+	let values = match (my_table, table){
+		("studies","instances") => { // grandchildren need special query
+			DB.query("select array::flatten(series.instances) as series from $rec").bind(("rec",id.0.to_owned()))
+				.await?.take::<Option<Vec<db_types::Value>>>("series")?.ok_or(NotFound)?
+				.into_iter()
+		},
+		// every entry knows its children anyway
+		("series","instances") => me.pick_remove("instances")?.into_array()?.into_iter(),
+		("studies","series") => me.pick_remove("series")?.into_array()?.into_iter(),
+		_ => {return Ok(vec![me])}
+	};
+	for v in values
+	{
+		ret.push(db::lookup(&RecordId(v.into_record()?)).await?.expect("failed accessing children of study"));
+	}
+	Ok(ret)
+
 }
 
 pub fn extract_from_dicom(obj:&'_ DefaultDicomObject,tag:dicom::core::Tag) -> Result<std::borrow::Cow<'_, str>>

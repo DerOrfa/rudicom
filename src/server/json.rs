@@ -111,7 +111,8 @@ async fn get_entry_parents(headers: HeaderMap,Path(path):Path<(String, String)>)
 {
 	let entry = lookup_or(&path).await.into_http_error(&headers)?;
 	let mut ret:Vec<_>=vec![];
-	let parents = db::find_down_tree(entry.id().clone()).into_http_error(&headers)?;
+	let parents = db::find_down_tree(&entry.id()).await;
+	let parents= parents.into_http_error(&headers)?;
 	for p_id in parents
 	{
 		let ctx = format!("looking up parent {p_id} of {}:{}",path.0,path.1);
