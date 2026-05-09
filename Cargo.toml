@@ -7,18 +7,21 @@ rust-version = "1.90.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["html", "dicom-json"]
+default = ["html", "embedded"]
 # enable html interface
 html = ["dep:html"]
 dicom-json = ["dep:dicom-json"]
+embedded = ["surrealdb/kv-surrealkv", "surrealdb/kv-mem" ]
 dhat-heap = ["dhat"]
+# needs rustflags = ["--cfg", "tokio_unstable"] in .cargo/config.toml
+instrumentation = ["dep:console-subscriber", "tokio/tracing"]
 
 [dependencies]
 dicom = {version = "0.8", features = ["image"] }
 dicom-json = { version = "0.8", optional = true }
 clap = { version = "4.5", features = ["derive","string"] }
 serde_json = "1.0"
-surrealdb = {version = "3.0", default-features = false, features = ["kv-surrealkv", "kv-mem", "protocol-ws"]}
+surrealdb = {version = "3.0", default-features = false, features = ["protocol-ws"]}
 serde = "1.0"
 tokio = { version = "1.52", features = ["signal", "macros", "rt-multi-thread", "fs"] }
 glob = "0.3"
@@ -42,6 +45,7 @@ async-compression = {version = "0.4", features = ["tokio","gzip","xz-parallel","
 async-tar = {version = "0.6", default-features = false, features = ["runtime-tokio"]}
 tokio-util = { version = "0.7.16", features = ["io-util","io"] }
 rand = "0.10"
+console-subscriber = { version = "0.5", optional = true }
 
 [dev-dependencies]
 

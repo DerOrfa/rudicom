@@ -98,6 +98,9 @@ pub(super) fn parse() -> Cli
 	#[cfg(not(windows))]
 	let ansi = true;
 
+	#[cfg(feature = "instrumentation")]
+	console_subscriber::init();
+	#[cfg(not(feature = "instrumentation"))]
 	tracing_subscriber::fmt()
 		.with_max_level(ret.log_level.0)
 		.with_ansi(ansi)
