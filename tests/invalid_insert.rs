@@ -10,6 +10,8 @@ mod common;
 #[tokio::test]
 async fn invalid_insert() -> Result<(), Box<dyn std::error::Error>>
 {
+	//tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
+
 	init_db().await?.health().await?;
 	
 	// set up some data register half of it
@@ -44,8 +46,8 @@ async fn invalid_insert() -> Result<(), Box<dyn std::error::Error>>
 	assert_eq!(instances_per_study,ins1.len(),"Only {} instanced should have been inserted, but {} are there",ins1.len(),instances_per_study);
 
 	match messy_insert{
-		Err(Error::DataConflict(_)) => {}
-		_ => panic!("Inserting conflicting data should result in DataConflict-Error, but result was {messy_insert:?}.")	
+		Err(Error::DataConflict(_)) | Err(Error::FieldConflict {..}) => {}
+		e => panic!("Inserting conflicting data should result in DataConflict-Error, but result was {e:?}.")
 	}
 	cleanup().await.map_err(|e| e.into())
 }

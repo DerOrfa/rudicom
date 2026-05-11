@@ -134,6 +134,9 @@ pub enum Error
 	GlobbingError(#[from]GlobError),
 	#[error("Entry already exists with different data")]
 	DataConflict(Entry),
+	#[error("Data fields {fields} in the entry {id} conflict with new update")]
+	FieldConflict{fields:String,id:RecordId},
+
 	#[error("Entry {existing_id} already exists with different data")]
 	Md5Conflict {existing_md5:String, my_md5:String, existing_id:RecordId},
 
@@ -154,7 +157,6 @@ impl Error {
 	pub fn root_cause(&self) -> &(dyn std::error::Error + 'static) {
 		self.sources().last().expect("Error chains can't be empty")
 	}
-
 }
 
 pub struct Source<'a> {
@@ -185,6 +187,7 @@ impl<T,E> Context for std::result::Result<T,E> where Error:From<E>
 		self.map_err(|e|Error::context_from(e,context))
 	}
 }
+
 
 impl From<&Error> for serde_json::Value{
 	fn from(err: &Error) -> Self {

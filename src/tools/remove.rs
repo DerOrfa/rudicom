@@ -27,7 +27,7 @@ async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 		match &res {
 			Err(e) =>
 			{
-				if e.kind_str() == "Transaction conflict" {
+				if let Some(e) = e.query_details() {
 					tokio::time::sleep(tokio::time::Duration::from_millis(rand::random_range(10..100))).await;
 					continue // try again
 				} else {

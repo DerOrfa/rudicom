@@ -15,9 +15,9 @@ use surrealdb::engine::any::Any;
 use surrealdb::method::IntoVariables;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::{IntoResource, PatchOp, Resource};
-use surrealdb::types as db_types;
 use surrealdb::types::{SurrealValue, Value};
 use surrealdb::Surreal;
+use surrealdb::{types as db_types, Connection};
 
 mod into_db_value;
 mod register;
@@ -37,7 +37,8 @@ pub struct AggregateData
 pub static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
 #[derive(Debug)]
-pub enum RegisterResult { // @todo unify via implementing Try https://github.com/rust-lang/rust/issues/84277
+pub enum RegisterResult
+{ // @todo unify via implementing Try https://github.com/rust-lang/rust/issues/84277
 	Stored(RecordId),
 	AlreadyStored(RecordId),
 }
