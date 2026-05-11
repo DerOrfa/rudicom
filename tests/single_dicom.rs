@@ -1,6 +1,7 @@
 use crate::common::dcm;
 use crate::common::init_db;
 use dicom::dictionary_std::tags;
+use tracing::debug;
 use rudicom::db::lookup;
 use rudicom::db::RegisterResult;
 use rudicom::tools::store::store;
@@ -11,10 +12,12 @@ mod common;
 #[tokio::test]
 async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 {
+	tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 	init_db().await?.health().await?;
 	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
 	if let RegisterResult::Stored(_) = store(obj.clone()).await? {} 
 	else { panic!("First store should return stored."); }
+	debug!("inserted object");
 	if let RegisterResult::AlreadyStored(stored) = store(obj.clone()).await? {
 		let stored = lookup(&stored).await?.expect("existing object should be found");
 		let path = stored.get_file()?.get_path();

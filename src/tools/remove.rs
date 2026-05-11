@@ -4,7 +4,7 @@ use crate::tools::Result;
 use std::path::{Path, PathBuf};
 use tokio::fs::{remove_dir, remove_file};
 use tracing::log::warn;
-use crate::db::DB;
+use crate::db::{if_retry, DB};
 use surrealdb::types as db_types;
 
 pub async fn remove(id:&db::RecordId) -> Result<()>
@@ -22,18 +22,11 @@ pub async fn remove(id:&db::RecordId) -> Result<()>
 async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
 {
 	let mut res;
+	let mut retry = 0;
 	loop {
 		res = DB.delete::<Option<db_types::Value>>(id.0.clone()).await;
 		match &res {
-			Err(e) =>
-			{
-				if let Some(e) = e.query_details() {
-					tokio::time::sleep(tokio::time::Duration::from_millis(rand::random_range(10..100))).await;
-					continue // try again
-				} else {
-					return Err(e.clone().into())
-				}
-			}
+			Err(e) => if if_retry(e,&mut retry).await?{continue},
 			_ => {break},
 		}
 	}

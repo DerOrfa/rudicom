@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use crate::db::{Entry, RecordId, RegisterResult, DB};
+use crate::db::{if_retry, Entry, RecordId, RegisterResult, DB};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::{extract_from_dicom, Error};
 use crate::{dcm, tools};
@@ -10,7 +10,7 @@ use itertools::Itertools;
 use surrealdb::method::Transaction;
 use surrealdb::{types as db_types, Connection, Surreal};
 use surrealdb::engine::any::Any;
-use surrealdb::types::{ErrorDetails, QueryError, SurrealValue, ToSql};
+use surrealdb::types::{SurrealValue, ToSql};
 use tracing::{debug, error, warn};
 use crate::tools::Error::{DataConflict, FieldConflict};
 
@@ -85,7 +85,8 @@ async fn insert<'a,C>(
 	transaction: &Transaction<C>
 ) -> tools::Result<bool> where C:Connection
 {
-	let meta= prepare_content(record_id, obj, add_meta, tags);
+	let meta= prepare_content(record_id, obj, add_meta, tags).into_value();
+	debug!("inserting meta {}", meta.to_sql_pretty());
 	// use UPSERT so we can get a BEFORE to compare it if data existed, the whole transaction will
 	// be canceled anyway, so there is no harm overwriting
 	let q = transaction.query("UPSERT ONLY $rec CONTENT $content RETURN BEFORE")
@@ -156,48 +157,31 @@ pub async fn register_instance(
 			else { transaction.get_or_insert(DB.clone().begin().await?)};
 
 		// make sure we have a result and handle it
-		match if let Some(r) = res.take() {r} // we already have a result, don't need a new one
+		let fall_throu = match if let Some(r) = res.take() {r} // we already have a result, don't need a new one
 			else {retry+=1;_register_instance(obj, add_meta.clone(), t).await}
 		{
-			Err(Error::SurrealError(e)) => {
-				match e.details(){
-					ErrorDetails::Query(Some(QueryError::TransactionConflict)) |
-					ErrorDetails::Internal if "Transaction conflict".eq(&e.message()[..20]) => {
-						if retry > 10 {warn!("{retry}nd transaction conflict, retrying")};
-						tokio::time::sleep(tokio::time::Duration::from_millis(rand::random_range(10..100))).await;
-						continue // try again
-					},
-					d => {
-						error!("{} error: {e:?}",e.kind_str());
-						if let Some(t) = transaction.take(){
-							t.cancel().await?;
-						}
-						return Err(e.clone().into())
-					}
-				}
-			}
-			Err(e) => {
-				if let Some(t) = transaction.take(){
-					t.cancel().await?;
-				}
-				return Err(e)
-			}
-			Ok(r) => {
+			Err(Error::SurrealError(e)) => if let Ok(true) = if_retry(&e,&mut retry).await{continue} else { e.into() },
+			Err(e) => e,
+			Ok(r) =>
 				if transaction_guard.0.is_some(){ // hand over the transaction to the guard if asked and leave
-					transaction_guard.0.replace(transaction.take().unwrap());
+					transaction_guard.0 = transaction.take();
 					return Ok(r)
 				} else {
 					// no guard, take out the transaction and handle commit here
 					match transaction.take().unwrap().commit().await{
-						Ok(_) =>
-							return Ok(r), // all good, we're done
-						Err(e) =>
-							res = Some(Err(e.into())) //darn, whatever the error is stuff it back in, and handle it in the next loop
+						Ok(_) => return Ok(r), // all good, we're done
+						Err(e) =>{
+							res = Some(Err(e.into())); //darn, whatever the error is, stuff it back in, and handle it in the next loop
+							continue
+						}
 					}
-				}
-			}
+				},
+		};
+		// should only be here because of a final error, cancel transaction and get out of here
+		if let Some(t) = transaction.take(){
+			t.cancel().await?;
 		}
-
+		return Err(fall_throu)
 	}
 
 }

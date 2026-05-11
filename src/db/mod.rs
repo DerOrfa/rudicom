@@ -15,9 +15,10 @@ use surrealdb::engine::any::Any;
 use surrealdb::method::IntoVariables;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::{IntoResource, PatchOp, Resource};
-use surrealdb::types::{SurrealValue, Value};
+use surrealdb::types::{ErrorDetails, QueryError, SurrealValue, Value};
 use surrealdb::Surreal;
-use surrealdb::{types as db_types, Connection};
+use surrealdb::types as db_types;
+use tracing::error;
 
 mod into_db_value;
 mod register;
@@ -216,4 +217,19 @@ pub async fn delete_value(id:impl IntoResource<Option<Value>>, name:impl AsRef<s
 	let ctx = format!("Deleting column {}",name.as_ref());
 	
 	DB.update(id).patch(PatchOp::remove(name.as_ref())).await.map(Option::unwrap_or_default).context(ctx)
+}
+
+pub async fn if_retry(e:&surrealdb::Error,retries:&mut u32) -> surrealdb::Result<bool>{
+	match e.details(){
+		ErrorDetails::Query(Some(QueryError::TransactionConflict)) |
+		ErrorDetails::Internal if "Transaction conflict".eq(&e.message()[..20]) => {
+			if *retries > 10 { tracing::warn!("{retries}nd transaction conflict, retrying")};
+			tokio::time::sleep(tokio::time::Duration::from_millis(rand::random_range(10..100))).await;
+			Ok(true) // try again
+		},
+		_ => {
+			error!("{} error: {e:?}",e.kind_str());
+			Err(e.clone())
+		}
+	}
 }

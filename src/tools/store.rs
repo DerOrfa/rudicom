@@ -52,6 +52,7 @@ pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 		{ // unfortunately this might fail too, so maybe we have to roll back the file (the commit will be rolled back anyway)
 			warn!("Failed to commit, I'll remove the file {lossy_cpath}");
 			tokio::fs::remove_file(c_path.as_path()).await?;
+			Err(e)?
 		}
 	}
 	Ok(registered)

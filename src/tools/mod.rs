@@ -61,12 +61,12 @@ pub async fn entries_for_record(id:&RecordId,table:&str) -> Result<Vec<db::Entry
 	let values = match (my_table, table){
 		("studies","instances") => { // grandchildren need special query
 			DB.query("select array::flatten(series.instances) as series from $rec").bind(("rec",id.0.to_owned()))
-				.await?.take::<Option<Vec<db_types::Value>>>("series")?.ok_or(NotFound)?
+				.await?.take::<Option<Vec<db_types::Value>>>("series")?.ok_or(NotFound).context(ctx)?
 				.into_iter()
 		},
 		// every entry knows its children anyway
-		("series","instances") => me.pick_remove("instances")?.into_array()?.into_iter(),
-		("studies","series") => me.pick_remove("series")?.into_array()?.into_iter(),
+		("series","instances") => me.pick_remove("instances").context(ctx)?.into_array()?.into_iter(),
+		("studies","series") => me.pick_remove("series").context(ctx)?.into_array()?.into_iter(),
 		_ => {return Ok(vec![me])}
 	};
 	for v in values

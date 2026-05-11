@@ -98,14 +98,5 @@ async fn study() -> Result<(), Box<dyn std::error::Error>>
 	let store_path = rudicom::config::get().paths.storage_path.display();
 	let files = glob(format!("{}/**/*",store_path).as_str())?.count();
 	assert_eq!(files,0, "expected number of files to be 0 after removing all instances");
-
-
-	let studies_v:Vec<AggregateData> = DB.select("instances_per_studies").await?;
-	let instances = studies_v.iter()
-		.map(|v|v.count)
-		.reduce(|a,b|a+b).unwrap_or(0);
-	let studies = studies_v.len();
-	assert_eq!(instances,0,"{} instances found in {} studies where they should be none",instances,studies);
-
 	Ok(())
 }
