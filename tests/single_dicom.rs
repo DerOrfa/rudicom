@@ -12,7 +12,7 @@ mod common;
 #[tokio::test]
 async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 {
-	tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
+	// tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 	init_db().await?.health().await?;
 	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
 	if let RegisterResult::Stored(_) = store(obj.clone()).await? {} 

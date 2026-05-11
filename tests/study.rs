@@ -1,11 +1,11 @@
-use crate::common::dcm::{synthesize_study,bulk_insert, UidSynthesizer};
+use crate::common::dcm::{bulk_insert, synthesize_study, UidSynthesizer};
 use crate::common::init_db;
 use dicom::dictionary_std::tags;
 use dicom::object::{FileDicomObject, InMemDicomObject};
 use glob::glob;
 use itertools::Itertools;
 use rand::random;
-use rudicom::db::{lookup_uid, AggregateData, DB};
+use rudicom::db::lookup_uid;
 use rudicom::tools::remove::remove;
 use tokio::task::JoinSet;
 use rudicom::db::RegisterResult;
@@ -39,6 +39,7 @@ async fn check_statistics(uid_gen: &UidSynthesizer, data:&Vec<Vec<FileDicomObjec
 #[tokio::test]
 async fn study() -> Result<(), Box<dyn std::error::Error>>
 {
+	// tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 	init_db().await?.health().await?;
 	let uid_gen = UidSynthesizer::default();
 	let mut instances = synthesize_study(&uid_gen,111,10,100);

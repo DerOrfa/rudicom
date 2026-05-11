@@ -11,7 +11,7 @@ use surrealdb::method::Transaction;
 use surrealdb::{types as db_types, Connection, Surreal};
 use surrealdb::engine::any::Any;
 use surrealdb::types::{SurrealValue, ToSql};
-use tracing::{debug, error, warn};
+use tracing::debug;
 use crate::tools::Error::{DataConflict, FieldConflict};
 
 /// a guard holding a transaction
@@ -57,6 +57,7 @@ impl RegistryGuard
 impl Drop for RegistryGuard{ //@todo find a better way
 	fn drop(&mut self) {
 		if let Some(trans) = self.0.take(){
+			debug!("spawning cleanup for unfinished transaction, try to always commit or reset");
 			let fut = trans.cancel().into_future();
 			tokio::spawn(fut);
 		}
@@ -86,7 +87,6 @@ async fn insert<'a,C>(
 ) -> tools::Result<bool> where C:Connection
 {
 	let meta= prepare_content(record_id, obj, add_meta, tags).into_value();
-	debug!("inserting meta {}", meta.to_sql_pretty());
 	// use UPSERT so we can get a BEFORE to compare it if data existed, the whole transaction will
 	// be canceled anyway, so there is no harm overwriting
 	let q = transaction.query("UPSERT ONLY $rec CONTENT $content RETURN BEFORE")
