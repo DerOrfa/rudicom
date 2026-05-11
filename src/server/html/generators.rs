@@ -54,7 +54,8 @@ fn table_from_map(map:BTreeMap<String, db_types::Value>) -> Table{
 			.table_cell(|c| {
 				match v {
 					db_types::Value::Object(o) => c.push(table_from_map(o.into_inner())),
-					_ => c.text(v.into_string().unwrap_or("### Unprintable ###".to_string()))
+					db_types::Value::String(o) => c.text(o),
+					_ => c.text(v.to_sql())
 				}
 
 			})
