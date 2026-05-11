@@ -8,7 +8,7 @@ rust-version = "1.90.0"
 
 [features]
 default = ["html", "embedded"]
-# enable html interface
+# enable HTML interface
 html = ["dep:html"]
 dicom-json = ["dep:dicom-json"]
 embedded = ["surrealdb/kv-surrealkv", "surrealdb/kv-mem" ]

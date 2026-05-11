@@ -8,11 +8,9 @@ pub use into_db_value::IntoDbValue;
 pub use record::RecordId;
 pub use register::{register_instance, RegistryGuard};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use surrealdb::engine::any::Any;
-use surrealdb::method::IntoVariables;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::{IntoResource, PatchOp, Resource};
 use surrealdb::types::{ErrorDetails, QueryError, SurrealValue, Value};
@@ -43,16 +41,6 @@ pub enum RegisterResult
 	Stored(RecordId),
 	AlreadyStored(RecordId),
 }
-
-async fn query(qry: impl Into<Cow<'_, str>>, bindings: impl IntoVariables) -> surrealdb::Result<Value>
-{
-	let mut result= DB
-		.query(qry)
-		.bind(bindings)
-		.await?;
-	result.take::<Value>(0usize)
-}
-
 pub async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where Resource: From<T>
 {
 	let val = DB.select::<Value>(Resource::from(table)).await?;
@@ -76,17 +64,12 @@ pub async fn lookup(id:&RecordId) -> Result<Option<Entry>>
 	}
 }
 
-pub async fn lookup_uid<S:AsRef<str>>(table:S, uid:String) -> Result<Option<Entry>>
+pub async fn lookup_uid<S>(table:S, uid:String) -> Result<Option<Entry>> where db_types::Table:From<S>
 {
-	let ctx = format!("looking up {uid} in {}",table.as_ref());
-	let value= query(format!("select * from {} where uid == $uid",table.as_ref()), ("uid", uid))
-		.await.context(ctx.clone())?;
-	if value.is_nullish() {
-		Ok(None)
-	}else{
-		Some(Entry::try_from(value)).transpose().context(ctx)
-	}
-
+	let table:db_types::Table = table.into();
+	let ctx = format!("looking up {uid} in {table}");
+	DB.select::<Option<Value>>(db_types::RecordId::new(table, uid)).await.context(ctx.clone())?
+		.map(Entry::try_from).transpose().context(ctx)
 }
 
 /// returns [me,parent,parents_parent]

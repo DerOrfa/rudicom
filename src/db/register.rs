@@ -65,14 +65,12 @@ impl Drop for RegistryGuard{ //@todo find a better way
 }
 
 fn prepare_content(
-	record_id: &RecordId,
 	obj:&DefaultDicomObject,
 	add_meta:Vec<(&str, db_types::Value)>,
 	tags:&HashMap<String, Vec<AttributeSelector>>
 ) -> impl SurrealValue
 {
 	dcm::extract(&obj, &tags).into_iter()
-		.chain([("uid", record_id.str_key().into_value())])
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect::<BTreeMap<_, _>>()
@@ -86,7 +84,7 @@ async fn insert<'a,C>(
 	transaction: &Transaction<C>
 ) -> tools::Result<bool> where C:Connection
 {
-	let meta= prepare_content(record_id, obj, add_meta, tags).into_value();
+	let meta= prepare_content(obj, add_meta, tags).into_value();
 	// use UPSERT so we can get a BEFORE to compare it if data existed, the whole transaction will
 	// be canceled anyway, so there is no harm overwriting
 	let q = transaction.query("UPSERT ONLY $rec CONTENT $content RETURN BEFORE")
@@ -111,7 +109,7 @@ async fn upsert<'a,C>(
 	transaction: &Transaction<C>
 ) -> tools::Result<bool> where C:Connection
 {
-	let meta= prepare_content(record_id, obj, add_meta, tags);
+	let meta= prepare_content(obj, add_meta, tags);
 	let q = transaction.query("UPSERT ONLY $rec MERGE $content RETURN diff")
 		.bind(("content",meta)).bind(("rec",record_id.0.clone()));
 	let diff  = q.await?.take::<Vec<Diff>>(0)?.into_iter()
@@ -122,7 +120,7 @@ async fn upsert<'a,C>(
 		Ok(true)
 	} else {
 		debug!("Field conflicts in {}:\n{}", record_id, diff.clone().into_value().to_sql_pretty());
-		Err(FieldConflict{ fields: diff.into_iter().map(|d|format!("{}:{}",d.path,d.value.to_sql())).join(":"), id: record_id.clone() })
+		Err(FieldConflict{ fields: diff.into_iter().map(|d|format!("{}",d.path)).join(":"), id: record_id.clone() })
 	}
 }
 /// Register a dicom object of an instance.

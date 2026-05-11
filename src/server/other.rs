@@ -98,14 +98,14 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 			Json(json!({
 				"Status":"Success",
 				"Path":id.str_path(),
-				"uid":id.str_key(),
+				"id":id.str_key(),
 			}))
 		).into_response()),
 		Ok(RegisterResult::AlreadyStored(id)) => Ok((StatusCode::FOUND,
 			Json(json!({
 				"Status":"AlreadyStored",
 				"Path":id.str_path(),
-				"uid":id.str_key(),
+				"id":id.str_key(),
 			}))
 		).into_response()),
 		Err(Error::DataConflict(e)) => {
