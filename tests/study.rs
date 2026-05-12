@@ -5,7 +5,7 @@ use dicom::object::{FileDicomObject, InMemDicomObject};
 use glob::glob;
 use itertools::Itertools;
 use rand::random;
-use rudicom::db::lookup_uid;
+use rudicom::db::{list_entries, lookup_uid};
 use rudicom::tools::remove::remove;
 use tokio::task::JoinSet;
 use rudicom::db::RegisterResult;
@@ -95,6 +95,9 @@ async fn study() -> Result<(), Box<dyn std::error::Error>>
 	}
 	remove_set.join_all().await.into_iter().collect::<Result<Vec<()>,_>>()
 		.map_err(|e| format!("failed to remove remaining instances: {e}"))?;
+
+	assert!(list_entries("series").await?.is_empty(),"All series should be gone.");
+	assert!(list_entries("studies").await?.is_empty(),"All studies should be gone.");
 
 	let store_path = rudicom::config::get().paths.storage_path.display();
 	let files = glob(format!("{}/**/*",store_path).as_str())?.count();
