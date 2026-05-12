@@ -166,7 +166,11 @@ pub async fn register_instance(
 					return Ok(r)
 				} else {
 					// no guard, take out the transaction and handle commit here
-					match transaction.take().unwrap().commit().await{
+					let commit_or_cancel = match r {
+						RegisterResult::Stored(_) => {transaction.take().unwrap().commit().await}
+						RegisterResult::AlreadyStored(_) => {transaction.take().unwrap().cancel().await}
+					};
+					match commit_or_cancel {
 						Ok(_) => return Ok(r), // all good, we're done
 						Err(e) =>{
 							res = Some(Err(e.into())); //darn, whatever the error is, stuff it back in, and handle it in the next loop

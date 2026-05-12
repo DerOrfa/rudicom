@@ -8,7 +8,7 @@ use std::path::Path;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use surrealdb::types as db_types;
-use tracing::warn;
+use tracing::{debug, warn};
 
 async fn read_to_buffer(filename:&Path) -> tools::Result<Vec<u8>>
 {
@@ -54,6 +54,9 @@ pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 			tokio::fs::remove_file(c_path.as_path()).await?;
 			Err(e)?
 		}
+	} else { // in any other case roll back transaction, no file was written
+		debug!("Rolling back store for {} as the file was not written",c_path.display());
+		guard.reset().await?; 
 	}
 	Ok(registered)
 }
