@@ -128,7 +128,13 @@ pub struct Stats
 }
 pub async fn statistics() -> Result<Stats>
 {
-	let studies_v:Vec<AggregateData> = DB.select("instances_per_studies").await?;
+	let studies_v:Vec<AggregateData> = DB.query(
+		r#"select
+			id, count(array::flatten(<~series<~instances)) as count,
+			math::sum(array::flatten(<~series<~instances.file.size)) as size
+		from
+			studies"#
+	).await?.take(0)?;
 
 	let size = studies_v.iter()
 		.map(|v|Byte::from(v.size))
