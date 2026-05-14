@@ -1,6 +1,7 @@
 use std::io::Cursor;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
-
+use std::sync::Arc;
 use crate::db::Pickable;
 use crate::storage::async_store::compute_md5;
 use crate::tools::{complete_filepath, Context, Error, Result};
@@ -9,6 +10,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use tokio::io::AsyncReadExt;
 use surrealdb::types as db_types;
+use tokio::join;
 
 #[derive(Deserialize)]
 pub struct File
@@ -41,11 +43,15 @@ impl File {
 	{
 		let mut buffer = Vec::<u8>::new();
 		let size= tokio::fs::File::open(path.as_ref()).await?.read_to_end(&mut buffer).await?;
+		let buffer_checksum = Arc::new(buffer);
+		let buffer_obj = buffer_checksum.clone();
 
-		let checksum = md5::compute(buffer.as_slice());
+		let checksum_er = tokio::task::spawn(async move { md5::compute(buffer_checksum.as_slice())});
+		let obj_er= tokio::task::spawn(async move{from_reader(Cursor::new(buffer_obj.deref()))});
 
-		let obj= from_reader(Cursor::new(buffer)).map_err(|e|Error::DicomError(e.into()))?;
-		Ok((Self::new(path.as_ref(),checksum,owned,size as u64), obj))
+		let (checksum,obj) = join!(checksum_er,obj_er);
+		let obj = obj.unwrap().map_err(|e|Error::DicomError(e.into()))?;
+		Ok((Self::new(path.as_ref(),checksum?,owned,size as u64), obj))
 	}
 
 	/// read the file stored at path, check its checksum and return it as dicom object

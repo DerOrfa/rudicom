@@ -13,8 +13,8 @@ use tracing::{debug, warn};
 async fn read_to_buffer(filename:&Path) -> tools::Result<Vec<u8>>
 {
 	let mut buffer = Vec::<u8>::new();
-	let mut file = File::open(filename).await?;
-	file.read_to_end(&mut buffer).await?;
+	File::open(filename).await.context(format!("opening {}", filename.display()))?
+		.read_to_end(&mut buffer).await.context(format!("reading {}", filename.display()))?;
 	Ok(buffer)
 }
 
