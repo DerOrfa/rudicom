@@ -15,7 +15,7 @@ Time = ["InstanceCreationTime"]
 
 [limits]
 upload_sizelimit = "200M"
-max_files = 32 # max amount of concurrently processed files
+max_files = 10 # max amount of concurrently processed files
 
 [paths]
 #use dicom tag names in "{}" to generate file names (obviously those should be unique)

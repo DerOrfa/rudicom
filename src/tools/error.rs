@@ -88,7 +88,7 @@ pub enum Error
 	#[error("Json error {0}")]
 	JsonError(#[from] serde_json::Error),
 
-	#[error("io error {0}")]
+	#[error(transparent)]
 	IoError(#[from] std::io::Error),
 
 	#[error("string formatting error {0}")]
@@ -97,7 +97,7 @@ pub enum Error
 	#[error("filename {name} is invalid")]
 	InvalidFilename{name:std::path::PathBuf},
 
-	#[error("{0}")]
+	#[error(transparent)]
 	DicomError(#[from] DicomError),
 
 	#[error(transparent)] // we use our own impl Display above
