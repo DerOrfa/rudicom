@@ -1,16 +1,42 @@
-use std::io::Cursor;
-use std::ops::Deref;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use crate::db::Pickable;
 use crate::storage::async_store::compute_md5;
 use crate::tools::{complete_filepath, Context, Error, Result};
 use dicom::object::{from_reader, DefaultDicomObject};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use tokio::io::AsyncReadExt;
 use surrealdb::types as db_types;
-use tokio::join;
+use tokio::task::spawn_blocking;
+use crate::dcm::gen_filepath;
+use crate::tools::Error::DicomError;
+
+struct Md5Proxy<'a,R> where R: Sized
+{
+	context:&'a mut md5::Context,
+	inner:R,
+}
+
+impl<'a,T> Read for Md5Proxy<'a, T> where T: Read + Sized
+{
+	fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+		let r = self.inner.read(buf)?;
+		self.context.consume(buf);
+		Ok(r)
+	}
+}
+impl<'a,T> Write for Md5Proxy<'a, T> where T: Write + Sized
+{
+	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+		self.context.consume(buf);
+		self.inner.write(buf)
+	}
+
+	fn flush(&mut self) -> std::io::Result<()> {
+		self.inner.flush()
+			.and_then(|_| self.context.flush())
+	}
+}
 
 #[derive(Deserialize)]
 pub struct File
@@ -38,20 +64,45 @@ impl File {
 	}
 	pub fn get_md5(&self) -> &str { self.md5.as_str() }
 
+	pub async fn new_from_obj(obj:DefaultDicomObject) -> Result<(DefaultDicomObject,File)>{
+		let path=PathBuf::from(gen_filepath(&obj)?);
+		let path = complete_filepath(&path);
+		let p=path.parent().unwrap();
+		tokio::fs::create_dir_all(p).await
+			.context(format!("Failed creating storage path {}",p.display()))?;
+
+		let path_clone=path.clone();
+		let (obj, checksum) = spawn_blocking(move || {
+			let inner=std::fs::File::create_new(&path_clone)
+				.context(format!("creating file {}",path_clone.display()))?;
+			let mut checksum = md5::Context::new();
+			let writer = Md5Proxy{context:&mut checksum,inner};
+			obj.write_all(writer).map_err(|e|DicomError(e.into())).map(|_|(obj,checksum))
+		}).await?
+			.context(format!("Writing object data to {}",path.display()))?;
+		let size = std::fs::metadata(&path)?.len();
+		Ok((obj,Self::new(path, checksum.finalize(), true,size)))
+	}
 	/// creates fileinfo struct and reads dicom object directly from path
 	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> Result<(File,DefaultDicomObject)>
 	{
-		let mut buffer = Vec::<u8>::new();
-		let size= tokio::fs::File::open(path.as_ref()).await?.read_to_end(&mut buffer).await?;
-		let buffer_checksum = Arc::new(buffer);
-		let buffer_obj = buffer_checksum.clone();
+		let path = path.as_ref();
+		let size = tokio::fs::metadata(path).await.context(format!("getting metadata for {}",path.display()))?.len();
+		let reader_ctx = format!("reading {}", path.display());
+		let reader = std::fs::File::open(path).context(format!("opening {}",path.display()))?;
 
-		let checksum_er = tokio::task::spawn(async move { md5::compute(buffer_checksum.as_slice())});
-		let obj_er= tokio::task::spawn(async move{from_reader(Cursor::new(buffer_obj.deref()))});
+		let obj_task= tokio::task::spawn_blocking(move||{
+			let mut md5_context = md5::Context::new();
+			let reader = Md5Proxy{context:&mut md5_context,inner:reader};
+			(from_reader(reader), md5_context)
+		});
 
-		let (checksum,obj) = join!(checksum_er,obj_er);
-		let obj = obj.unwrap().map_err(|e|Error::DicomError(e.into()))?;
-		Ok((Self::new(path.as_ref(),checksum?,owned,size as u64), obj))
+		let (obj,md5_context) = obj_task.await?;
+
+		Ok((
+			Self::new(path, md5_context.finalize(), owned, size),
+			obj.map_err(|e|Error::DicomError(e.into())).context(reader_ctx)?
+		))
 	}
 
 	/// read the file stored at path, check its checksum and return it as dicom object

@@ -105,7 +105,7 @@ async fn import_file<T>(path:T, mode: ImportMode) -> ImportResult where T:Into<P
 	let import = 
 		match mode {
 			ImportMode::Import => {crate::tools::store::import_file(path.as_path()).await}
-			ImportMode::Store => {crate::tools::store::store_file(path.as_path()).await}
+			ImportMode::Store => {crate::tools::store::store_file(path).await}
 			ImportMode::Move => {crate::tools::store::move_file(path.as_path()).await}
 		};
 	match import

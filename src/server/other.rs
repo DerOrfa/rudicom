@@ -1,26 +1,19 @@
 use crate::db::{Entry, RegisterResult};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
-use crate::storage::async_store;
-use crate::tools::remove::remove;
-use crate::tools::store::store;
 use crate::tools::tar::{make_tar, TarStream};
-use crate::tools::verify::verify_entry;
-use crate::tools::{get_instance_dicom, lookup_instance_file, Error};
+use crate::tools::{get_instance_dicom, lookup_instance_file,remove::remove,store::store,verify::verify_entry, Error};
 use crate::tools::{Context, Error::DicomError};
 use crate::db;
 use axum::body::{Body, Bytes};
-use axum::extract::rejection::BytesRejection;
-use axum::extract::Path;
+use axum::extract::{Path,rejection::BytesRejection};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::Json;
-use axum_extra::body::AsyncReadBody;
-use axum_extra::extract::OptionalQuery;
+use axum_extra::{body::AsyncReadBody,extract::OptionalQuery};
 use dicom::dictionary_std::tags;
-use dicom::pixeldata::image::ImageFormat;
-use dicom::pixeldata::PixelDecoder;
+use dicom::pixeldata::{image::ImageFormat,PixelDecoder};
 use mime::IMAGE_PNG;
 use serde::Deserialize;
 use serde_json::json;
@@ -29,6 +22,7 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use async_compression::Level;
 use async_compression::tokio::write::{GzipEncoder, BzEncoder, XzEncoder};
+use dicom::object::from_reader;
 
 pub(super) fn router() -> axum::Router
 {
@@ -92,7 +86,7 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 	if bytes.is_empty(){
 		return Err(HttpError::new(InnerHttpError::BadRequest {message:"Ignoring empty upload".into()}, &headers))
 	}
-	let obj= async_store::read(bytes).into_http_error(&headers)?;
+	let obj= from_reader(Cursor::new(bytes)).map_err(|e|DicomError(e.into())).into_http_error(&headers)?;
 	match store(obj).await {
 		Ok(RegisterResult::Stored(id)) => Ok((StatusCode::CREATED,
 			Json(json!({

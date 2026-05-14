@@ -1,22 +1,12 @@
-use crate::db::{lookup, RegisterResult, RegistryGuard};
-use crate::dcm::gen_filepath;
-use crate::storage::async_store::{read, write};
+use crate::db::{lookup, File, RegisterResult, RegistryGuard};
 use crate::tools::Context;
 use crate::{db, tools};
 use dicom::object::DefaultDicomObject;
-use std::path::Path;
-use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::path::{Path, PathBuf};
 use surrealdb::types as db_types;
+use tokio::task::spawn_blocking;
 use tracing::{debug, warn};
-
-async fn read_to_buffer(filename:&Path) -> tools::Result<Vec<u8>>
-{
-	let mut buffer = Vec::<u8>::new();
-	File::open(filename).await.context(format!("opening {}", filename.display()))?
-		.read_to_end(&mut buffer).await.context(format!("reading {}", filename.display()))?;
-	Ok(buffer)
-}
+use crate::storage::async_store;
 
 /// check if a path is a subdirectory of the storage path defined in config
 pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
@@ -31,32 +21,22 @@ pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
 pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 {
 	let mut guard= RegistryGuard::default();
-	let mut checksum = md5::Context::new();
-	let buffer= write(&obj,Some(&mut checksum))?;
 
-	let fileinfo = db::File::new(gen_filepath(&obj)?, checksum.finalize(), true, buffer.len() as u64);
+	let (obj,fileinfo) = File::new_from_obj(obj).await?;
 	let c_path = fileinfo.get_path();
 	let fileinfo = db_types::Value::try_from(fileinfo)?;
 
 	let registered= db::register_instance(&obj, vec![("file",fileinfo.into())], &mut guard).await?;
 	if let RegisterResult::Stored(_) = &registered { // normal register => store the file
-		let p = c_path.parent().unwrap();
-		let lossy_cpath= c_path.display();
-		tokio::fs::create_dir_all(p).await.context(format!("Failed creating storage path {:?}",p))?;
-		let mut file = OpenOptions::new().write(true).create_new(true).open(c_path.as_path()).await
-			.context(format!("creating file {lossy_cpath}"))?;
-		file.write_all(buffer.as_slice()).await
-			.context(format!("writing to file {lossy_cpath}"))?;
-		file.flush().await.context(format!("closing file {lossy_cpath}"))?;
 		if let Err(e) = guard.commit().await//the file is stored, we can commit
 		{ // unfortunately this might fail too, so maybe we have to roll back the file (the commit will be rolled back anyway)
-			warn!("Failed to commit, I'll remove the file {lossy_cpath}");
 			tokio::fs::remove_file(c_path.as_path()).await?;
 			Err(e)?
 		}
-	} else { // in any other case roll back transaction, no file was written
+	} else {
 		debug!("Rolling back store for {} as the file was not written",c_path.display());
-		guard.reset().await?; 
+		tokio::fs::remove_file(c_path.as_path()).await?;
+		guard.reset().await?;
 	}
 	Ok(registered)
 }
@@ -64,10 +44,10 @@ pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 /// Stores given dicom file as file (makes a copy) and registers it as owned (might change data).
 /// 
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
-pub async fn store_file(filename:&Path) -> tools::Result<RegisterResult>
+pub async fn store_file(filename:PathBuf) -> tools::Result<RegisterResult>
 {
-	let buffer = read_to_buffer(filename).await?;
-	store(read(buffer)?).await
+	let obj = spawn_blocking(move ||async_store::read(filename)).await??;
+	store(obj).await
 }
 
 /// Registers an existing file without storing (data won't be changed).
@@ -113,7 +93,7 @@ pub async fn move_file(filename: &Path) -> tools::Result<RegisterResult>
 	if is_storage(filename) { // if the file is already in the storage-path just import it, and take ownership
 		import_file_impl(filename,true).await
 	} else { // if not, store (aka copy) file and delete the source once we're done
-		let stored= store_file(filename).await?;
+		let stored= store_file(filename.to_owned()).await?;
 		if let RegisterResult::Stored(_) = stored { //no error and no previously existing file, we can delete the source
 			tokio::fs::remove_file(filename).await.context(format!("moving file {:?}",filename))?;
 		}
