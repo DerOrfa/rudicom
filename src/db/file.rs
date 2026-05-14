@@ -8,6 +8,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use surrealdb::types as db_types;
 use tokio::task::spawn_blocking;
+use tracing::log::warn;
 use crate::dcm::gen_filepath;
 use crate::tools::Error::{DicomError, FileIOError};
 
@@ -20,16 +21,18 @@ struct Md5Proxy<'a,R> where R: Sized
 impl<'a,T> Read for Md5Proxy<'a, T> where T: Read + Sized
 {
 	fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-		let r = self.inner.read(buf)?;
-		self.context.consume(buf);
-		Ok(r)
+		let s = self.inner.read(buf)?;
+		self.context.consume(&buf[..s]);
+		if s == 0 {self.context.flush()?;}
+		Ok(s)
 	}
 }
 impl<'a,T> Write for Md5Proxy<'a, T> where T: Write + Sized
 {
 	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-		self.context.consume(buf);
-		self.inner.write(buf)
+		let s = self.inner.write(buf)?;
+		self.context.consume(&buf[..s]);
+		Ok(s)
 	}
 
 	fn flush(&mut self) -> std::io::Result<()> {
@@ -38,7 +41,7 @@ impl<'a,T> Write for Md5Proxy<'a, T> where T: Write + Sized
 	}
 }
 
-#[derive(Deserialize)]
+#[derive(Clone,Deserialize)]
 pub struct File
 {
 	path:PathBuf,
@@ -64,6 +67,7 @@ impl File {
 	}
 	pub fn get_md5(&self) -> &str { self.md5.as_str() }
 
+	/// writes a new file taking an object and returning that object plus a file info
 	pub async fn new_from_obj(obj:DefaultDicomObject) -> Result<(DefaultDicomObject,File)>{
 		let path=PathBuf::from(gen_filepath(&obj)?);
 		let path = complete_filepath(&path);
@@ -78,8 +82,7 @@ impl File {
 			let mut checksum = md5::Context::new();
 			let writer = Md5Proxy{context:&mut checksum,inner};
 			obj.write_all(writer).map_err(|e|DicomError(e.into())).map(|_|(obj,checksum))
-		}).await?
-			.context(format!("Writing object data to {}",path.display()))?;
+		}).await??;
 		let size = std::fs::metadata(&path)?.len();
 		Ok((obj,Self::new(path, checksum.finalize(), true,size)))
 	}
@@ -91,7 +94,7 @@ impl File {
 		let reader_ctx = format!("reading {}", path.display());
 		let reader = std::fs::File::open(path).context(format!("opening {}",path.display()))?;
 
-		let obj_task= tokio::task::spawn_blocking(move||{
+		let obj_task= spawn_blocking(move||{
 			let mut md5_context = md5::Context::new();
 			let reader = Md5Proxy{context:&mut md5_context,inner:reader};
 			(from_reader(reader), md5_context)
@@ -128,6 +131,22 @@ impl File {
 			file:filename.to_string_lossy().into()
 		})}
 	}
+	pub async fn remove(self) -> Result<()>{
+		if self.owned {
+			let mut path = self.get_path();
+			if path.exists() {
+				std::fs::remove_file(&path).context(format!("deleting {}", path.display()))?;
+				if path.pop(){// if there is a parent path, try to delete it as far as possible
+					let ctx = format!("deleting {}",path.display());
+					crate::tools::remove::remove_path(path, &crate::config::get().paths.storage_path)
+						.await.context(ctx)?;
+				}
+			} else {
+				warn!("trying to delete file {} but it does not exist",path.to_string_lossy())
+			}
+		}
+		Ok(())
+	} 
 }
 
 impl TryFrom<db_types::Value> for File

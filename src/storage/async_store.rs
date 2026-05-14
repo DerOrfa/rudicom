@@ -2,10 +2,9 @@ use std::io::{Cursor, Error, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::Poll;
-use dicom::object::{DefaultDicomObject, from_reader, open_file};
+use dicom::object::DefaultDicomObject;
 use tokio::fs::File;
 use tokio::task::spawn_blocking;
-use crate::storage::async_store;
 use crate::tools::Error::DicomError;
 use crate::tools::{Context, Result};
 
