@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use surrealdb::types as db_types;
 use tokio::task::spawn_blocking;
 use crate::dcm::gen_filepath;
-use crate::tools::Error::DicomError;
+use crate::tools::Error::{DicomError, FileIOError};
 
 struct Md5Proxy<'a,R> where R: Sized
 {
@@ -74,7 +74,7 @@ impl File {
 		let path_clone=path.clone();
 		let (obj, checksum) = spawn_blocking(move || {
 			let inner=std::fs::File::create_new(&path_clone)
-				.context(format!("creating file {}",path_clone.display()))?;
+				.map_err(|e|FileIOError{inner:e,path:path_clone})?;
 			let mut checksum = md5::Context::new();
 			let writer = Md5Proxy{context:&mut checksum,inner};
 			obj.write_all(writer).map_err(|e|DicomError(e.into())).map(|_|(obj,checksum))

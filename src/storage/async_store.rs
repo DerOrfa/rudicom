@@ -2,8 +2,10 @@ use std::io::{Cursor, Error, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::Poll;
-use dicom::object::{DefaultDicomObject, from_reader};
+use dicom::object::{DefaultDicomObject, from_reader, open_file};
 use tokio::fs::File;
+use tokio::task::spawn_blocking;
+use crate::storage::async_store;
 use crate::tools::Error::DicomError;
 use crate::tools::{Context, Result};
 
@@ -29,13 +31,11 @@ impl tokio::io::AsyncWrite for AsyncMd5{
 	}
 }
 
-pub fn read(filename: impl Into<PathBuf>) -> Result<DefaultDicomObject>
+pub async fn read(filename: impl Into<PathBuf>) -> Result<DefaultDicomObject>
 {
 	let filename = filename.into();
-	let o_ctx = format!("opening {}",filename.display());
-	let r_ctx = format!("reading {}",filename.display());
-	let reader = std::fs::File::open(filename).context(o_ctx)?;
-	from_reader(reader).map_err(|e|DicomError(e.into())).context(r_ctx)
+	spawn_blocking(move ||dicom::object::open_file(filename)).await?
+		.map_err(|e|DicomError(e.into()))
 }
 
 pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Result<Vec<u8>>{

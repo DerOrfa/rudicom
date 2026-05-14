@@ -1,5 +1,6 @@
 use glob::{GlobError, PatternError};
 use std::fmt::{Debug, Display, Formatter};
+use std::path::PathBuf;
 use thiserror::Error;
 use crate::db::{Entry, RecordId};
 
@@ -113,6 +114,14 @@ pub enum Error
 		expected: String,
 		id: RecordId,
 	},
+	#[error("Entry {0} is missing")]
+	MissingEntry(RecordId),
+	#[error("{inner} on {path}")]
+	FileIOError{
+		inner:std::io::Error,
+		path:PathBuf,
+	},
+	
 	#[error("Failed to parse {to_parse} ({source})")]
 	ParseError{
 		to_parse: String,

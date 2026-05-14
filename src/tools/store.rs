@@ -1,12 +1,15 @@
-use crate::db::{lookup, File, RegisterResult, RegistryGuard};
-use crate::tools::Context;
+use std::io::ErrorKind;
+use crate::db::{lookup, File, RecordId, RegisterResult, RegistryGuard};
+use crate::tools::{Context, Error};
 use crate::{db, tools};
 use dicom::object::DefaultDicomObject;
 use std::path::{Path, PathBuf};
+use dicom::dictionary_std::tags;
 use surrealdb::types as db_types;
-use tokio::task::spawn_blocking;
 use tracing::{debug, warn};
+use crate::db::RegisterResult::AlreadyStored;
 use crate::storage::async_store;
+use crate::tools::Error::{DataConflict, DicomError};
 
 /// check if a path is a subdirectory of the storage path defined in config
 pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
@@ -20,11 +23,33 @@ pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
 pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 {
-	let mut guard= RegistryGuard::default();
+	let uid = obj.element(tags::SOP_INSTANCE_UID)
+		.map_err(|e|DicomError(e.into())).map(|e|e.to_str().unwrap().to_string())?;
 
-	let (obj,fileinfo) = File::new_from_obj(obj).await?;
+	let (obj,fileinfo) = match File::new_from_obj(obj).await{
+		Ok((obj,fileinfo)) => Ok((obj,fileinfo)),
+		Err(Error::FileIOError {inner,path}) => {
+			if let ErrorKind::AlreadyExists = inner.kind()
+			{ // file is already there, lets see, if that's what we have
+				let rec = RecordId::from_instance(uid.clone());
+				let ctx = format!("looking for entry of existing file {}",path.display());
+				let db_entry = lookup(&rec).await.transpose()
+					.unwrap_or(Err(Error::MissingEntry(rec.clone())))
+					.context(ctx.clone())?;
+				let in_db = db_entry.get_file().context(ctx)?
+					.read().await?;
+				let incoming = async_store::read(&path).await
+					.context(format!("reading existing file {} for comparison with {rec}",path.display()))?;
+				return if in_db == incoming {Ok(AlreadyStored(rec))}
+				else {Err(DataConflict(db_entry))}
+			}
+			Err(inner.into())
+		},
+		e => e,
+	}?;
 	let c_path = fileinfo.get_path();
 	let fileinfo = db_types::Value::try_from(fileinfo)?;
+	let mut guard= RegistryGuard::default();
 
 	let registered= db::register_instance(&obj, vec![("file",fileinfo.into())], &mut guard).await?;
 	if let RegisterResult::Stored(_) = &registered { // normal register => store the file
@@ -46,8 +71,7 @@ pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
 pub async fn store_file(filename:PathBuf) -> tools::Result<RegisterResult>
 {
-	let obj = spawn_blocking(move ||async_store::read(filename)).await??;
-	store(obj).await
+	store(async_store::read(&filename).await?).await
 }
 
 /// Registers an existing file without storing (data won't be changed).
