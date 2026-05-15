@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use crate::db::Pickable;
 use crate::storage::async_store::compute_md5;
 use crate::tools::{complete_filepath, Context, Error, Result};
@@ -68,7 +69,7 @@ impl File {
 	pub fn get_md5(&self) -> &str { self.md5.as_str() }
 
 	/// writes a new file taking an object and returning that object plus a file info
-	pub async fn new_from_obj(obj:DefaultDicomObject) -> Result<(DefaultDicomObject,File)>{
+	pub async fn new_from_obj(obj:Arc<DefaultDicomObject>) -> Result<File>{
 		let path=PathBuf::from(gen_filepath(&obj)?);
 		let path = complete_filepath(&path);
 		let p=path.parent().unwrap();
@@ -76,15 +77,15 @@ impl File {
 			.context(format!("Failed creating storage path {}",p.display()))?;
 
 		let path_clone=path.clone();
-		let (obj, checksum) = spawn_blocking(move || {
+		let checksum = spawn_blocking(move || {
 			let inner=std::fs::File::create_new(&path_clone)
 				.map_err(|e|FileIOError{inner:e,path:path_clone})?;
 			let mut checksum = md5::Context::new();
 			let writer = Md5Proxy{context:&mut checksum,inner};
-			obj.write_all(writer).map_err(|e|DicomError(e.into())).map(|_|(obj,checksum))
+			obj.write_all(writer).map_err(|e|DicomError(e.into())).map(|_|checksum)
 		}).await??;
 		let size = std::fs::metadata(&path)?.len();
-		Ok((obj,Self::new(path, checksum.finalize(), true,size)))
+		Ok(Self::new(path, checksum.finalize(), true,size))
 	}
 	/// creates fileinfo struct and reads dicom object directly from path
 	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> Result<(File,DefaultDicomObject)>

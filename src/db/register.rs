@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
-use crate::db::{if_retry, Entry, RecordId, RegisterResult, DB};
+use std::sync::Arc;
+use crate::db::{if_retry, Entry, File, RecordId, RegisterResult, DB};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::{extract_from_dicom, Error};
-use crate::{dcm, tools};
+use crate::{db, dcm, tools};
 use dcm::AttributeSelector;
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
@@ -36,8 +37,7 @@ impl RegistryGuard
 	}
 	pub async fn commit(mut self) -> surrealdb::Result<Option<Surreal<Any>>>
 	{
-		if let Some(t) = self.0.take()
-		{
+		if let Some(t) = self.0.take() {
 			Some(t.commit().await).transpose()
 		} else {
 			Ok(None)
@@ -45,8 +45,7 @@ impl RegistryGuard
 	}
 	pub async fn reset(mut self) -> surrealdb::Result<Option<Surreal<Any>>>
 	{
-		if let Some(t) = self.0.take()
-		{
+		if let Some(t) = self.0.take(){
 			Some(t.cancel().await).transpose()
 		} else {
 			Ok(None)
@@ -64,10 +63,35 @@ impl Drop for RegistryGuard{ //@todo find a better way
 	}
 }
 
-fn prepare_content(
+pub enum FileInfo{
+	Exists(File),
+	Stored(Option<File>),
+	Store
+}
+
+impl FileInfo{
+	pub fn commit(&mut self){
+		if let FileInfo::Stored(s) = self {
+			s.take();
+		} else {
+			debug!("commiting non-stored file");
+		}
+	}
+}
+impl Drop for FileInfo{
+	fn drop(&mut self) {
+		if let FileInfo::Stored(s) = self {
+			if let Some(f) = s.take() {
+				debug!("dropping uncommited file {}",f.get_path().display());
+				tokio::spawn(f.remove());
+			}
+		}
+	}
+}
+fn prepare_content<'a>(
 	obj:&DefaultDicomObject,
-	add_meta:Vec<(&str, db_types::Value)>,
-	tags:&HashMap<String, Vec<AttributeSelector>>
+	add_meta:impl IntoIterator<Item=(&'a str, db_types::Value)>,
+	tags:&'a HashMap<String, Vec<AttributeSelector>>
 ) -> impl SurrealValue
 {
 	dcm::extract(&obj, &tags).into_iter()
@@ -79,8 +103,8 @@ fn prepare_content(
 async fn insert<'a,C>(
 	obj:&DefaultDicomObject,
 	record_id: &RecordId,
-	add_meta:Vec<(&'a str,db_types::Value)>,
-	tags:&HashMap<String,Vec<AttributeSelector>>,
+	add_meta:impl IntoIterator<Item=(&'a str,db_types::Value)>,
+	tags:&'a HashMap<String, Vec<AttributeSelector>>,
 	transaction: &Transaction<C>
 ) -> tools::Result<bool> where C:Connection
 {
@@ -94,7 +118,7 @@ async fn insert<'a,C>(
 		.take::<Option<db_types::Value>>(0)?
 		.map(Entry::try_from).transpose()?
 	{
-		if existing == *obj {Ok(false)}
+		if existing == *obj {Ok(false)} // @todo should not compare file as this validly might not be there yet
 		else {Err(DataConflict(existing))}
 	} else {
 		Ok(true)
@@ -140,13 +164,12 @@ async fn upsert<'a,C>(
 /// * Error(tools::Error) if another error occurred 
 /// 
 pub async fn register_instance(
-	obj:&DefaultDicomObject,
-	add_meta:Vec<(&str, db_types::Value)>,
-	transaction_guard:&mut RegistryGuard,
+	obj:Arc<DefaultDicomObject>,
+	file_info:&mut FileInfo
 ) -> tools::Result<RegisterResult>
 {
 	// begin owns the session. so if its dropped, the whole session is dropped, hence canceled
-	let mut transaction = None;
+	let mut transaction = Some(DB.clone().begin().await?);
 	let mut res = None;
 	let mut retry = 0;
 	loop {
@@ -156,18 +179,16 @@ pub async fn register_instance(
 
 		// make sure we have a result and handle it
 		let fall_throu = match if let Some(r) = res.take() {r} // we already have a result, don't need a new one
-			else {retry+=1;_register_instance(obj, add_meta.clone(), t).await}
+			else {retry+=1;_register_instance(obj.clone(), file_info, t).await}
 		{
 			Err(Error::SurrealError(e)) => if let Ok(true) = if_retry(&e,&mut retry).await{continue} else { e.into() },
 			Err(e) => e,
-			Ok(r) =>
-				if transaction_guard.0.is_some(){ // hand over the transaction to the guard if asked and leave
-					transaction_guard.0 = transaction.take();
-					return Ok(r)
-				} else {
+			Ok(r) => {
 					// no guard, take out the transaction and handle commit here
 					let commit_or_cancel = match r {
-						RegisterResult::Stored(_) => {transaction.take().unwrap().commit().await}
+						RegisterResult::Stored(_) => {
+							transaction.take().unwrap().commit().await.map(|s|{file_info.commit();s} )
+						}
 						RegisterResult::AlreadyStored(_) => {transaction.take().unwrap().cancel().await}
 					};
 					match commit_or_cancel {
@@ -189,28 +210,43 @@ pub async fn register_instance(
 }
 
 async fn _register_instance<'a,C>(
-	obj:&DefaultDicomObject,
-	add_meta:Vec<(&'a str,db_types::Value)>,
+	obj:Arc<DefaultDicomObject>,
+	fileinfo:&mut FileInfo,
 	transaction: &Transaction<C>
 ) -> tools::Result<RegisterResult> where C:Connection
 {
-	let study_uid = extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?;
-	let series_uid = extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?;
-	let instance_uid = extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?;
+	let study_uid = extract_from_dicom(&*obj, tags::STUDY_INSTANCE_UID)?;
+	let series_uid = extract_from_dicom(&*obj, tags::SERIES_INSTANCE_UID)?;
+	let instance_uid = extract_from_dicom(&*obj, tags::SOP_INSTANCE_UID)?;
 
 	let study_id = RecordId::from_study(study_uid.as_ref());
 	let series_id= RecordId::from_series(series_uid.as_ref());
 	let instance_id = RecordId::from_instance(instance_uid.as_ref());
+	let mut add_meta = vec![("series",series_id.0.to_owned().into_value())];
 
-	if insert(obj, &instance_id,
-		add_meta.into_iter().chain([("series",series_id.0.to_owned().into_value())]).collect(),
-		&INSTANCE_TAGS,
-		&transaction
-	).await? { // normal insert, didn't exist before. So make sure its series/study exists (this may also update non-existing entries)
-		upsert(obj, &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await?;
-		upsert(obj, &study_id, vec![], &STUDY_TAGS, &transaction).await?;
+	match fileinfo{
+		FileInfo::Exists(file)|FileInfo::Stored(Some(file)) => {
+			add_meta.push(("file", file.clone().try_into()?));
+		}
+		_ =>{}
+	};
+
+	if insert(&*obj, &instance_id, add_meta, &INSTANCE_TAGS, &transaction	).await?
+	{ // normal insert, didn't exist before. So make sure its series/study exists (this may also update non-existing entries)
+		upsert(&*obj, &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await?;
+		upsert(&*obj, &study_id, vec![], &STUDY_TAGS, &transaction).await?;
 
 		// everything successfully inserted
+		// now do the file, if it's not there yet
+		if let FileInfo::Store = fileinfo{
+			let file = File::new_from_obj(obj).await?; // storing failed, abort
+			*fileinfo = FileInfo::Stored(Some(file.clone())); 
+			transaction.query("UPDATE $rec SET file = $file")
+				.bind(("rec",instance_id.0.clone()))
+				.bind(("file", db_types::Value::try_from(file)?))
+				.await?;
+		}
+
 		// set up the guard with the registered instance, so we can roll back the registration if needed
 		// @todo we could return the transaction so the caller could cancel (or just drop) it, no guard needed
 		Ok(RegisterResult::Stored(instance_id))

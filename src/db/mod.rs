@@ -6,7 +6,7 @@ pub use entry::Entry;
 pub use file::File;
 pub use into_db_value::IntoDbValue;
 pub use record::RecordId;
-pub use register::{register_instance, RegistryGuard};
+pub use register::{register_instance, RegistryGuard,FileInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
