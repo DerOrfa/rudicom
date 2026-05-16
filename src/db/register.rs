@@ -1,26 +1,20 @@
 use std::collections::{BTreeMap, HashMap};
+use std::ops::Deref;
 use std::sync::Arc;
-use crate::db::{if_retry, Entry, File, RecordId, RegisterResult, DB};
+use crate::db::{if_retry, ArcSession, Entry, File, RecordId, RegisterResult};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::{extract_from_dicom, Error};
-use crate::{db, dcm, tools};
+use crate::{dcm, tools};
 use dcm::AttributeSelector;
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
 use itertools::Itertools;
 use surrealdb::method::Transaction;
-use surrealdb::{types as db_types, Connection, Surreal};
+use surrealdb::{types as db_types, Connection};
 use surrealdb::engine::any::Any;
 use surrealdb::types::{SurrealValue, ToSql};
-use tracing::debug;
+use tracing::{debug};
 use crate::tools::Error::{DataConflict, FieldConflict};
-
-/// a guard holding a transaction
-///
-/// The transaction will be dropped when the guard is dropped or `cancel()` is called.
-/// Call `commit()` to commit the transaction. This will consume the guard
-#[derive(Default)]
-pub struct RegistryGuard(Option<Transaction<Any>>);
 
 #[derive(Default,Debug,Clone,SurrealValue)]
 struct Diff
@@ -28,39 +22,6 @@ struct Diff
 	op:String,
 	path:String,
 	value:db_types::Value,
-}
-
-impl RegistryGuard
-{
-	pub fn set(&mut self,transaction: Transaction<Any>){
-		self.0.replace(transaction);
-	}
-	pub async fn commit(mut self) -> surrealdb::Result<Option<Surreal<Any>>>
-	{
-		if let Some(t) = self.0.take() {
-			Some(t.commit().await).transpose()
-		} else {
-			Ok(None)
-		}
-	}
-	pub async fn reset(mut self) -> surrealdb::Result<Option<Surreal<Any>>>
-	{
-		if let Some(t) = self.0.take(){
-			Some(t.cancel().await).transpose()
-		} else {
-			Ok(None)
-		}
-	}
-}
-
-impl Drop for RegistryGuard{ //@todo find a better way
-	fn drop(&mut self) {
-		if let Some(trans) = self.0.take(){
-			debug!("spawning cleanup for unfinished transaction, try to always commit or reset");
-			let fut = trans.cancel().into_future();
-			tokio::spawn(fut);
-		}
-	}
 }
 
 pub enum FileInfo{
@@ -165,33 +126,32 @@ async fn upsert<'a,C>(
 /// 
 pub async fn register_instance(
 	obj:Arc<DefaultDicomObject>,
-	file_info:&mut FileInfo
+	file_info:&mut FileInfo,
+	mut session: ArcSession<Any>,
 ) -> tools::Result<RegisterResult>
 {
 	// begin owns the session. so if its dropped, the whole session is dropped, hence canceled
-	let mut transaction = Some(DB.clone().begin().await?);
 	let mut res = None;
 	let mut retry = 0;
+	let mut transaction = None;
 	loop {
 		// make sure we have a transaction
-		let t = if let Some(t) = &mut transaction {t}
-			else { transaction.get_or_insert(DB.clone().begin().await?)};
-
+		let t= transaction.get_or_insert(session.begin().await?);
 		// make sure we have a result and handle it
 		let fall_throu = match if let Some(r) = res.take() {r} // we already have a result, don't need a new one
-			else {retry+=1;_register_instance(obj.clone(), file_info, t).await}
+			else {retry+=1;_register_instance(obj.clone(), file_info, t.deref()).await}
 		{
 			Err(Error::SurrealError(e)) => if let Ok(true) = if_retry(&e,&mut retry).await{continue} else { e.into() },
 			Err(e) => e,
-			Ok(r) => {
-					// no guard, take out the transaction and handle commit here
+			Ok(r) => { // no inner errors, commit or cancel based on results
 					let commit_or_cancel = match r {
-						RegisterResult::Stored(_) => {
-							transaction.take().unwrap().commit().await.map(|s|{file_info.commit();s} )
-						}
-						RegisterResult::AlreadyStored(_) => {transaction.take().unwrap().cancel().await}
+						RegisterResult::Stored(_) => // normal store, commit the store, and then the file
+							transaction.take().unwrap().commit().await
+								.map(|_|{file_info.commit();} ),
+						RegisterResult::AlreadyStored(_) =>
+							transaction.take().unwrap().cancel().await,
 					};
-					match commit_or_cancel {
+					match commit_or_cancel { // results of the commit/reset above
 						Ok(_) => return Ok(r), // all good, we're done
 						Err(e) =>{
 							res = Some(Err(e.into())); //darn, whatever the error is, stuff it back in, and handle it in the next loop
@@ -201,7 +161,7 @@ pub async fn register_instance(
 				},
 		};
 		// should only be here because of a final error, cancel transaction and get out of here
-		if let Some(t) = transaction.take(){
+		if let Some(t) = transaction{
 			t.cancel().await?;
 		}
 		return Err(fall_throu)
@@ -240,7 +200,7 @@ async fn _register_instance<'a,C>(
 		// now do the file, if it's not there yet
 		if let FileInfo::Store = fileinfo{
 			let file = File::new_from_obj(obj).await?; // storing failed, abort
-			*fileinfo = FileInfo::Stored(Some(file.clone())); 
+			*fileinfo = FileInfo::Stored(Some(file.clone()));
 			transaction.query("UPDATE $rec SET file = $file")
 				.bind(("rec",instance_id.0.clone()))
 				.bind(("file", db_types::Value::try_from(file)?))

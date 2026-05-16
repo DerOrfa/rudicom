@@ -159,8 +159,7 @@ impl TryFrom<db_types::Value> for File
 		let kind = obj.kind().to_string();
 		match obj {
 			db_types::Value::Object(obj) => obj.try_into(),
-			_ =>
-				Err(Error::UnexpectedResult {expected:"object".into(),found:kind})
+			_ => Err(Error::UnexpectedResult {expected:"object".into(),found:kind})
 		}.context(context)
 	}
 }

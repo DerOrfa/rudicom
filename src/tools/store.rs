@@ -1,11 +1,12 @@
 use crate::db::RegisterResult::AlreadyStored;
-use crate::db::{lookup, FileInfo, RegisterResult};
+use crate::db::{lookup, ArcSession, FileInfo, RegisterResult};
 use crate::storage::async_store;
 use crate::tools::{Context, Error};
 use crate::{db, tools};
 use dicom::object::DefaultDicomObject;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use surrealdb::engine::any::Any;
 
 /// check if a path is a subdirectory of the storage path defined in config
 pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
@@ -16,17 +17,17 @@ pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
 /// Stores given a dicom object as a file and registers it as owned (might change data).
 /// 
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
-pub async fn store(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
+pub async fn store(obj:DefaultDicomObject, session: ArcSession<Any>) -> tools::Result<RegisterResult>
 {
-	db::register_instance(Arc::new(obj), &mut FileInfo::Store).await
+	db::register_instance(Arc::new(obj), &mut FileInfo::Store, session).await
 }
 
 /// Stores given dicom file as file (makes a copy) and registers it as owned (might change data).
 /// 
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
-pub async fn store_file(filename:PathBuf) -> tools::Result<RegisterResult>
+pub async fn store_file(filename:PathBuf, session: ArcSession<Any>) -> tools::Result<RegisterResult>
 {
-	store(async_store::read(&filename).await?).await
+	store(async_store::read(&filename).await?, session).await
 }
 
 /// Registers an existing file without storing (data won't be changed).
@@ -34,16 +35,16 @@ pub async fn store_file(filename:PathBuf) -> tools::Result<RegisterResult>
 /// If the data already exists, the store is aborted but considered successful if existing data are equal.
 /// 
 /// If the existing data has a different checksum, an error is returned
-pub async fn import_file(filename:&Path) -> tools::Result<RegisterResult>
+pub async fn import_file(filename:&Path, session: ArcSession<Any>) -> tools::Result<RegisterResult>
 {
-	import_file_impl(filename, is_storage(filename)).await	
+	import_file_impl(filename, is_storage(filename), session).await
 }
 
-async fn import_file_impl(path:&Path,own:bool) -> tools::Result<RegisterResult>
+async fn import_file_impl(path:&Path,own:bool, session: ArcSession<Any>) -> tools::Result<RegisterResult>
 {
 	let (fileinfo,obj) = db::File::new_from_existing(path,own).await?;
 	let my_md5= fileinfo.get_md5().to_string();
-	let registered=db::register_instance(Arc::new(obj),&mut FileInfo::Exists(fileinfo)).await;
+	let registered=db::register_instance(Arc::new(obj),&mut FileInfo::Exists(fileinfo), session).await;
 	let registered = registered?;
 	if let AlreadyStored(existing) = &registered //if register says equal data exist, we check md5sum
 	{
@@ -66,12 +67,12 @@ async fn import_file_impl(path:&Path,own:bool) -> tools::Result<RegisterResult>
 /// If the data already exists, the store is aborted but considered successful if existing data are equal.
 ///
 /// If the existing data has a different checksum, an error is returned
-pub async fn move_file(filename: &Path) -> tools::Result<RegisterResult>
+pub async fn move_file(filename: &Path, session: ArcSession<Any>) -> tools::Result<RegisterResult>
 {
 	if is_storage(filename) { // if the file is already in the storage-path just import it, and take ownership
-		import_file_impl(filename,true).await
+		import_file_impl(filename,true, session).await
 	} else { // if not, store (aka copy) file and delete the source once we're done
-		let stored= store_file(filename.to_owned()).await?;
+		let stored= store_file(filename.to_owned(), session).await?;
 		if let RegisterResult::Stored(_) = stored { //no error and no previously existing file, we can delete the source
 			tokio::fs::remove_file(filename).await.context(format!("moving file {:?}",filename))?;
 		}

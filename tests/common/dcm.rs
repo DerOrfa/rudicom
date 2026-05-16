@@ -5,7 +5,7 @@ use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
 use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
 use rudicom::tools::store::store;
-use rudicom::db::RegisterResult;
+use rudicom::db::{ArcSession, RegisterResult, DB};
 use std::time::SystemTime;
 use tokio::task::JoinSet;
 use tracing::debug;
@@ -97,11 +97,12 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 	let mut tasks = JoinSet::new();
 	let mut ret = Vec::<RegisterResult>::new();
 	let mut instances = instances.cloned();
+	let session = ArcSession::new(&DB);
 	
 	while tasks.len() < rudicom::config::get().limits.max_files as usize
 	{
 		if let Some(obj) = instances.next() {
-			tasks.spawn(store(obj));
+			tasks.spawn(store(obj,session.clone()));
 		} else {break} //abort if we already run out of instances
 	}
 	// take out the next finished import and thus drain the task list
@@ -109,7 +110,7 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 		ret.push(r?);
 		// we finished one store task, add another one as long as we have them
 		if let Some(obj) = instances.next() {
-			tasks.spawn(store(obj));
+			tasks.spawn(store(obj,session.clone()));
 		}
 	}
 	Ok(ret)

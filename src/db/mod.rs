@@ -6,7 +6,8 @@ pub use entry::Entry;
 pub use file::File;
 pub use into_db_value::IntoDbValue;
 pub use record::RecordId;
-pub use register::{register_instance, RegistryGuard,FileInfo};
+pub use register::{register_instance,FileInfo};
+pub use session::{ArcSession,Session};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -23,6 +24,7 @@ mod register;
 mod entry;
 mod file;
 mod record;
+mod session;
 
 #[derive(Deserialize,Debug,SurrealValue)]
 pub struct AggregateData

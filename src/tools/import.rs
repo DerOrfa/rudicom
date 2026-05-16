@@ -1,12 +1,13 @@
-use std::fmt::Display;
-use crate::db::{Entry, RecordId, RegisterResult};
+use crate::db::{ArcSession, Entry, RecordId, RegisterResult, DB};
 use crate::tools::Error;
 use futures::{Stream, StreamExt, TryStreamExt};
 use glob::glob;
 use itertools::Itertools;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
+use std::fmt::Display;
 use std::path::PathBuf;
+use surrealdb::engine::any::Any;
 use tokio::task::JoinError;
 
 pub enum ImportResult {
@@ -98,15 +99,15 @@ impl Serialize for ImportResult
 	}
 }
 
-async fn import_file<T>(path:T, mode: ImportMode) -> ImportResult where T:Into<PathBuf>
+async fn import_file<T>(path:T, mode: ImportMode, session: ArcSession<Any>) -> ImportResult where T:Into<PathBuf>
 {
 	let path= path.into();
 	let filename = path.display().to_string();
 	let import = 
 		match mode {
-			ImportMode::Import => {crate::tools::store::import_file(path.as_path()).await}
-			ImportMode::Store => {crate::tools::store::store_file(path).await}
-			ImportMode::Move => {crate::tools::store::move_file(path.as_path()).await}
+			ImportMode::Import => {crate::tools::store::import_file(path.as_path(), session).await}
+			ImportMode::Store => {crate::tools::store::store_file(path, session).await}
+			ImportMode::Move => {crate::tools::store::move_file(path.as_path(), session).await}
 		};
 	match import
 	{
@@ -128,23 +129,25 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
+	let session = ArcSession::new(&DB);
 
 	//if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
-		tasks.spawn(import_file(file,mode));
+		tasks.spawn(import_file(file,mode, session.clone()));
 	} else {
 		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
 	}
 	// make a stream that polls tasks and feeds new ones
 	let stream=futures::stream::poll_fn(move |c|{
-		// fill the task list up to max_files 
+		// fill the task list up to max_files
 		while tasks.len() < crate::config::get().limits.max_files as usize
 		{
+			let session = session.clone();
 			if let Some(nextfile) = files.next() {
 				tasks.spawn(async move {
 					match nextfile
 					{
-						Ok(p) => import_file(p, mode).await,
+						Ok(p) => import_file(p, mode, session).await,
 						Err(e) => ImportResult::GlobError(e.into())
 					}
 				});
