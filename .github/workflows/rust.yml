@@ -37,7 +37,7 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          name: rudicom-${{ matrix.os }}-${{ architecture }}
+          name: rudicom-${{ matrix.os }}-${{ matrix.architecture }}
           path: target/release/rudicom[.exe if ${{matrix.os}} == 'windows-latest']
           archive: false
         env:
