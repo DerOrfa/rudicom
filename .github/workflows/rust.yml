@@ -13,10 +13,16 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+      - name: Build binaries in "release" mode
+        run: cargo build -r
+      - name: Run tests
+        run: cargo test --verbose
+      - name: create release
+        run: gh release create --generate-notes "${{  github.ref_name }}" "target/release/rudicom#Ubuntu-latest"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
