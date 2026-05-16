@@ -11,18 +11,34 @@ env:
 
 jobs:
   build:
+    strategy:
+      # Continue running other matrix jobs even if one fails
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        architecture: ['x64', 'arm64']
+        # Exclude combinations that don't exist or aren't supported
+        exclude:
+          # Windows ARM64 runners are not widely available
+          - os: windows-latest
+            architecture: arm64
 
-    runs-on: ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
+      - name: Run tests
+        run: cargo test
       - name: Build binaries in "release" mode
         run: cargo build -r
-      - name: Run tests
-        run: cargo test --verbose
-      - name: create release
-        run: gh release create --generate-notes "${{  github.ref_name }}" "target/release/rudicom#Ubuntu-latest"
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: rudicom-${{ matrix.os }}-${{ architecture }}
+          path: target/release/rudicom[.exe if ${{matrix.os}} == 'windows-latest']
+          archive: false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
