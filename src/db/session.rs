@@ -1,16 +1,11 @@
 use std::fmt::Debug;
 use std::mem;
-use std::ops::Deref;
-use std::pin::Pin;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
-use futures::future::BoxFuture;
-use futures::FutureExt;
-use surrealdb::{Connection, Surreal};
 use surrealdb::method::Transaction;
-use tracing::{debug, error, warn};
 use surrealdb::Result;
-use tokio::sync::{oneshot, Mutex};
+use surrealdb::{Connection, Surreal};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 /// A guard holding a session.
 ///
@@ -29,75 +24,37 @@ pub trait Session<C> where C:Connection
 /// This cannot me cloned, but borrowed.
 
 #[derive(Default)]
-pub enum LocalSession<C> where C:Connection + Debug {
+pub struct LocalSession<C> where C:Connection + Debug {
+	state:Arc<Mutex<SessionState<C>>>
+}
+
+#[derive(Default)]
+enum SessionState<C> where C:Connection {
 	#[default]
 	None,
-	Waiting(oneshot::Receiver<std::result::Result<Surreal<C>, Transaction<C>>>),
 	Ready(Surreal<C>),
-	Busy(BoxFuture<'static, Result<Transaction<C>>>),
-	Canceled(BoxFuture<'static, Result<Surreal<C>>>)
+	Busy(Transaction<C>)
 }
-
 impl<C> LocalSession<C> where C:Connection + Debug {
-	pub fn new(parent:&Surreal<C>) -> Self {Self::Ready(parent.clone())}
-}
-
-impl<C> Future for LocalSession<C> where C:Connection + Debug + Unpin {
-	type Output = Result<TransactionGuard<C>>;
-
-	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>
-	{
-		let this = self.get_mut();
-		*this = match mem::take(this) { // we have to take it, because the future takes ownership
-			// original state, we have a client and can ask for a transaction
-			LocalSession::Ready(client) =>
-				LocalSession::Busy(client.begin().into_future()),
-			other => other // ot stuff it back
-		};
-		loop {
-			// we asked for a transaction, poll for answer, return guard
-			if let LocalSession::Busy(fut) = this {
-				let transaction = ready!(fut.as_mut().poll(cx))?;
-				let (tx, rx) = oneshot::channel();
-				debug!("Create transaction {tx:?}{rx:?}");
-				let guard = TransactionGuard((false,Some((tx, transaction))));
-				*this = LocalSession::Waiting(rx);
-				return Poll::Ready(Ok(guard)); // we got our guard, return it
-			}
-			// all set up, now we're waiting
-			if let LocalSession::Waiting(rx) = this {
-				debug!("Waiting for transaction from {rx:?}");
-				let ret = ready!(rx.poll_unpin(cx));
-				*this = match ret {
-					Err(e) =>{
-						error!("{rx:?}:{e}");
-						panic!("RecvError");
-					}
-					// Transaction was dropped without finishing, cancel it here, and wait for the db to return our session
-					Ok(Err(t)) =>{
-						debug!("Transaction was canceled, waiting for next");
-						LocalSession::Canceled(t.cancel().into_future())
-					},
-					// normal path transaction finished, and we got our Session back, ask again
-					Ok(Ok(s)) => {
-						debug!("Transaction was commited, waiting for next");
-						LocalSession::Busy(s.begin().into_future())
-					},
-				};
-			};
-			// wait for the db to return our session from a canceled transaction
-			if let LocalSession::Canceled(f) = this {
-				debug!("Cancellation confirmed, waiting for next");
-				let session = ready!(f.as_mut().poll(cx))?;
-				*this = LocalSession::Busy(session.begin().into_future());
-			}
-		}
+	pub fn new(parent:&Surreal<C>) -> Self {
+		let state = SessionState::Ready(parent.clone());
+		Self{state:Arc::new(state.into())}
 	}
 }
+
 impl<C> Session<C> for LocalSession<C> where C:Connection + Debug + Unpin {
 	async fn begin(&mut self) -> Result<TransactionGuard<C>>
 	{
-		self.await
+		let mut lock = self.state.clone().lock_owned().await;
+		let transaction = match mem::take(lock.deref_mut()) {
+			SessionState::None => {panic!("Invalid state")}
+			// transaction finished / or new
+			SessionState::Ready(s) => s.begin(),
+			// transaction didn't finish, but we got the lock back
+			SessionState::Busy(t) => t.cancel().await?.begin(),
+		}.await?;
+		*lock = SessionState::Busy(transaction);
+		Ok(TransactionGuard(lock))
 	}
 }
 
@@ -120,68 +77,33 @@ impl<C> Session<C> for ArcSession<C> where C:Connection + Debug + Unpin {
 ///
 /// It dereferences to surrealdb::method::Transaction and can be finished by calling either `commit()` ot `cancel()`.
 /// Dropping it will cancel the transaction.
-pub struct TransactionGuard<C>((bool, Option<(
-	oneshot::Sender<std::result::Result<Surreal<C>,Transaction<C>>>,
-	Transaction<C>
-)>)) where C:Connection;
+pub struct TransactionGuard<C>(OwnedMutexGuard<SessionState<C>>) where C:Connection;
 impl<C> TransactionGuard<C> where C:Connection {
 	pub async fn commit(mut self) -> Result<()>{
-		// option is only there so we can take out the values without moving them
-		// and this function consumes self, so None should never happen
-		self.0.0=true;
-		match self.0.1.take() {
-			Some((sender,t)) =>{
-				t.commit().await.map(Ok)
-					.map(|s|{let _ = sender.send(s);})
-			},
-			None => {unreachable!()}
-		}
+		if let SessionState::Busy(t) = mem::take(self.0.deref_mut()) {
+			*self.0 = SessionState::Ready(t.commit().await?);
+			Ok(())
+		}else { panic!("TransactionGuard was already commited");}
 	}
 	pub async fn cancel(mut self) -> Result<()>{
-		// option is only there so we can take out the values without moving them
-		// and this function consumes self, so None should never happen
-		self.0.0=true;
-		match self.0.1.take() {
-			Some((sender,t)) =>{
-				t.cancel().await.map(Ok)
-					.map(|s|{let _ = sender.send(s);})
-			},
-			None => {unreachable!()}
-		}
+		if let SessionState::Busy(t) = mem::take(self.0.deref_mut()) {
+			*self.0 = SessionState::Ready(t.cancel().await?);
+			Ok(())
+		}else { panic!("TransactionGuard was already commited");}
 	}
 	pub async fn reset(&mut self) -> Result<()>{
-		// option is only there so we can take out the values without moving them
-		// and this function consumes self, so None should never happen
-		self.0.0=true;
-		let repl= match self.0.1.take() {
-			Some((sender, t)) => {
-				(sender, t.cancel().await?.begin().await?)
-			},
-			None => { unreachable!() }
-		};
-		self.0.1.replace(repl);
-		Ok(())
+		if let SessionState::Busy(t) = mem::take(self.0.deref_mut()) {
+			*self.0 = SessionState::Busy(t.cancel().await?.begin().await?);
+			Ok(())
+		}else { panic!("TransactionGuard was already commited");}
 	}
 }
 impl<C> Deref for TransactionGuard<C> where C:Connection {
 	type Target = Transaction<C>;
 
 	fn deref(&self) -> &Self::Target {
-		&self.0.1.as_ref().unwrap().1
-	}
-}
-impl<C> Drop for TransactionGuard<C> where C:Connection {
-	fn drop(&mut self) {
-		match &self.0 {
-			(true,_) => {} //intentional drop, all good
-			(false, Some(_)) => {
-				let (sender,t) = self.0.1.take().unwrap();
-				warn!("Dropping unfinished transaction, sending it back");
-				let _ = sender.send(Err(t));
-			}
-			_ => {
-				error!("Dropping invalid transaction, this is not good ")
-			}
-		}
+		if let SessionState::Busy(t) = self.0.deref() {
+			t
+		}else { panic!("TransactionGuard was already commited");}
 	}
 }
