@@ -1,4 +1,4 @@
-use crate::db::{ArcSession, Entry, RecordId, RegisterResult, DB};
+use crate::db::{ArcSession, Entry, LocalSession, RecordId, RegisterResult, Session, DB};
 use crate::tools::Error;
 use futures::{Stream, StreamExt, TryStreamExt};
 use glob::glob;
@@ -7,6 +7,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::Display;
 use std::path::PathBuf;
+use rand::random_range;
 use surrealdb::engine::any::Any;
 use tokio::task::JoinError;
 
@@ -99,7 +100,7 @@ impl Serialize for ImportResult
 	}
 }
 
-async fn import_file<T>(path:T, mode: ImportMode, session: ArcSession<Any>) -> ImportResult where T:Into<PathBuf>
+async fn import_file<T>(path:T, mode: ImportMode, session: impl Session<Any>) -> ImportResult where T:Into<PathBuf>
 {
 	let path= path.into();
 	let filename = path.display().to_string();
@@ -126,28 +127,31 @@ async fn import_file<T>(path:T, mode: ImportMode, session: ArcSession<Any>) -> I
 pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
 {
 	let mut tasks=tokio::task::JoinSet::new();
+	let max_files = crate::config::get().limits.max_files;
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let session = ArcSession::new(&DB);
+	// let session_pool = (0..max_files).into_iter()
+	// 	.map(|_|ArcSession::new(&DB)).collect::<Vec<_>>();
 
 	//if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
-		tasks.spawn(import_file(file,mode, session.clone()));
+		//let session = session_pool[random_range(0..max_files) as usize].clone();
+		tasks.spawn(import_file(file,mode, LocalSession::new(&DB)));
 	} else {
 		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
 	}
 	// make a stream that polls tasks and feeds new ones
 	let stream=futures::stream::poll_fn(move |c|{
 		// fill the task list up to max_files
-		while tasks.len() < crate::config::get().limits.max_files as usize
+		while tasks.len() < max_files as usize
 		{
-			let session = session.clone();
+			//let session = session_pool[random_range(0..max_files) as usize].clone();
 			if let Some(nextfile) = files.next() {
 				tasks.spawn(async move {
 					match nextfile
 					{
-						Ok(p) => import_file(p, mode, session).await,
+						Ok(p) => import_file(p, mode, LocalSession::new(&DB)).await,
 						Err(e) => ImportResult::GlobError(e.into())
 					}
 				});

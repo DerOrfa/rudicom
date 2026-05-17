@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 use std::sync::Arc;
-use crate::db::{if_retry, ArcSession, Entry, File, RecordId, RegisterResult};
+use crate::db::{if_retry, Entry, File, RecordId, RegisterResult, Session};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::{extract_from_dicom, Error};
 use crate::{dcm, tools};
@@ -127,7 +127,7 @@ async fn upsert<'a,C>(
 pub async fn register_instance(
 	obj:Arc<DefaultDicomObject>,
 	file_info:&mut FileInfo,
-	mut session: ArcSession<Any>,
+	mut session: impl Session<Any>,
 ) -> tools::Result<RegisterResult>
 {
 	// begin owns the session. so if its dropped, the whole session is dropped, hence canceled

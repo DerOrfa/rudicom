@@ -7,7 +7,7 @@ pub use file::File;
 pub use into_db_value::IntoDbValue;
 pub use record::RecordId;
 pub use register::{register_instance,FileInfo};
-pub use session::{ArcSession,Session};
+pub use session::{ArcSession, LocalSession, Session};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
