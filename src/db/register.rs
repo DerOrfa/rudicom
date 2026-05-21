@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::ops::Deref;
 use std::sync::Arc;
 use crate::db::{if_retry, Entry, File, RecordId, RegisterResult, Session};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
@@ -13,6 +12,7 @@ use surrealdb::method::Transaction;
 use surrealdb::{types as db_types, Connection};
 use surrealdb::engine::any::Any;
 use surrealdb::types::{SurrealValue, ToSql};
+use tokio::task;
 use tracing::{debug};
 use crate::tools::Error::{DataConflict, FieldConflict};
 
@@ -130,18 +130,27 @@ pub async fn register_instance(
 	mut session: impl Session<Any>,
 ) -> tools::Result<RegisterResult>
 {
-	// begin owns the session. so if its dropped, the whole session is dropped, hence canceled
 	let mut res = None;
 	let mut retry = 0;
 	let mut transaction = None;
 	loop {
 		// make sure we have a transaction
-		let t= transaction.get_or_insert(session.begin().await?);
+		let t= match &mut transaction{
+			Some(t) => t,
+			None => {
+				transaction = Some(session.begin().await?);
+				transaction.as_mut().unwrap()
+			}
+		};
+
 		// make sure we have a result and handle it
 		let fall_throu = match if let Some(r) = res.take() {r} // we already have a result, don't need a new one
-			else {retry+=1;_register_instance(obj.clone(), file_info, t.deref()).await}
-		{
-			Err(Error::SurrealError(e)) => if let Ok(true) = if_retry(&e,&mut retry).await{continue} else { e.into() },
+			else {
+				retry+=1;
+				_register_instance(obj.clone(), file_info, t).await
+		}{
+			Err(Error::SurrealError(e)) =>
+				if let Ok(true) = if_retry(&e,&mut retry).await{continue} else { e.into() },
 			Err(e) => e,
 			Ok(r) => { // no inner errors, commit or cancel based on results
 					let commit_or_cancel = match r {
@@ -190,6 +199,7 @@ async fn _register_instance<'a,C>(
 		}
 		_ =>{}
 	};
+	debug!("task {} registering instance {}",task::id(),instance_uid);
 
 	if insert(&*obj, &instance_id, add_meta, &INSTANCE_TAGS, &transaction	).await?
 	{ // normal insert, didn't exist before. So make sure its series/study exists (this may also update non-existing entries)

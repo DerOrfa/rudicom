@@ -1,4 +1,4 @@
-use crate::db::{ArcSession, Entry, LocalSession, RecordId, RegisterResult, Session, DB};
+use crate::db::{Entry, RecordId, RegisterResult, LocalSessionStream, DB, Session, SharedSessionStream};
 use crate::tools::Error;
 use futures::{Stream, StreamExt, TryStreamExt};
 use glob::glob;
@@ -7,7 +7,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::Display;
 use std::path::PathBuf;
-use rand::random_range;
+use std::sync::Arc;
 use surrealdb::engine::any::Any;
 use tokio::task::JoinError;
 
@@ -131,13 +131,11 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	// let session_pool = (0..max_files).into_iter()
-	// 	.map(|_|ArcSession::new(&DB)).collect::<Vec<_>>();
+	let session_pool:SharedSessionStream<Any> = Arc::new(LocalSessionStream::new(&DB, max_files).into());
 
-	//if there is not at least one file, it's probably a good idea to return an error
+	// if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
-		//let session = session_pool[random_range(0..max_files) as usize].clone();
-		tasks.spawn(import_file(file,mode, LocalSession::new(&DB)));
+		tasks.spawn(import_file(file,mode, session_pool.clone()));
 	} else {
 		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
 	}
@@ -146,16 +144,16 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 		// fill the task list up to max_files
 		while tasks.len() < max_files as usize
 		{
-			//let session = session_pool[random_range(0..max_files) as usize].clone();
+			let session = session_pool.clone();
 			if let Some(nextfile) = files.next() {
 				tasks.spawn(async move {
 					match nextfile
 					{
-						Ok(p) => import_file(p, mode, LocalSession::new(&DB)).await,
+						Ok(p) => import_file(p, mode, session).await,
 						Err(e) => ImportResult::GlobError(e.into())
 					}
 				});
-			} else {break} //as long as there are files  
+			} else {break} //as long as there are files
 		}
 		// pass on the next finished import and thus drain the task list
 		tasks.poll_join_next(c)

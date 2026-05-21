@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use dicom::core::{DataElement, VR};
 use dicom::dictionary_std::{tags, uids};
@@ -5,10 +6,11 @@ use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
 use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
 use rudicom::tools::store::store;
-use rudicom::db::{ArcSession, RegisterResult, DB};
+use rudicom::db::{LocalSessionStream, RegisterResult, SharedSessionStream, DB};
 use std::time::SystemTime;
+use surrealdb::engine::any::Any;
 use tokio::task::JoinSet;
-use tracing::debug;
+use tracing::{debug, info};
 
 pub struct UidSynthesizer{
 	prefix: String,
@@ -97,9 +99,9 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 	let mut tasks = JoinSet::new();
 	let mut ret = Vec::<RegisterResult>::new();
 	let mut instances = instances.cloned();
-	let session = ArcSession::new(&DB);
-	
-	while tasks.len() < rudicom::config::get().limits.max_files as usize
+	let session:SharedSessionStream<Any> = Arc::new(LocalSessionStream::new(&DB, 1).into());
+
+	while tasks.len() < 2 /*rudicom::config::get().limits.max_files as usize*/
 	{
 		if let Some(obj) = instances.next() {
 			tasks.spawn(store(obj,session.clone()));
@@ -107,9 +109,9 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 	}
 	// take out the next finished import and thus drain the task list
 	while let Some(r) = tasks.join_next().await.transpose()?{
-		ret.push(r?);
-		// we finished one store task, add another one as long as we have them
-		if let Some(obj) = instances.next() {
+			ret.push(r?);
+			// we finished one store task, add another one as long as we have them
+			if let Some(obj) = instances.next() {
 			tasks.spawn(store(obj,session.clone()));
 		}
 	}

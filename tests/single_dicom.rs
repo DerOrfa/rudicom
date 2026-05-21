@@ -2,7 +2,7 @@ use crate::common::dcm;
 use crate::common::init_db;
 use dicom::dictionary_std::tags;
 use tracing::debug;
-use rudicom::db::{lookup, ArcSession, DB};
+use rudicom::db::{lookup, LocalSessionStream, SingleSessionStream, DB};
 use rudicom::db::RegisterResult;
 use rudicom::tools::store::store;
 use crate::common::dcm::cleanup;
@@ -12,14 +12,13 @@ mod common;
 #[tokio::test]
 async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 {
-	// tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
+	//tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 	init_db().await?.health().await?;
-	let session = ArcSession::new(&DB);
 	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
-	if let RegisterResult::Stored(_) = store(obj.clone(), session.clone()).await? {}
+	if let RegisterResult::Stored(_) = store(obj.clone(), LocalSessionStream::new(&DB,1)).await? {}
 	else { panic!("First store should return stored."); }
 	debug!("inserted object");
-	if let RegisterResult::AlreadyStored(stored) = store(obj.clone(), session).await? {
+	if let RegisterResult::AlreadyStored(stored) = store(obj.clone(), LocalSessionStream::new(&DB,1)).await? {
 		let stored = lookup(&stored).await?.expect("existing object should be found");
 		let path = stored.get_file()?.get_path();
 		let red = dicom::object::open_file(&path)?;

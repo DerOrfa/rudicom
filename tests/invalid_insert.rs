@@ -10,7 +10,8 @@ mod common;
 #[tokio::test]
 async fn invalid_insert() -> Result<(), Box<dyn std::error::Error>>
 {
-	//tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
+//	console_subscriber::init();
+	tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 
 	init_db().await?.health().await?;
 	

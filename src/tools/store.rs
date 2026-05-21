@@ -14,7 +14,7 @@ pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
 	path.as_ref().starts_with(&crate::config::get().paths.storage_path)
 }
 
-/// Stores given a dicom object as a file and registers it as owned (might change data).
+/// Stores a dicom object as a file and registers it as owned (might change data).
 /// 
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
 pub async fn store(obj:DefaultDicomObject, session: impl Session<Any>) -> tools::Result<RegisterResult>

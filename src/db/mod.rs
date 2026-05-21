@@ -7,7 +7,7 @@ pub use file::File;
 pub use into_db_value::IntoDbValue;
 pub use record::RecordId;
 pub use register::{register_instance,FileInfo};
-pub use session::{ArcSession, LocalSession, Session};
+pub use session::{Session, SingleSessionStream, LocalSessionStream, SharedSessionStream, TransactionGuard};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -214,7 +214,7 @@ pub async fn if_retry(e:&surrealdb::Error,retries:&mut u32) -> surrealdb::Result
 	match e.details(){
 		ErrorDetails::Query(Some(QueryError::TransactionConflict)) |
 		ErrorDetails::Internal if "Transaction conflict".eq(&e.message()[..20]) => {
-			if *retries > 10 { tracing::warn!("{retries}nd transaction conflict, retrying")};
+			if *retries > 5 { tracing::warn!("{retries}nd transaction conflict, retrying")};
 			tokio::time::sleep(tokio::time::Duration::from_millis(rand::random_range(10..100))).await;
 			Ok(true) // try again
 		},
