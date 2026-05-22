@@ -1,4 +1,4 @@
-use crate::db::{Entry, RecordId, RegisterResult, LocalSessionStream, DB, Session, SharedSessionStream};
+use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSessionStream};
 use crate::tools::Error;
 use futures::{Stream, StreamExt, TryStreamExt};
 use glob::glob;
@@ -7,7 +7,6 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::Display;
 use std::path::PathBuf;
-use std::sync::Arc;
 use surrealdb::engine::any::Any;
 use tokio::task::JoinError;
 
@@ -131,7 +130,7 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let session_pool:SharedSessionStream<Any> = Arc::new(LocalSessionStream::new(&DB, max_files).into());
+	let session_pool = SharedSessionStream::<Any>::create(&DB, max_files);
 
 	// if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{

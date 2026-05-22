@@ -23,6 +23,7 @@ use tracing::{error, trace};
 /// Dropping the transaction will send it back as well. This is equivalent to calling `cancel()` on it.
 pub trait Session<C> where C:Connection
 {
+	fn create(parent:&Surreal<C>, size:u16) -> Self;
 	fn begin(&mut self) -> impl Future<Output = Result<TransactionGuard<C>>> + Send;
 }
 
@@ -74,7 +75,7 @@ impl<C> SingleSession<C> where C:Connection {
 	}
 }
 
-pub struct SingleSessionStream<C> where C:Connection {
+struct SingleSessionStream<C> where C:Connection {
 	inner:SingleSession<C>,
 	active_future: Option<Pin<Box<dyn Future<Output=Option<Result<TransactionGuard<C>>>> + Send>>>,
 }
@@ -118,8 +119,18 @@ impl<C> Stream for SingleSessionStream<C> where C:Connection {
 
 /// A basic shared Session.
 pub struct LocalSessionStream<C>(BoxStream<'static, Result<TransactionGuard<C>>>) where C:Connection ;
-impl<C> LocalSessionStream<C> where C:Connection {
-	pub fn new(parent:&Surreal<C>,size:u16) -> Self {
+impl<C> Stream for LocalSessionStream<C> where C:Connection {
+	type Item = Result<TransactionGuard<C>>;
+
+	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		self.get_mut().0.poll_next_unpin(cx)
+	}
+}
+
+pub type SharedSessionStream<C>=Arc<Mutex<LocalSessionStream<C>>>;
+
+impl<C> Session<C> for LocalSessionStream<C> where C:Connection {
+	fn create(parent: &Surreal<C>, size:u16) -> Self {
 		let mut pool = Box::pin(stream::SelectAll::new());
 		let source = parent.clone();
 		let stream = stream::poll_fn(move |cx| {
@@ -133,23 +144,15 @@ impl<C> LocalSessionStream<C> where C:Connection {
 		});
 		LocalSessionStream(stream.boxed())
 	}
-}
-impl<C> Stream for LocalSessionStream<C> where C:Connection {
-	type Item = Result<TransactionGuard<C>>;
 
-	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-		self.get_mut().0.poll_next_unpin(cx)
-	}
-}
-
-pub type SharedSessionStream<C>=Arc<Mutex<LocalSessionStream<C>>>;
-
-impl<C> Session<C> for LocalSessionStream<C> where C:Connection {
 	async fn begin(&mut self) -> Result<TransactionGuard<C>> {
 		self.next().await.unwrap()
 	}
 }
 impl<C> Session<C> for SharedSessionStream<C> where C:Connection {
+	fn create(parent: &Surreal<C>, size:u16) -> Self {
+		Arc::new(LocalSessionStream::<C>::create(parent, size).into())
+	}
 	async fn begin(&mut self) -> Result<TransactionGuard<C>> {
 		self.lock().await.next().await.unwrap()
 	}

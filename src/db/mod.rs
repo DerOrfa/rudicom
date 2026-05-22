@@ -7,7 +7,7 @@ pub use file::File;
 pub use into_db_value::IntoDbValue;
 pub use record::RecordId;
 pub use register::{register_instance,FileInfo};
-pub use session::{Session, SingleSessionStream, LocalSessionStream, SharedSessionStream, TransactionGuard};
+pub use session::{Session, LocalSessionStream, SharedSessionStream, TransactionGuard};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -107,7 +107,7 @@ pub async fn init_file(file:&std::path::Path) -> surrealdb::Result<()>
 }
 pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 {
-	DB.connect(addr).await?;
+	init_local(addr).await?;
 
 	// Sign in as a namespace, database, or root user
 	DB.signin(Root { username: "root".into(), password: "root".into(), }).await?;
@@ -115,7 +115,7 @@ pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 }
 pub async fn init_local(addr:&str) -> surrealdb::Result<()>
 {
-	DB.connect(addr).await
+	DB.connect(addr).with_capacity(crate::config::get().limits.db_capacity).await
 }
 
 #[derive(Serialize)]

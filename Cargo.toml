@@ -30,7 +30,7 @@ md5 = "0.8.0"
 strfmt = "0.2.4"
 axum = {version = "0.8", features = ["tracing","query"]}
 axum-extra = {version = "0.12", features = ["async-read-body","query"]}
-tracing = "0.1"
+tracing = {version = "0.1.44", features = ["release_max_level_debug"]}
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = {version = "0.3", default-features = false}
 axum-streams = {version = "0.25.0", default-features = false, features = ["text","json"]}

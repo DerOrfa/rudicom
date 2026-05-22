@@ -6,7 +6,7 @@ use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
 use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
 use rudicom::tools::store::store;
-use rudicom::db::{LocalSessionStream, RegisterResult, SharedSessionStream, DB};
+use rudicom::db::{RegisterResult, Session, SharedSessionStream, DB};
 use std::time::SystemTime;
 use surrealdb::engine::any::Any;
 use tokio::task::JoinSet;
@@ -99,7 +99,7 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 	let mut tasks = JoinSet::new();
 	let mut ret = Vec::<RegisterResult>::new();
 	let mut instances = instances.cloned();
-	let session:SharedSessionStream<Any> = Arc::new(LocalSessionStream::new(&DB, 1).into());
+	let session:SharedSessionStream<Any> = SharedSessionStream::create(&DB, 1);
 
 	while tasks.len() < 2 /*rudicom::config::get().limits.max_files as usize*/
 	{

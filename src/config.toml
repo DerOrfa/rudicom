@@ -16,6 +16,7 @@ Time = ["InstanceCreationTime"]
 [limits]
 upload_sizelimit = "200M"
 max_files = 10 # max amount of concurrently processed files
+db_capacity = 0 # https://docs.rs/surrealdb/3.0.5/surrealdb/struct.Connect.html#method.with_capacity
 
 [paths]
 #use dicom tag names in "{}" to generate file names (obviously those should be unique)
