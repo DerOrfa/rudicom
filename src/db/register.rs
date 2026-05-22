@@ -99,7 +99,7 @@ async fn upsert<'a,C>(
 		.bind(("content",meta)).bind(("rec",record_id.0.clone()));
 	let diff  = q.await?.take::<Vec<Diff>>(0)?.into_iter()
 		.filter(|d|d.op!="add")
-		.filter(|d|d.path!="/instances").filter(|d|d.path!="/series")
+		.filter(|d|!d.path.starts_with("/instances")).filter(|d|!d.path.starts_with("/series"))
 		.collect::<Vec<_>>();
 	if diff.is_empty(){
 		Ok(true)
