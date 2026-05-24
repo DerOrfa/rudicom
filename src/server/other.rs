@@ -1,4 +1,4 @@
-use crate::db::{Entry, RegisterResult, DB, LocalSessionStream, Session};
+use crate::db::{Entry, RegisterResult, DB, LocalSession, Session};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
 use crate::tools::tar::{make_tar, TarStream};
@@ -87,7 +87,7 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 		return Err(HttpError::new(InnerHttpError::BadRequest {message:"Ignoring empty upload".into()}, &headers))
 	}
 	let obj= from_reader(Cursor::new(bytes)).map_err(|e|DicomError(e.into())).into_http_error(&headers)?;
-	let session = LocalSessionStream::create(&DB, 1);
+	let session = LocalSession::create(&DB, 1);
 	match store(obj, session).await {
 		Ok(RegisterResult::Stored(id)) => Ok((StatusCode::CREATED,
 			Json(json!({

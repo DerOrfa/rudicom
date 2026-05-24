@@ -1,4 +1,4 @@
-use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSessionStream};
+use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSession};
 use crate::tools::Error;
 use futures::{Stream, StreamExt, TryStreamExt};
 use glob::glob;
@@ -130,7 +130,7 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let session_pool = SharedSessionStream::<Any>::create(&DB, max_files);
+	let session_pool = SharedSession::<Any>::create(&DB, max_files);
 
 	// if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{

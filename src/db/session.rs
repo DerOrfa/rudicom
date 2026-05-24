@@ -4,8 +4,8 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
-use futures::{stream, FutureExt, Stream, StreamExt};
-use futures::stream::BoxStream;
+use futures::{FutureExt, Stream, StreamExt};
+use futures::stream::{Fuse, SelectAll};
 use rand::random;
 use surrealdb::method::Transaction;
 use surrealdb::Result;
@@ -117,44 +117,41 @@ impl<C> Stream for SingleSessionStream<C> where C:Connection {
 	}
 }
 
-/// A basic shared Session.
-pub struct LocalSessionStream<C>(BoxStream<'static, Result<TransactionGuard<C>>>) where C:Connection ;
-impl<C> Stream for LocalSessionStream<C> where C:Connection {
-	type Item = Result<TransactionGuard<C>>;
-
-	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-		self.get_mut().0.poll_next_unpin(cx)
-	}
+/// A Stream that can generate multiple Transactions at a time from an internal pool.
+pub struct LocalSession<C> where C:Connection
+{
+	size:u16,
+	source: Surreal<C>,
+	pool:SelectAll<Fuse<SingleSessionStream<C>>>,
 }
 
-pub type SharedSessionStream<C>=Arc<Mutex<LocalSessionStream<C>>>;
-
-impl<C> Session<C> for LocalSessionStream<C> where C:Connection {
-	fn create(parent: &Surreal<C>, size:u16) -> Self {
-		let mut pool = Box::pin(stream::SelectAll::new());
-		let source = parent.clone();
-		let stream = stream::poll_fn(move |cx| {
-			let pool = &mut pool;
-			async {
-				while pool.len() < size as usize {
-					pool.push(SingleSessionStream::new(&source).fuse())
-				}
-				pool.next().await
-			}.boxed().poll_unpin(cx)
-		});
-		LocalSessionStream(stream.boxed())
+impl<C> Session<C> for LocalSession<C> where C:Connection {
+	fn create(parent: &Surreal<C>, size:u16) -> LocalSession<C> {
+		LocalSession::<C>{
+			size,
+			source:parent.clone(),
+			pool:SelectAll::new(),
+		}
 	}
 
 	async fn begin(&mut self) -> Result<TransactionGuard<C>> {
-		self.next().await.unwrap()
+		while self.pool.len() < self.size as usize {
+			self.pool.push(SingleSessionStream::new(&self.source).fuse())
+		}
+		self.pool.next().await.unwrap()
 	}
 }
-impl<C> Session<C> for SharedSessionStream<C> where C:Connection {
+
+/// Same as `LocalSessionStream` but can be shared across threads.
+///
+/// The internal pool will be shared as well.
+pub type SharedSession<C>=Arc<Mutex<LocalSession<C>>>;
+impl<C> Session<C> for SharedSession<C> where C:Connection {
 	fn create(parent: &Surreal<C>, size:u16) -> Self {
-		Arc::new(LocalSessionStream::<C>::create(parent, size).into())
+		Arc::new(LocalSession::<C>::create(parent, size).into())
 	}
 	async fn begin(&mut self) -> Result<TransactionGuard<C>> {
-		self.lock().await.next().await.unwrap()
+		self.lock().await.begin().await
 	}
 }
 
