@@ -11,8 +11,8 @@ use surrealdb::method::Transaction;
 use surrealdb::Result;
 use surrealdb::{Connection, Surreal};
 use tokio::sync::{Mutex, OwnedMutexGuard};
-use tokio::task;
-use tracing::{error, trace};
+use tokio::{spawn, task};
+use tracing::{error, trace, warn};
 
 /// A guard holding a session.
 ///
@@ -112,6 +112,23 @@ impl<C> Stream for SingleSessionStream<C> where C:Connection {
 			None => {
 				trace!("session {} died", this.inner.id);
 				Poll::Ready(None)
+			}
+		}
+	}
+}
+
+impl<C> Drop for SingleSessionStream<C> where C:Connection {
+	fn drop(&mut self) {
+		if Arc::<Mutex<SessionState<C>>>::strong_count(&self.inner.state) > 1{
+			warn!("session {} dropped with an active transaction guard",self.inner.id);
+		} else {
+			let mut locked = self.inner.state.try_lock().unwrap();
+			match mem::take(locked.deref_mut()) {
+				SessionState::Busy(t) => { // dropped transaction guard, but never dropped
+					// tell it to cancel, hand it over to a separate task and hope it finishes
+					spawn(t.cancel().into_future());
+				}
+				_ => {}
 			}
 		}
 	}
