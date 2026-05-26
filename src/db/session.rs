@@ -121,7 +121,7 @@ impl<C> Drop for SingleSessionStream<C> where C:Connection {
 	fn drop(&mut self) {
 		if let Ok(mut locked) = self.inner.state.try_lock(){
 			match mem::take(locked.deref_mut()) {
-				SessionState::Busy(t) => { // dropped transaction guard, but never dropped
+				SessionState::Busy(t) => { // dropped transaction guard, but never closed the transaction
 					// tell it to cancel, hand it over to a separate task and hope it finishes
 					spawn(t.cancel().into_future());
 				}
@@ -155,6 +155,18 @@ impl<C> Session<C> for LocalSession<C> where C:Connection {
 			self.pool.push(SingleSessionStream::new(&self.source).fuse())
 		}
 		self.pool.next().await.unwrap()
+	}
+}
+
+impl<C> Drop for LocalSession<C> where C:Connection {
+	fn drop(&mut self) {
+		// LocalSessions always races all SessionStreams, meaning all but one have always
+		// an active future. They need to be cleaned up
+		for s in &mut self.pool{
+			s.get_mut().active_future.take();
+		}
+		// and then clear the pool while we're already here
+		self.pool.clear();
 	}
 }
 
