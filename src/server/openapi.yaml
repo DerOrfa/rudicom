@@ -354,7 +354,7 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/dbentry"
-  /{table}/{id}/col/{name}:
+  /api/{table}/{id}/col/{name}:
     get:
       operationId: tableEntryAttachmentGet
       summary: get table entry-attachment

@@ -119,10 +119,7 @@ impl<C> Stream for SingleSessionStream<C> where C:Connection {
 
 impl<C> Drop for SingleSessionStream<C> where C:Connection {
 	fn drop(&mut self) {
-		if Arc::<Mutex<SessionState<C>>>::strong_count(&self.inner.state) > 1{
-			warn!("session {} dropped with an active transaction guard",self.inner.id);
-		} else {
-			let mut locked = self.inner.state.try_lock().unwrap();
+		if let Ok(mut locked) = self.inner.state.try_lock(){
 			match mem::take(locked.deref_mut()) {
 				SessionState::Busy(t) => { // dropped transaction guard, but never dropped
 					// tell it to cancel, hand it over to a separate task and hope it finishes
@@ -130,6 +127,8 @@ impl<C> Drop for SingleSessionStream<C> where C:Connection {
 				}
 				_ => {}
 			}
+		} else {
+			warn!("session {} dropped with an active transaction around",self.inner.id);
 		}
 	}
 }
