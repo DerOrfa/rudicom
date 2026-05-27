@@ -151,10 +151,15 @@ impl<C> Session<C> for LocalSession<C> where C:Connection {
 	}
 
 	async fn begin(&mut self) -> Result<TransactionGuard<C>> {
-		while self.pool.len() < self.size as usize {
-			self.pool.push(SingleSessionStream::new(&self.source).fuse())
+		loop {
+			while self.pool.len() < self.size as usize {
+				self.pool.push(SingleSessionStream::new(&self.source).fuse())
+			}
+			if let Some(r)= self.pool.next().await
+			{
+				return r
+			}
 		}
-		self.pool.next().await.unwrap()
 	}
 }
 
