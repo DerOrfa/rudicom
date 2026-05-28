@@ -5,6 +5,7 @@ pub mod verify;
 mod error;
 pub mod conv;
 pub mod tar;
+pub mod csa;
 
 use crate::db;
 use crate::db::{lookup_uid, Pickable, RecordId, DB};

@@ -1,4 +1,4 @@
-use crate::{config, db};
+use crate::{config, db, tools};
 use crate::db::IntoDbValue;
 use crate::tools::Context;
 use dicom::core::header::HasLength;
@@ -14,7 +14,13 @@ use strfmt::{strfmt_map, FmtError};
 use surrealdb::types as db_types;
 
 #[derive(Debug,Clone,Hash,PartialEq,Eq)]
-pub struct AttributeSelector(pub dicom::core::ops::AttributeSelector);
+pub enum AttributeSelector{
+	Core(dicom::core::ops::AttributeSelector),
+	CSA {
+		base: dicom::core::ops::AttributeSelector,
+		element: String,
+	}
+}
 
 pub static INSTANCE_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> =
 	LazyLock::new(|| get_attr_list(db::Table::Instances, vec![("Number", vec![Tag::from((0x0020,0x0013))])]));//InstanceNumber
@@ -33,7 +39,7 @@ pub static STUDY_TAGS: LazyLock<HashMap<String, Vec<AttributeSelector>>> =
 	);
 
 impl From<Tag> for AttributeSelector{
-	fn from(value: Tag) -> Self {AttributeSelector(value.into())}
+	fn from(value: Tag) -> Self {AttributeSelector::Core(value.into())}
 }
 
 pub fn find_tag(name:&str) -> Option<Tag>
@@ -68,8 +74,16 @@ pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a HashMap<String,Vec<At
 	requested.iter().map(|(k,selectors)|(
 		k.deref(),
 		selectors.iter()
-			.find_map(|s|obj.entry_at(s.0.clone()).ok())
-			.map(|v|v.clone().into_db_value())
+			.find_map(|s| {
+				match s {
+					AttributeSelector::Core(selector) => 
+						obj.entry_at(selector.clone()).map(|e|e.clone().into_db_value()).ok(),
+					AttributeSelector::CSA{ base, element } => 
+						obj.entry_at(base.clone()).ok()
+							.and_then(|b|tools::csa::extract_csa(b, element).unwrap())
+							.map(|e|e.into_db_value()),					
+				}
+			})
 			.unwrap_or_default()
 		)
 	)

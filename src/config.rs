@@ -26,7 +26,11 @@ pub struct ConfigStruct
 impl Serialize for AttributeSelector {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer
 	{
-		serializer.serialize_str(self.0.to_string().as_str())
+		let v = match self {
+			AttributeSelector::Core(c) => c.to_string(),
+			AttributeSelector::CSA { base, element } => format!("{}#CSA.{}", base, element),
+		};
+		serializer.serialize_str(v.as_str())
 	}
 }
 impl<'de> Deserialize<'de> for AttributeSelector {
@@ -35,9 +39,15 @@ impl<'de> Deserialize<'de> for AttributeSelector {
 		let dict = StandardDataDictionary::default();
 
 		let parts=String::deserialize(deserializer)?;
-		dict.parse_selector(parts.as_str())
-			.map(AttributeSelector)
-			.map_err(serde::de::Error::custom)
+		if let Some(p) = parts.find("#CSA"){
+			let base = &parts[..p];
+			let base = dict.parse_selector(base).map_err(serde::de::Error::custom)?;
+			Ok(AttributeSelector::CSA {base,element:parts[p+5..].to_string()})
+		} else {
+			dict.parse_selector(parts.as_str())
+				.map(AttributeSelector::Core)
+				.map_err(serde::de::Error::custom)
+		}
 	}
 }
 
