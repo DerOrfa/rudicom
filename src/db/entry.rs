@@ -73,9 +73,9 @@ impl Entry
 			Study(_) => {
 				let id=self.get_string("Name").unwrap_or("<-->");
 				let mut date=self.get_string("Date").unwrap_or("<-->");
-				let time=self.get_string("Time").unwrap_or("<-->");
+				let mut time=self.get_string("Time").unwrap_or("<-->");
 				if date.len()>6 {date=&date[2..];}
-				let time = &time[..6];
+				if time.len()>6 {time=&time[..6]};
 				format!("{id}/{date}_{time}")
 			}
 		}
