@@ -9,7 +9,7 @@ use rudicom::tools::store::store;
 use rudicom::db::{shared_session, RegisterResult, DB};
 use std::time::SystemTime;
 use tokio::task::JoinSet;
-use tracing::{debug, info};
+use tracing::debug;
 
 pub struct UidSynthesizer{
 	prefix: String,
