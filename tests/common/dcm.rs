@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::ops::DerefMut;
 use chrono::{DateTime, Utc};
 use dicom::core::{DataElement, VR};
 use dicom::dictionary_std::{tags, uids};
@@ -6,9 +6,8 @@ use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
 use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
 use rudicom::tools::store::store;
-use rudicom::db::{RegisterResult, Session, SharedSession, DB};
+use rudicom::db::{shared_session, RegisterResult, DB};
 use std::time::SystemTime;
-use surrealdb::engine::any::Any;
 use tokio::task::JoinSet;
 use tracing::{debug, info};
 
@@ -99,20 +98,27 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 	let mut tasks = JoinSet::new();
 	let mut ret = Vec::<RegisterResult>::new();
 	let mut instances = instances.cloned();
-	let session: SharedSession<Any> = SharedSession::create(&DB, 1);
+	let session = shared_session(DB.clone(), 1);
 
 	while tasks.len() < 2 /*rudicom::config::get().limits.max_files as usize*/
 	{
 		if let Some(obj) = instances.next() {
-			tasks.spawn(store(obj,session.clone()));
+			let session = session.clone();
+			tasks.spawn(async move {
+				store(obj,session.lock().await.deref_mut()).await
+			});
 		} else {break} //abort if we already run out of instances
 	}
 	// take out the next finished import and thus drain the task list
-	while let Some(r) = tasks.join_next().await.transpose()?{
-			ret.push(r?);
-			// we finished one store task, add another one as long as we have them
-			if let Some(obj) = instances.next() {
-			tasks.spawn(store(obj,session.clone()));
+	while let Some(r) = tasks.join_next().await.transpose()?
+	{
+		ret.push(r?);
+		// we finished one store task, add another one as long as we have them
+		if let Some(obj) = instances.next() {
+			let session = session.clone();
+			tasks.spawn(async move {
+				store(obj,session.lock().await.deref_mut()).await
+			});
 		}
 	}
 	Ok(ret)

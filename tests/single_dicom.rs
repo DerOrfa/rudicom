@@ -2,7 +2,7 @@ use crate::common::dcm;
 use crate::common::init_db;
 use dicom::dictionary_std::tags;
 use tracing::debug;
-use rudicom::db::{lookup, LocalSession, Session, DB};
+use rudicom::db::{local_session, lookup, DB};
 use rudicom::db::RegisterResult;
 use rudicom::tools::store::store;
 use crate::common::dcm::cleanup;
@@ -14,11 +14,12 @@ async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 {
 	tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 	init_db().await?.health().await?;
+	let mut session = local_session(DB.clone(), 1);
 	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
-	if let RegisterResult::Stored(_) = store(obj.clone(), LocalSession::create(&DB, 1)).await? {}
+	if let RegisterResult::Stored(_) = store(obj.clone(), &mut session).await? {}
 	else { panic!("First store should return stored."); }
 	debug!("inserted object");
-	if let RegisterResult::AlreadyStored(stored) = store(obj.clone(), LocalSession::create(&DB, 1)).await? {
+	if let RegisterResult::AlreadyStored(stored) = store(obj.clone(), &mut session).await? {
 		let stored = lookup(&stored).await?.expect("existing object should be found");
 		let path = stored.get_file()?.get_path();
 		let red = dicom::object::open_file(&path)?;

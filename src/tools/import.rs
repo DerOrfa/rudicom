@@ -1,4 +1,4 @@
-use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSession};
+use crate::db::{Entry, RecordId, RegisterResult, DB, Session, shared_session};
 use crate::tools::Error;
 use futures::{Stream, StreamExt, TryStreamExt};
 use glob::glob;
@@ -6,6 +6,7 @@ use itertools::Itertools;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::Display;
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use surrealdb::engine::any::Any;
 use tokio::task::JoinError;
@@ -99,7 +100,7 @@ impl Serialize for ImportResult
 	}
 }
 
-async fn import_file<T>(path:T, mode: ImportMode, session: impl Session<Any>) -> ImportResult where T:Into<PathBuf>
+async fn import_file<T,S>(path:T, mode: ImportMode, session: &mut S) -> ImportResult where T:Into<PathBuf>, S:Session<Any>
 {
 	let path= path.into();
 	let filename = path.display().to_string();
@@ -130,11 +131,14 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let session_pool = SharedSession::<Any>::create(&DB, max_files);
+	let session_pool = shared_session(DB.clone(), max_files);
 
 	// if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
-		tasks.spawn(import_file(file,mode, session_pool.clone()));
+		let session=session_pool.clone();
+		tasks.spawn(async move{
+			import_file(file,mode, session.lock().await.deref_mut()).await
+		});
 	} else {
 		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
 	}
@@ -143,12 +147,12 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 		// fill the task list up to max_files
 		while tasks.len() < max_files as usize
 		{
-			let session = session_pool.clone();
 			if let Some(nextfile) = files.next() {
+				let session = session_pool.clone();
 				tasks.spawn(async move {
 					match nextfile
 					{
-						Ok(p) => import_file(p, mode, session).await,
+						Ok(p) => import_file(p, mode, session.lock().await.deref_mut()).await,
 						Err(e) => ImportResult::GlobError(e.into())
 					}
 				});

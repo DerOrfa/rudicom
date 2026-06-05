@@ -124,11 +124,11 @@ async fn upsert<'a,C>(
 /// * Err(ExistingDifferent(Entry)) if the instance was already registered and different
 /// * Error(tools::Error) if another error occurred 
 /// 
-pub async fn register_instance(
+pub async fn register_instance<S>(
 	obj:Arc<DefaultDicomObject>,
 	file_info:&mut FileInfo,
-	mut session: impl Session<Any>,
-) -> tools::Result<RegisterResult>
+	session: &mut S,
+) -> tools::Result<RegisterResult> where S:Session<Any>
 {
 	let mut res = None;
 	let mut retry = 0;

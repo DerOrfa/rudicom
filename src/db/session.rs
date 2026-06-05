@@ -4,8 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
-use futures::{FutureExt, Stream, StreamExt};
-use futures::stream::{Fuse, SelectAll};
+use futures::{stream, FutureExt, Stream, StreamExt};
 use rand::random;
 use surrealdb::method::Transaction;
 use surrealdb::Result;
@@ -23,7 +22,6 @@ use tracing::{error, trace, warn};
 /// Dropping the transaction will send it back as well. This is equivalent to calling `cancel()` on it.
 pub trait Session<C> where C:Connection
 {
-	fn create(parent:&Surreal<C>, size:u16) -> Self;
 	fn begin(&mut self) -> impl Future<Output = Result<TransactionGuard<C>>> + Send;
 }
 
@@ -87,6 +85,7 @@ impl<C> SingleSessionStream<C> where C:Connection {
 		}
 	}
 }
+
 impl<C> Stream for SingleSessionStream<C> where C:Connection {
 	type Item = Result<TransactionGuard<C>>;
 
@@ -119,6 +118,8 @@ impl<C> Stream for SingleSessionStream<C> where C:Connection {
 
 impl<C> Drop for SingleSessionStream<C> where C:Connection {
 	fn drop(&mut self) {
+		// make sure we drop pending futures
+		drop(self.active_future.take());
 		if let Ok(mut locked) = self.inner.state.try_lock(){
 			match mem::take(locked.deref_mut()) {
 				SessionState::Busy(t) => { // dropped transaction guard, but never closed the transaction
@@ -132,62 +133,25 @@ impl<C> Drop for SingleSessionStream<C> where C:Connection {
 		}
 	}
 }
+pub fn local_session<C:Connection>(parent:Surreal<C>, pool_size:u16) -> impl Stream<Item=Result<TransactionGuard<C>>> + Send {
+	stream::repeat_with(move||SingleSessionStream::new(&parent))
+		.flatten_unordered(pool_size as usize)
+}
 
-/// A Stream that can generate multiple Transactions at a time from an internal pool.
-pub struct LocalSession<C> where C:Connection
+impl<S,C> Session<C> for S where S:Stream<Item=Result<TransactionGuard<C>>> + Unpin + Send, C:Connection
 {
-	size:u16,
-	source: Surreal<C>,
-	pool:SelectAll<Fuse<SingleSessionStream<C>>>,
-}
-
-impl<C> Session<C> for LocalSession<C> where C:Connection {
-	fn create(parent: &Surreal<C>, size:u16) -> LocalSession<C> {
-		LocalSession::<C>{
-			size,
-			source:parent.clone(),
-			pool:SelectAll::new(),
-		}
-	}
-
 	async fn begin(&mut self) -> Result<TransactionGuard<C>> {
-		loop {
-			while self.pool.len() < self.size as usize {
-				self.pool.push(SingleSessionStream::new(&self.source).fuse())
-			}
-			if let Some(r)= self.pool.next().await
-			{
-				return r
-			}
-		}
-	}
-}
-
-impl<C> Drop for LocalSession<C> where C:Connection {
-	fn drop(&mut self) {
-		// LocalSessions always races all SessionStreams, meaning all but one have always
-		// an active future. They need to be cleaned up
-		for s in &mut self.pool{
-			s.get_mut().active_future.take();
-		}
-		// and then clear the pool while we're already here
-		self.pool.clear();
+		self.next().await.expect("Session stream closed")
 	}
 }
 
 /// Same as `LocalSessionStream` but can be shared across threads.
 ///
 /// The internal pool will be shared as well.
-pub type SharedSession<C>=Arc<Mutex<LocalSession<C>>>;
-impl<C> Session<C> for SharedSession<C> where C:Connection {
-	fn create(parent: &Surreal<C>, size:u16) -> Self {
-		Arc::new(LocalSession::<C>::create(parent, size).into())
-	}
-	async fn begin(&mut self) -> Result<TransactionGuard<C>> {
-		self.lock().await.begin().await
-	}
+pub fn shared_session<C:Connection>(parent:Surreal<C>, pool_size:u16) -> Arc<Mutex<impl Stream<Item=Result<TransactionGuard<C>>> + Send>>
+{
+	Arc::new(Mutex::new(local_session(parent, pool_size)))
 }
-
 
 /// The transaction guard returned by `Session::begin()`
 ///
