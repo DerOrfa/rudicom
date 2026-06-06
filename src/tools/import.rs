@@ -128,7 +128,7 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let session_pool = shared_session(DB.clone(), 2);
+	let session_pool = shared_session(DB.clone(), 1);
 
 	// if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{

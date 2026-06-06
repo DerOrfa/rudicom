@@ -11,7 +11,7 @@ use surrealdb::Result;
 use surrealdb::{Connection, Surreal};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio::{spawn, task};
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 /// A guard holding a session.
 ///
@@ -79,10 +79,9 @@ struct SingleSessionStream<C> where C:Connection {
 }
 impl<C> SingleSessionStream<C> where C:Connection {
 	pub fn new(parent:&Surreal<C>) -> Self {
-		Self{
-			inner:SingleSession::new(parent),
-			active_future:None
-		}
+		let inner = SingleSession::new(parent);
+		debug!("Creating single session stream {} for task {}",inner.id,task::id());
+		Self{inner,	active_future:None}
 	}
 }
 
@@ -118,12 +117,16 @@ impl<C> Stream for SingleSessionStream<C> where C:Connection {
 
 impl<C> Drop for SingleSessionStream<C> where C:Connection {
 	fn drop(&mut self) {
+		debug!("Dropping single session stream {} for task {}",self.inner.id,task::id());
 		// make sure we drop pending futures
-		drop(self.active_future.take());
+		if let Some(f) = self.active_future.take() {
+			debug!("Dropping active future for session {} for task {}",self.inner.id,task::id());
+		}
 		if let Ok(mut locked) = self.inner.state.try_lock(){
 			match mem::take(locked.deref_mut()) {
 				SessionState::Busy(t) => { // dropped transaction guard, but never closed the transaction
 					// tell it to cancel, hand it over to a separate task and hope it finishes
+					debug!("Canceling transaction for session {} for task {}",self.inner.id,task::id());
 					spawn(t.cancel().into_future());
 				}
 				_ => {}
@@ -184,6 +187,16 @@ impl<C> TransactionGuard<C> where C:Connection {
 		} else { panic!("transaction for session {} is already closed",self.1);}
 	}
 }
+
+impl<C> Drop for TransactionGuard<C> where C:Connection {
+	fn drop(&mut self) {
+		match self.0.deref_mut() {
+			SessionState::Ready(_) => {}
+			_ => trace!("dropping transaction for session {} without finishing it",self.1)
+		}
+	}
+}
+
 impl<C> Deref for TransactionGuard<C> where C:Connection {
 	type Target = Transaction<C>;
 
