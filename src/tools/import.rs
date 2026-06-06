@@ -6,7 +6,6 @@ use itertools::Itertools;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::Display;
-use std::ops::DerefMut;
 use dicom::object::DefaultDicomObject;
 use surrealdb::engine::any::Any;
 use crate::tools::store::is_storage;
@@ -129,22 +128,26 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let session_pool = shared_session(DB.clone(), 1);
+	let session_pool = shared_session(DB.clone(), 2);
 
 	// if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
 		let files = [Ok(file)].into_iter().chain(files);
 		let stream = stream::iter(files)
-			.map_err(move |e|e.into())
-			.map_ok(|p|{
-				let owned = is_storage(&p);
+			.map_err(|e|e.into())
+			.map_ok(move|p|{
+				let owned = match mode {
+					ImportMode::Import => false,
+					ImportMode::Store => true,
+					ImportMode::Move => is_storage(&p)
+				};
 				File::new_from_existing(p, owned)
 			})
 			.try_buffer_unordered(max_files as usize)
 			.and_then(move|(info,obj)|{
-				let session=session_pool.clone();
+				let mut session =session_pool.clone();
 				async move {
-					Ok(import_file_ob(info,obj,mode,session.lock().await.deref_mut()).await)
+					Ok(import_file_ob(info,obj,mode,&mut session).await)
 				}})
 			.try_filter(move |item|{
 				let ret =	match item.to_owned() {

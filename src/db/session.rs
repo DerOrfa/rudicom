@@ -145,12 +145,24 @@ impl<S,C> Session<C> for S where S:Stream<Item=Result<TransactionGuard<C>>> + Un
 	}
 }
 
+
+pub struct SharedSession<C,S>(Arc<Mutex<S>>) where S:Stream<Item=Result<TransactionGuard<C>>>, C:Connection;
+impl<C,S> Session<C> for SharedSession<C,S> where S:Stream<Item=Result<TransactionGuard<C>>> + Unpin+Send, C:Connection
+{
+	async fn begin(&mut self) -> Result<TransactionGuard<C>> {
+		self.0.lock().await.next().await.expect("Session stream closed")
+	}
+}
+impl<C,S> Clone for SharedSession<C,S>  where S:Stream<Item=Result<TransactionGuard<C>>> + Unpin,C:Connection{
+	fn clone(&self) -> Self {Self(self.0.clone())}
+}
+
 /// Same as `LocalSessionStream` but can be shared across threads.
 ///
 /// The internal pool will be shared as well.
-pub fn shared_session<C:Connection>(parent:Surreal<C>, pool_size:u16) -> Arc<Mutex<impl Stream<Item=Result<TransactionGuard<C>>> + Send>>
+pub fn shared_session<C:Connection>(parent:Surreal<C>, pool_size:u16) -> SharedSession<C,impl Stream<Item=Result<TransactionGuard<C>>>>
 {
-	Arc::new(Mutex::new(local_session(parent, pool_size)))
+	SharedSession(Arc::new(Mutex::new(local_session(parent, pool_size))))
 }
 
 /// The transaction guard returned by `Session::begin()`

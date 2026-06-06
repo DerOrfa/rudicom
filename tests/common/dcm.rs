@@ -1,4 +1,3 @@
-use std::ops::DerefMut;
 use chrono::{DateTime, Utc};
 use dicom::core::{DataElement, VR};
 use dicom::dictionary_std::{tags, uids};
@@ -103,9 +102,9 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 	while tasks.len() < 2 /*rudicom::config::get().limits.max_files as usize*/
 	{
 		if let Some(obj) = instances.next() {
-			let session = session.clone();
+			let mut session = session.clone();
 			tasks.spawn(async move {
-				store_ob(obj, session.lock().await.deref_mut()).await
+				store_ob(obj, &mut session).await
 			});
 		} else {break} //abort if we already run out of instances
 	}
@@ -115,16 +114,16 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 		ret.push(r?);
 		// we finished one store task, add another one as long as we have them
 		if let Some(obj) = instances.next() {
-			let session = session.clone();
+			let mut session = session.clone();
 			tasks.spawn(async move {
-				store_ob(obj, session.lock().await.deref_mut()).await
+				store_ob(obj, &mut session).await
 			});
 		}
 	}
 	Ok(ret)
 }
 
-pub async fn cleanup() -> rudicom::tools::Result<()>
+pub async fn cleanup() -> tools::Result<()>
 {
 	let studies= db::list_entries("instances").await?;
 	for study in studies{
