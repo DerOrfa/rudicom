@@ -1,14 +1,14 @@
-use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSession};
+use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSession, File};
 use crate::tools::Error;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{stream, Stream, TryStreamExt};
 use glob::glob;
 use itertools::Itertools;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::Display;
-use std::path::PathBuf;
+use dicom::object::DefaultDicomObject;
 use surrealdb::engine::any::Any;
-use tokio::task::JoinError;
+use crate::tools::store::is_storage;
 
 pub enum ImportResult {
 	Registered{filename:String},
@@ -99,15 +99,14 @@ impl Serialize for ImportResult
 	}
 }
 
-async fn import_file<T>(path:T, mode: ImportMode, session: impl Session<Any>) -> ImportResult where T:Into<PathBuf>
+async fn import_file_ob<S>(info: File, obj: DefaultDicomObject, mode: ImportMode, session: &mut S) -> ImportResult where S:Session<Any>
 {
-	let path= path.into();
-	let filename = path.display().to_string();
-	let import = 
+	let filename = info.get_path().to_string_lossy().to_string();
+	let import =
 		match mode {
-			ImportMode::Import => {crate::tools::store::import_file(path.as_path(), session).await}
-			ImportMode::Store => {crate::tools::store::store_file(path, session).await}
-			ImportMode::Move => {crate::tools::store::move_file(path.as_path(), session).await}
+			ImportMode::Import => {crate::tools::store::import_file_ob(info,obj, session).await}
+			ImportMode::Store => {crate::tools::store::store_ob(obj, session).await}
+			ImportMode::Move => {crate::tools::store::move_file_ob(info, obj, session).await}
 		};
 	match import
 	{
@@ -123,52 +122,48 @@ async fn import_file<T>(path:T, mode: ImportMode, session: impl Session<Any>) ->
 }
 
 
-pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<ImportResult,JoinError>>> where T:AsRef<str>
+pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=crate::tools::Result<ImportResult>>> where T:AsRef<str>
 {
-	let mut tasks=tokio::task::JoinSet::new();
 	let max_files = crate::config::get().limits.max_files;
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let session_pool = SharedSession::<Any>::create(&DB, max_files);
+	let session_pool = SharedSession::<Any>::create(&DB, 1);
 
 	// if there is not at least one file, it's probably a good idea to return an error
 	if let Some(file)=files.next().transpose()?{
-		tasks.spawn(import_file(file,mode, session_pool.clone()));
-	} else {
-		return Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
-	}
-	// make a stream that polls tasks and feeds new ones
-	let stream=futures::stream::poll_fn(move |c|{
-		// fill the task list up to max_files
-		while tasks.len() < max_files as usize
-		{
-			let session = session_pool.clone();
-			if let Some(nextfile) = files.next() {
-				tasks.spawn(async move {
-					match nextfile
-					{
-						Ok(p) => import_file(p, mode, session).await,
-						Err(e) => ImportResult::GlobError(e.into())
-					}
-				});
-			} else {break} //as long as there are files
-		}
-		// pass on the next finished import and thus drain the task list
-		tasks.poll_join_next(c)
-	});
-	let stream= stream.filter(move |item|{
-			let ret =	match item.to_owned() {
-				Ok(ImportResult::Registered { .. }) => config.echo,
-				Ok(ImportResult::Existed { .. }) => config.echo_existing,
-				_ => true
-			};
-			async move {ret}
+		let files = [Ok(file)].into_iter().chain(files);
+		let stream = stream::iter(files)
+			.map_err(move |e|e.into())
+			.map_ok(move|p|{
+				let owned = match mode {
+					ImportMode::Import => false,
+					ImportMode::Store => true,
+					ImportMode::Move => is_storage(&p)
+				};
+				File::new_from_existing(p, owned)
+			})
+			.try_buffer_unordered(max_files as usize)
+			.and_then(move|(info,obj)|{
+				let mut session =session_pool.clone();
+				async move {
+					Ok(import_file_ob(info,obj,mode,&mut session).await)
+				}})
+			.try_filter(move |item|{
+				let ret =	match item.to_owned() {
+					ImportResult::Registered { .. } => config.echo,
+					ImportResult::Existed { .. } => config.echo_existing,
+					_ => true
+				};
+				async move {ret}
 		});
-	Ok(stream)
+		Ok(stream)
+	} else {
+		Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
+	}
 }
 
-pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=Result<String,JoinError>>> where T:AsRef<str>
+pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=crate::tools::Result<String>>> where T:AsRef<str>
 {
 	Ok(import_glob(pattern, config, mode)?
 		.map_ok(|item| {

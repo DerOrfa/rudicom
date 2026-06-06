@@ -1,8 +1,8 @@
-use crate::db::{Entry, RegisterResult, DB, LocalSession, Session};
+use crate::db::{Entry, LocalSession, RegisterResult, Session, DB};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
 use crate::tools::tar::{make_tar, TarStream};
-use crate::tools::{get_instance_dicom, lookup_instance_file,remove::remove,store::store,verify::verify_entry, Error};
+use crate::tools::{get_instance_dicom, lookup_instance_file,remove::remove,verify::verify_entry, Error};
 use crate::tools::{Context, Error::DicomError};
 use crate::db;
 use axum::body::{Body, Bytes};
@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use async_compression::Level;
 use async_compression::tokio::write::{GzipEncoder, BzEncoder, XzEncoder};
 use dicom::object::from_reader;
+use crate::tools::store::store_ob;
 
 pub(super) fn router() -> axum::Router
 {
@@ -87,8 +88,8 @@ async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>)
 		return Err(HttpError::new(InnerHttpError::BadRequest {message:"Ignoring empty upload".into()}, &headers))
 	}
 	let obj= from_reader(Cursor::new(bytes)).map_err(|e|DicomError(e.into())).into_http_error(&headers)?;
-	let session = LocalSession::create(&DB, 1);
-	match store(obj, session).await {
+	let mut session = LocalSession::create(&DB, 1);
+	match store_ob(obj, &mut session).await {
 		Ok(RegisterResult::Stored(id)) => Ok((StatusCode::CREATED,
 			Json(json!({
 				"Status":"Success",
