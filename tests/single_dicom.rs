@@ -4,7 +4,7 @@ use dicom::dictionary_std::tags;
 use tracing::debug;
 use rudicom::db::{local_session, lookup, DB};
 use rudicom::db::RegisterResult;
-use rudicom::tools::store::store;
+use rudicom::tools::store::store_ob;
 use crate::common::dcm::cleanup;
 
 mod common;
@@ -16,10 +16,10 @@ async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 	init_db().await?.health().await?;
 	let mut session = local_session(DB.clone(), 1);
 	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
-	if let RegisterResult::Stored(_) = store(obj.clone(), &mut session).await? {}
+	if let RegisterResult::Stored(_) = store_ob(obj.clone(), &mut session).await? {}
 	else { panic!("First store should return stored."); }
 	debug!("inserted object");
-	if let RegisterResult::AlreadyStored(stored) = store(obj.clone(), &mut session).await? {
+	if let RegisterResult::AlreadyStored(stored) = store_ob(obj.clone(), &mut session).await? {
 		let stored = lookup(&stored).await?.expect("existing object should be found");
 		let path = stored.get_file()?.get_path();
 		let red = dicom::object::open_file(&path)?;

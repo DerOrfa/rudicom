@@ -5,7 +5,7 @@ use dicom::dictionary_std::{tags, uids};
 use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
 use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
-use rudicom::tools::store::store;
+use rudicom::tools::store::store_ob;
 use rudicom::db::{shared_session, RegisterResult, DB};
 use std::time::SystemTime;
 use tokio::task::JoinSet;
@@ -105,7 +105,7 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 		if let Some(obj) = instances.next() {
 			let session = session.clone();
 			tasks.spawn(async move {
-				store(obj,session.lock().await.deref_mut()).await
+				store_ob(obj, session.lock().await.deref_mut()).await
 			});
 		} else {break} //abort if we already run out of instances
 	}
@@ -117,7 +117,7 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 		if let Some(obj) = instances.next() {
 			let session = session.clone();
 			tasks.spawn(async move {
-				store(obj,session.lock().await.deref_mut()).await
+				store_ob(obj, session.lock().await.deref_mut()).await
 			});
 		}
 	}
