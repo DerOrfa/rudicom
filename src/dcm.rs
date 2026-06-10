@@ -110,7 +110,7 @@ fn format_filepath(mut f:strfmt::Formatter, obj:&DefaultDicomObject) -> strfmt::
 		return f.write_str("__empty__").map_err(|e|FmtError::Invalid(e.to_string()))
 	}
 	let val=val.to_str().map_err(|e|FmtError::Invalid(e.to_string()))?
-		.replace("/","_");
+		.trim_matches(' ').replace(['/',' '],"_");
 	let mut val=val.deref();
 	if let Some(width)=f.width()
 	{
