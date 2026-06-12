@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use axum::{Json, Router};
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
@@ -67,7 +68,7 @@ pub async fn serve(listener:TcpListener) -> Result<()>
 	}
 
 	// run it
-	axum::serve(listener,app.into_make_service())
+	axum::serve(listener,app.into_make_service_with_connect_info::<SocketAddr>())
 		.with_graceful_shutdown(shutdown_signal())
 		.await.map_err(|e|e.into())
 }

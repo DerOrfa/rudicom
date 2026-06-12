@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::db::{Entry, LocalSession, RegisterResult, Session, DB};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
@@ -6,7 +7,7 @@ use crate::tools::{get_instance_dicom, lookup_instance_file,remove::remove,verif
 use crate::tools::{Context, Error::DicomError};
 use crate::db;
 use axum::body::{Body, Bytes};
-use axum::extract::{Path,rejection::BytesRejection};
+use axum::extract::{Path, rejection::BytesRejection, ConnectInfo, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -18,11 +19,15 @@ use mime::IMAGE_PNG;
 use serde::Deserialize;
 use serde_json::json;
 use std::io::Cursor;
+use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
+use std::sync::Arc;
 use async_compression::Level;
 use async_compression::tokio::write::{GzipEncoder, BzEncoder, XzEncoder};
 use dicom::object::from_reader;
+use surrealdb::engine::any::Any;
+use tokio::sync::Mutex;
 use crate::tools::store::store_ob;
 
 pub(super) fn router() -> axum::Router
@@ -42,7 +47,7 @@ pub(super) fn router() -> axum::Router
     {
         rtr = rtr.route("/instances/{id}/json-ext", get(get_instance_json_ext));
     }
-    rtr
+    rtr.with_state(Default::default())
 }
 
 async fn get_statistics(headers: HeaderMap) -> Result<Json<db::Stats>, HttpError>
@@ -81,15 +86,22 @@ async fn filepath(headers: HeaderMap,Path(path):Path<(String, String)>) -> Resul
 	Ok(Json(json!({"path":path})).into_response())
 }
 
-async fn store_instance(headers: HeaderMap,payload:Result<Bytes,BytesRejection>) -> Result<Response, HttpError> {
+async fn store_instance(
+	headers: HeaderMap,
+	ConnectInfo(addr): ConnectInfo<SocketAddr>,
+	State(sessions): State<Arc<Mutex<HashMap<IpAddr,LocalSession<Any>>>>>,
+	payload:Result<Bytes,BytesRejection>
+) -> Result<Response, HttpError> {
 	let bytes = payload.map_err(|e|
 		HttpError::new(InnerHttpError::BadRequest {message:format!("failed to receive data {e}")}, &headers))?;
+
 	if bytes.is_empty(){
 		return Err(HttpError::new(InnerHttpError::BadRequest {message:"Ignoring empty upload".into()}, &headers))
 	}
 	let obj= from_reader(Cursor::new(bytes)).map_err(|e|DicomError(e.into())).into_http_error(&headers)?;
-	let mut session = LocalSession::create(&DB, 1);
-	match store_ob(obj, &mut session).await {
+	let mut sessions = sessions.lock().await;
+	let session = sessions.entry(addr.ip()).or_insert_with(|| LocalSession::create(&DB,1));
+	match store_ob(obj, session).await {
 		Ok(RegisterResult::Stored(id)) => Ok((StatusCode::CREATED,
 			Json(json!({
 				"Status":"Success",
