@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::Json;
 use axum::response::{IntoResponse, Response};
@@ -29,8 +30,11 @@ impl InnerHttpError
 	{
 		let root = error.root_cause();
 		let error_code = root.downcast_ref::<tools::Error>().map(
-			|e|match *e {
+			|e|match e {
 				tools::Error::NotFound | tools::Error::IdNotFound {..} => StatusCode::NOT_FOUND,
+				tools::Error::FileIOError { inner, .. } if inner.kind() == ErrorKind::StorageFull
+					=> StatusCode::INSUFFICIENT_STORAGE,
+				tools::Error::DataConflict(_)|tools::Error::FieldConflict {..} => StatusCode::CONFLICT,
 				_ => StatusCode::INTERNAL_SERVER_ERROR
 			});
 		error_code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
