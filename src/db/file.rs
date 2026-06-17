@@ -1,16 +1,48 @@
-use std::io::Cursor;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-
+use std::sync::Arc;
 use crate::db::Pickable;
 use crate::storage::async_store::compute_md5;
 use crate::tools::{complete_filepath, Context, Error, Result};
 use dicom::object::{from_reader, DefaultDicomObject};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use surrealdb::sql;
-use tokio::io::AsyncReadExt;
+use surrealdb::types as db_types;
+use tokio::task::spawn_blocking;
+use tracing::log::warn;
+use crate::dcm::gen_filepath;
+use crate::tools::Error::{DicomError, FileIOError};
 
-#[derive(Deserialize)]
+struct Md5Proxy<'a,R> where R: Sized
+{
+	context:&'a mut md5::Context,
+	inner:R,
+}
+
+impl<'a,T> Read for Md5Proxy<'a, T> where T: Read + Sized
+{
+	fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+		let s = self.inner.read(buf)?;
+		self.context.consume(&buf[..s]);
+		if s == 0 {self.context.flush()?;}
+		Ok(s)
+	}
+}
+impl<'a,T> Write for Md5Proxy<'a, T> where T: Write + Sized
+{
+	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+		let s = self.inner.write(buf)?;
+		self.context.consume(&buf[..s]);
+		Ok(s)
+	}
+
+	fn flush(&mut self) -> std::io::Result<()> {
+		self.inner.flush()
+			.and_then(|_| self.context.flush())
+	}
+}
+
+#[derive(Clone,Deserialize)]
 pub struct File
 {
 	path:PathBuf,
@@ -36,16 +68,45 @@ impl File {
 	}
 	pub fn get_md5(&self) -> &str { self.md5.as_str() }
 
+	/// writes a new file taking an object and returning that object plus a file info
+	pub async fn new_from_obj(obj:Arc<DefaultDicomObject>) -> Result<File>{
+		let path=PathBuf::from(gen_filepath(&obj)?);
+		let path = complete_filepath(&path);
+		let p=path.parent().unwrap();
+		tokio::fs::create_dir_all(p).await
+			.context(format!("Failed creating storage path {}",p.display()))?;
+
+		let path_clone=path.clone();
+		let checksum = spawn_blocking(move || {
+			let inner=std::fs::File::create_new(&path_clone)
+				.map_err(|e|FileIOError{inner:e,path:path_clone})?;
+			let mut checksum = md5::Context::new();
+			let writer = Md5Proxy{context:&mut checksum,inner};
+			obj.write_all(writer).map_err(|e|DicomError(e.into())).map(|_|checksum)
+		}).await??;
+		let size = std::fs::metadata(&path)?.len();
+		Ok(Self::new(path, checksum.finalize(), true,size))
+	}
 	/// creates fileinfo struct and reads dicom object directly from path
 	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> Result<(File,DefaultDicomObject)>
 	{
-		let mut buffer = Vec::<u8>::new();
-		let size= tokio::fs::File::open(path.as_ref()).await?.read_to_end(&mut buffer).await?;
+		let path = path.as_ref();
+		let size = tokio::fs::metadata(path).await.context(format!("getting metadata for {}",path.display()))?.len();
+		let reader_ctx = format!("reading {}", path.display());
+		let reader = std::fs::File::open(path).context(format!("opening {}",path.display()))?;
 
-		let checksum = md5::compute(buffer.as_slice());
+		let obj_task= spawn_blocking(move||{
+			let mut md5_context = md5::Context::new();
+			let reader = Md5Proxy{context:&mut md5_context,inner:reader};
+			(from_reader(reader), md5_context)
+		});
 
-		let obj= from_reader(Cursor::new(buffer)).map_err(|e|Error::DicomError(e.into()))?;
-		Ok((Self::new(path.as_ref(),checksum,owned,size as u64), obj))
+		let (obj,md5_context) = obj_task.await?;
+
+		Ok((
+			Self::new(path, md5_context.finalize(), owned, size),
+			obj.map_err(|e|Error::DicomError(e.into())).context(reader_ctx)?
+		))
 	}
 
 	/// read the file stored at path, check its checksum and return it as dicom object
@@ -71,35 +132,50 @@ impl File {
 			file:filename.to_string_lossy().into()
 		})}
 	}
+	pub async fn remove(self) -> Result<()>{
+		if self.owned {
+			let mut path = self.get_path();
+			if path.exists() {
+				std::fs::remove_file(&path).context(format!("deleting {}", path.display()))?;
+				if path.pop(){// if there is a parent path, try to delete it as far as possible
+					let ctx = format!("deleting {}",path.display());
+					crate::tools::remove::remove_path(path, &crate::config::get().paths.storage_path)
+						.await.context(ctx)?;
+				}
+			} else {
+				warn!("trying to delete file {} but it does not exist",path.to_string_lossy())
+			}
+		}
+		Ok(())
+	} 
 }
 
-impl TryFrom<surrealdb::Value> for File
+impl TryFrom<db_types::Value> for File
 {
 	type Error = Error;
 
-	fn try_from(obj: surrealdb::Value) -> std::result::Result<Self, Self::Error> {
-		let context=format!("parsing database object {obj} as File object");
-		let obj = obj.into_inner();
-		let kind = obj.kindof();
+	fn try_from(obj: db_types::Value) -> std::result::Result<Self, Self::Error> {
+		let context=format!("parsing database object {obj:?} as File object");
+		let kind = obj.kind().to_string();
 		match obj {
-			sql::Value::Object(obj) => surrealdb::Object::from_inner(obj).try_into(),
+			db_types::Value::Object(obj) => obj.try_into(),
 			_ => Err(Error::UnexpectedResult {expected:"object".into(),found:kind})
 		}.context(context)
 	}
 }
 
-impl TryFrom<File> for surrealdb::Value
+impl TryFrom<File> for db_types::Value
 {
 	type Error = Error;
 
 	fn try_from(file: File) -> std::result::Result<Self, Self::Error> {
-		let mut ret=sql::Object::default();
+		let mut ret=db_types::Object::default();
 		let file_path = file.path.to_str().ok_or(Error::InvalidFilename {name:file.path.clone()})?;
-		ret.insert("path".into(),file_path.into());
-		ret.insert("owned".into(),file.owned.into());
-		ret.insert("md5".into(),file.md5.into());
-		ret.insert("size".into(),file.size.into());
-		Ok(surrealdb::Value::from_inner(ret.into()))
+		ret.insert("path",file_path.to_string());
+		ret.insert("owned",file.owned);
+		ret.insert("md5",file.md5);
+		ret.insert("size",file.size);
+		Ok(ret.into())
 	}
 }
 
@@ -118,16 +194,16 @@ impl Serialize for File
     }
 }
 
-impl TryFrom<surrealdb::Object> for File
+impl TryFrom<db_types::Object> for File
 {
 	type Error = Error;
 
-	fn try_from(mut obj: surrealdb::Object) -> std::result::Result<Self, Self::Error> {
-		let path = obj.pick_remove("path").map(|v| v.into_inner().as_raw_string())?;
-		let owned = obj.pick_remove("owned").map(|v|v.into_inner().is_true())?;
-		let md5 = obj.pick_remove("md5").map(|v|v.into_inner().as_raw_string())?;
+	fn try_from(mut obj: db_types::Object) -> std::result::Result<Self, Self::Error> {
+		let path = obj.pick_remove("path")?.into_string()?;
+		let owned = obj.pick_remove("owned")?.is_true();
+		let md5 = obj.pick_remove("md5")?.into_string()?;
 		let size = obj.pick_remove("size")
-			.map(|v|if let sql::Value::Number(num) = v.into_inner() { num.to_int()} else {0})?;
+			.map(|v|if let db_types::Value::Number(num) = v { num.to_int().unwrap_or_default()} else {0})?;
 		Ok(File{path:path.into(),owned,md5,size:size as u64})
 	}
 }

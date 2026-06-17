@@ -1,11 +1,11 @@
-use crate::common::dcm::{synthesize_study,bulk_insert, UidSynthesizer};
+use crate::common::dcm::{bulk_insert, synthesize_study, UidSynthesizer};
 use crate::common::init_db;
 use dicom::dictionary_std::tags;
 use dicom::object::{FileDicomObject, InMemDicomObject};
 use glob::glob;
 use itertools::Itertools;
 use rand::random;
-use rudicom::db::{lookup_uid, AggregateData, DB};
+use rudicom::db::{list_entries, lookup_uid};
 use rudicom::tools::remove::remove;
 use tokio::task::JoinSet;
 use rudicom::db::RegisterResult;
@@ -18,13 +18,13 @@ async fn check_statistics(uid_gen: &UidSynthesizer, data:&Vec<Vec<FileDicomObjec
 	let study_id = uid_gen.study(111);
 	let study_entry = lookup_uid("studies",study_id).await?
 		.expect("expected study entry");
-	let instances_per_study= study_entry.get_instances_per().await?.count;
+	let instances_per_study= study_entry.get_aggregate().await?.count;
 	assert_eq!(instances_per_study,data.iter().flatten().count(),"expected number of instances in study-statistics to match data");
 	for i in 0..10{
 		let ser_id = uid_gen.series(111,i);
 		let series_entry = lookup_uid("series",ser_id).await?
 			.expect("expected series entry");
-		let instances_per_series= series_entry.get_instances_per().await?.count;
+		let instances_per_series= series_entry.get_aggregate().await?.count;
 		assert_eq!(instances_per_series,data[i as usize].len(), "expected number of instances in statistics for series {i} to match data");
 	};
 	let store_path = rudicom::config::get().paths.storage_path.display();
@@ -39,6 +39,7 @@ async fn check_statistics(uid_gen: &UidSynthesizer, data:&Vec<Vec<FileDicomObjec
 #[tokio::test]
 async fn study() -> Result<(), Box<dyn std::error::Error>>
 {
+	tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 	init_db().await?.health().await?;
 	let uid_gen = UidSynthesizer::default();
 	let mut instances = synthesize_study(&uid_gen,111,10,100);
@@ -95,17 +96,11 @@ async fn study() -> Result<(), Box<dyn std::error::Error>>
 	remove_set.join_all().await.into_iter().collect::<Result<Vec<()>,_>>()
 		.map_err(|e| format!("failed to remove remaining instances: {e}"))?;
 
+	assert!(list_entries("series").await?.is_empty(),"All series should be gone.");
+	assert!(list_entries("studies").await?.is_empty(),"All studies should be gone.");
+
 	let store_path = rudicom::config::get().paths.storage_path.display();
 	let files = glob(format!("{}/**/*",store_path).as_str())?.count();
 	assert_eq!(files,0, "expected number of files to be 0 after removing all instances");
-
-
-	let studies_v:Vec<AggregateData> = DB.select("instances_per_studies").await?;
-	let instances = studies_v.iter()
-		.map(|v|v.count)
-		.reduce(|a,b|a+b).unwrap_or(0);
-	let studies = studies_v.len();
-	assert_eq!(instances,0,"{} instances found in {} studies where they should be none",instances,studies);
-
 	Ok(())
 }

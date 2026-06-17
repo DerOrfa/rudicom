@@ -12,6 +12,7 @@ use dimse::RetrieveLevel;
 use futures::{StreamExt, stream, stream::BoxStream};
 use std::path::PathBuf;
 use dicom::core::VR;
+use surrealdb::types::ToSql;
 
 #[derive(Clone)]
 pub struct Accessor {}
@@ -20,7 +21,7 @@ impl dimse::io::FileAccess for Accessor {
 	type Item = Entry;
 
 	async fn get_uid(&self, item: &Self::Item) -> Result<String, StatusFailure> {
-		Ok(item.id().key().to_string())
+		Ok(item.id().key.to_sql())
 	}
 
 	async fn get_path(&self, item: &Self::Item) -> Result<PathBuf, StatusFailure> {

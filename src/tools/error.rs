@@ -1,5 +1,6 @@
 use glob::{GlobError, PatternError};
 use std::fmt::{Debug, Display, Formatter};
+use std::path::PathBuf;
 use dimse::error::DimseError;
 use thiserror::Error;
 use crate::db::{Entry, RecordId};
@@ -89,7 +90,7 @@ pub enum Error
 	#[error("Json error {0}")]
 	JsonError(#[from] serde_json::Error),
 
-	#[error("io error {0}")]
+	#[error(transparent)]
 	IoError(#[from] std::io::Error),
 
 	#[error("string formatting error {0}")]
@@ -98,14 +99,14 @@ pub enum Error
 	#[error("filename {name} is invalid")]
 	InvalidFilename{name:std::path::PathBuf},
 
-	#[error("{0}")]
+	#[error(transparent)]
 	DicomError(#[from] DicomError),
 
 	#[error(transparent)] // we use our own impl Display above
 	Context(#[from]ErrorContext),
 	#[error(transparent)] // we use our own impl Display above
 	Dimse(#[from]DimseError),
-	
+
 	#[error("Invalid value type (expected {expected:?}, found {found:?})")]
 	UnexpectedResult{
 		expected: String,
@@ -116,6 +117,14 @@ pub enum Error
 		expected: String,
 		id: RecordId,
 	},
+	#[error("Entry {0} is missing")]
+	MissingEntry(RecordId),
+	#[error("{inner} on {path}")]
+	FileIOError{
+		inner:std::io::Error,
+		path:PathBuf,
+	},
+
 	#[error("Failed to parse {to_parse} ({source})")]
 	ParseError{
 		to_parse: String,
@@ -137,6 +146,9 @@ pub enum Error
 	GlobbingError(#[from]GlobError),
 	#[error("Entry already exists with different data")]
 	DataConflict(Entry),
+	#[error("Data fields {fields} in the entry {id} conflict with new update")]
+	FieldConflict{fields:String,id:RecordId},
+
 	#[error("Entry {existing_id} already exists with different data")]
 	Md5Conflict {existing_md5:String, my_md5:String, existing_id:RecordId},
 

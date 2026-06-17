@@ -4,10 +4,12 @@ use dicom::dictionary_std::{tags, uids};
 use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
 use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
-use rudicom::tools::store::store;
-use rudicom::db::RegisterResult;
+use rudicom::tools::store::store_ob;
+use rudicom::db::{RegisterResult, Session, SharedSession, DB};
 use std::time::SystemTime;
+use surrealdb::engine::any::Any;
 use tokio::task::JoinSet;
+use tracing::debug;
 
 pub struct UidSynthesizer{
 	prefix: String,
@@ -96,11 +98,13 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 	let mut tasks = JoinSet::new();
 	let mut ret = Vec::<RegisterResult>::new();
 	let mut instances = instances.cloned();
-	
-	while tasks.len() < rudicom::config::get().limits.max_files as usize
+	let session: SharedSession<Any> = SharedSession::create(&DB, 1);
+
+	while tasks.len() < 2 /*rudicom::config::get().limits.max_files as usize*/
 	{
 		if let Some(obj) = instances.next() {
-			tasks.spawn(store(obj));
+			let mut session = session.clone();
+			tasks.spawn(async move { store_ob(obj,&mut session).await });
 		} else {break} //abort if we already run out of instances
 	}
 	// take out the next finished import and thus drain the task list
@@ -108,7 +112,8 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 		ret.push(r?);
 		// we finished one store task, add another one as long as we have them
 		if let Some(obj) = instances.next() {
-			tasks.spawn(store(obj));
+			let mut session = session.clone();
+			tasks.spawn(async move{ store_ob(obj,&mut session).await });
 		}
 	}
 	Ok(ret)
@@ -116,8 +121,9 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 
 pub async fn cleanup() -> rudicom::tools::Result<()>
 {
-	let studies= db::list_entries("studies").await?;
+	let studies= db::list_entries("instances").await?;
 	for study in studies{
+		debug!("removing leftover {}", study.id());
 		remove(study.id()).await?;
 	}
 	Ok(())

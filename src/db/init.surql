@@ -1,28 +1,20 @@
-if $initialized then [] else
+// set up instances table
+DEFINE FIELD IF NOT EXISTS timestamp ON instances TYPE datetime DEFAULT time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS series ON instances TYPE record<series> REFERENCE;
+DEFINE EVENT OVERWRITE del_instance ON TABLE instances WHEN $event == "DELETE" ASYNC THEN
 {
-define param $initialized value true;
-
--- keep timestamp of creation for instances as readonly field
-define field created ON table instances value time::now() readonly;
-define index uid_index ON table instances fields uid UNIQUE;
-define index uid_index ON table series fields uid UNIQUE;
-define index uid_index ON table studies fields uid UNIQUE;
-define field study ON table instances value type::thing("studies",array::slice(record::id(id), 0, 6)) readonly;
-define field series ON table instances value type::thing("series",array::slice(record::id(id), 0, 12)) readonly;
-
--- set up aggregates for fast lookup of overall size an count of instances per series/study
-define table instances_per_studies as select count(), math::sum(file.size) as size, study from instances group by study;
-define table instances_per_series as select count(), math::sum(file.size) as size, series from instances group by series;
-
--- delete empty series / studies when last instance is deleted
-define event OVERWRITE del_instance on table instances when $event = "DELETE" then
-{
-    IF instances_per_series:[$value.series].count < 1 {
-        delete $value.series;
-        IF instances_per_studies:[$value.study].count < 1 {
-            delete $value.study
-        };
-    };
+    IF $value.series.instances.is_array() AND $value.series.instances.is_empty() {delete $value.series}
 };
-}
-end
+
+// set up series table
+DEFINE FIELD IF NOT EXISTS timestamp ON series TYPE datetime DEFAULT time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS study ON series TYPE record<studies> REFERENCE;
+DEFINE FIELD IF NOT EXISTS instances ON series COMPUTED <~ instances;
+DEFINE EVENT OVERWRITE del_series ON TABLE series WHEN $event == "DELETE" ASYNC THEN
+{
+    IF $value.study.series.is_array() AND $value.study.series.is_empty() {delete $value.study}
+};
+
+// set up studies table
+DEFINE FIELD IF NOT EXISTS timestamp ON studies TYPE datetime DEFAULT time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS series ON studies COMPUTED <~ series;
