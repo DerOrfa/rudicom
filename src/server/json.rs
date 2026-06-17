@@ -10,10 +10,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Json;
 use mime::Mime;
-use serde_json::Value;
-use surrealdb::sql;
 use crate::server::lookup_or;
 use crate::tools::conv::value_to_json;
+use surrealdb::types as db_types;
+use surrealdb::types::SurrealValue;
 
 pub(super) fn router() -> axum::Router
 {
@@ -38,7 +38,7 @@ pub fn is_json(mime: &Mime) -> bool {
 }
 
 #[derive(Default,Debug)]
-struct Content(surrealdb::Value);
+struct Content(db_types::Value);
 enum ContentRejection
 {
 	JsonReject(JsonRejection),
@@ -64,22 +64,22 @@ impl<S> FromRequest<S> for Content where S: Send + Sync
 	async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection>
 	{
 		let inner = if get_mime(req.headers()).is_some_and(|m|is_json(&m)){
-			let json_val = Json::<Value>::from_request(req, state).await
+			let json_val = Json::<serde_json::Value>::from_request(req, state).await
 				.map_err(|e|ContentRejection::JsonReject(e))?;
 			crate::tools::conv::json_to_value(json_val.0)
 		} else {
 			match axum::Form::<HashMap<String,String>>::from_request(req,state).await {
 				Ok(form) => {
-					let map:BTreeMap<String, sql::Value> =
-						form.0.into_iter().map(|(k,v)| (k,v.into()))
+					let map:BTreeMap<String, db_types::Value> =
+						form.0.into_iter().map(|(k,v)| (k,v.into_value()))
 							.collect();
-					sql::Value::from(map)
+					map.into_value()
 				}
 				Err(FormRejection::InvalidFormContentType(_)) => Err(ContentRejection::InvalidContent)?,
 				Err(e) => Err(ContentRejection::FormReject(e))?,
 			}
 		};
-		Ok(Content(surrealdb::Value::from_inner(inner)))
+		Ok(Content(inner))
 	}
 }
 
@@ -111,7 +111,8 @@ async fn get_entry_parents(headers: HeaderMap,Path(path):Path<(String, String)>)
 {
 	let entry = lookup_or(&path).await.into_http_error(&headers)?;
 	let mut ret:Vec<_>=vec![];
-	let parents = db::find_down_tree(entry.id().clone()).into_http_error(&headers)?;
+	let parents = db::find_down_tree(&entry.id()).await;
+	let parents= parents.into_http_error(&headers)?;
 	for p_id in parents
 	{
 		let ctx = format!("looking up parent {p_id} of {}:{}",path.0,path.1);
@@ -132,21 +133,21 @@ async fn get_value(headers: HeaderMap,Path((table,uid,name)):Path<(String, Strin
 		.ok_or(IdNotFound {id:format!("'{name}' in existing {}:{}",path.0,path.1)})
 		.into_http_error(&headers)?;
 
-	Ok(Json(value_to_json(value.into_inner())).into_response())
+	Ok(Json(value_to_json(value)).into_response())
 }
 
 async fn set_value(headers: HeaderMap,Path((table,uid,name)):Path<(String, String, String)>,content:Content) -> Result<Response, HttpError>
 {
 	let entry = lookup_or(&(table,uid)).await.into_http_error(&headers)?;
-	db::set_value(entry.id(),name,content.0).await
-		.map(|v|(StatusCode::ACCEPTED,Json(value_to_json(v.into_inner()))).into_response())
+	db::set_value(entry.id().0.to_owned(),name,content.0).await
+		.map(|v|(StatusCode::ACCEPTED,Json(value_to_json(v))).into_response())
 		.into_http_error(&headers)
 }
 
 async fn delete_value(headers: HeaderMap,Path((table,uid,name)):Path<(String, String, String)>) -> Result<Response, HttpError>
 {
 	let entry = lookup_or(&(table,uid)).await.into_http_error(&headers)?;
-	db::delete_value(entry.id(),name).await
-		.map(|v|(StatusCode::ACCEPTED,Json(value_to_json(v.into_inner()))).into_response())
+	db::delete_value(entry.id().0.to_owned(),name).await
+		.map(|v|(StatusCode::ACCEPTED,Json(value_to_json(v))).into_response())
 		.into_http_error(&headers)
 }

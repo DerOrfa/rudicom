@@ -1,11 +1,17 @@
-use std::path::PathBuf;
-use clap::{Args, Parser, Subcommand, ValueEnum};
 use clap::builder::PossibleValue;
-use clap::ValueHint::{Hostname,FilePath};
+use clap::ValueHint::{FilePath, Hostname};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
 use tracing::Level;
 
 use clap::ValueHint::DirPath;
+#[cfg(feature = "instrumentation")]
+use console_subscriber::ConsoleLayer;
 use rudicom::tools::import::ImportMode;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 #[derive(Clone)]
 pub(super) struct LogLevel(Level);
@@ -98,10 +104,14 @@ pub(super) fn parse() -> Cli
 	#[cfg(not(windows))]
 	let ansi = true;
 
-	tracing_subscriber::fmt()
-		.with_max_level(ret.log_level.0)
-		.with_ansi(ansi)
-		.init();
-
+	let tracing=tracing_subscriber::registry();
+	#[cfg(feature = "instrumentation")]
+	let tracing=tracing.with(ConsoleLayer::builder().with_default_env().spawn());
+	tracing.with(
+		tracing_subscriber::fmt::layer()
+			.with_ansi(ansi)
+			.with_filter(LevelFilter::from_level(ret.log_level.0))
+	)
+	.init();
 	ret
 }
