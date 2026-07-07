@@ -1,56 +1,61 @@
 [package]
 name = "rudicom"
 version = "0.4.0"
-edition = "2021"
-rust-version = "1.80.0"
+edition = "2024"
+rust-version = "1.90.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["html", "dicom-json"]
-# enable html interface
+default = ["html", "embedded"]
+# enable HTML interface
 html = ["dep:html"]
 dicom-json = ["dep:dicom-json"]
+embedded = ["surrealdb/kv-surrealkv", "surrealdb/kv-mem" ]
 dhat-heap = ["dhat"]
+# needs rustflags = ["--cfg", "tokio_unstable"] in .cargo/config.toml
+instrumentation = ["dep:console-subscriber", "tokio/tracing"]
 
 [dependencies]
-dicom = {version = "0.8", features = ["image"] }
-dicom-json = { version = "0.8", optional = true }
+dicom = {version = "0.10.0", features = ["image"] }
+dicom-json = { version = "0.10.0", optional = true }
 clap = { version = "4.5", features = ["derive","string"] }
 serde_json = "1.0"
-surrealdb = {version = "=2.1.4", default-features = false, features = ["kv-surrealkv", "kv-mem", "protocol-http"]}
+surrealdb = {version = "3.1", default-features = false, features = ["protocol-ws"]}
 serde = "1.0"
-tokio = { version = "1.47.1", features = ["signal", "macros", "rt-multi-thread", "fs"] }
+tokio = { version = "1.52", features = ["signal", "macros", "rt-multi-thread", "fs"] }
 glob = "0.3"
 config = {version = "0.15", default-features = false, features = ["toml"]}
 md5 = "0.8.0"
 strfmt = "0.2.4"
 axum = {version = "0.8", features = ["tracing","query"]}
-axum-extra = {version = "0.10", features = ["async-read-body","query"]}
-tracing = "0.1"
+axum-extra = {version = "0.12", features = ["async-read-body","query"]}
+tracing = {version = "0.1.44", features = ["release_max_level_debug"]}
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = {version = "0.3", default-features = false}
-axum-streams = {version = "0.21", default-features = false, features = ["text","json"]}
+axum-streams = {version = "0.26.0", default-features = false, features = ["text","json"]}
 html = { version = "0.6", optional = true}
-itertools = "0.14"
+itertools = "0.15.0"
 thiserror = { version = "2.0" }
 dhat = { version = "0.3", optional = true }
 byte-unit = { version = "5.1", features = ["serde"] }
 chrono = "0.4"
-base64 = "0.22"
 mime = "0.3.17"
 async-compression = {version = "0.4", features = ["tokio","gzip","xz-parallel","bzip2"]}
 async-tar = {version = "0.6", default-features = false, features = ["runtime-tokio"]}
 tokio-util = { version = "0.7.16", features = ["io-util","io"] }
-tokio-stream = "0.1.18"
+rand = "0.10"
+console-subscriber = { version = "0.5", optional = true }
+dimse = {git = "https://github.com/DerOrfa/dimse.git"}
 
 [dev-dependencies]
-rand = "0.9.1"
 
 [profile.release]
 strip = true
 lto = true
-#opt-level = "z"
+opt-level = 3
+panic = 'abort'
+#codegen-units = 1
 #debug = 1
 
 [target.'cfg(windows)'.dependencies]

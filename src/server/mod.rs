@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use axum::{Json, Router};
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
@@ -6,7 +7,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
 use tokio::net::TcpListener;
-use tokio::signal;
 use tracing;
 use crate::{config, db};
 use crate::db::DB;
@@ -47,7 +47,7 @@ pub async fn backup(headers: HeaderMap) -> std::result::Result<Response, HttpErr
 pub async fn serve(listener:TcpListener) -> Result<()>
 {
 	let inf=server_info().await;
-	tracing::info!("listening on http://{}", listener.local_addr()?);
+	tracing::info!("http server listening on http://{}", listener.local_addr()?);
 
 	// build our application with a route
 	let mut app = Router::new();
@@ -67,35 +67,9 @@ pub async fn serve(listener:TcpListener) -> Result<()>
 	}
 
 	// run it
-	axum::serve(listener,app.into_make_service())
-		.with_graceful_shutdown(shutdown_signal())
+	axum::serve(listener,app.into_make_service_with_connect_info::<SocketAddr>())
+		.with_graceful_shutdown(super::tools::shutdown_signal())
 		.await.map_err(|e|e.into())
-}
-
-async fn shutdown_signal() {
-	let ctrl_c = async {
-		signal::ctrl_c()
-			.await
-			.expect("failed to install Ctrl+C handler");
-		eprintln!("Got CTRL+C trying graceful shutdown");
-	};
-
-	#[cfg(unix)]
-		let terminate = async {
-		signal::unix::signal(signal::unix::SignalKind::terminate())
-			.expect("failed to install signal handler")
-			.recv()
-			.await;
-		eprintln!("Got CTRL+C trying graceful shutdown");
-	};
-
-	#[cfg(not(unix))]
-		let terminate = std::future::pending::<()>();
-
-	tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
 }
 
 pub async fn lookup_or(rec:&(String, String)) -> Result<db::Entry>

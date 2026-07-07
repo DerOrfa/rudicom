@@ -354,7 +354,7 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/dbentry"
-  /{table}/{id}/col/{name}:
+  /api/{table}/{id}/col/{name}:
     get:
       operationId: tableEntryAttachmentGet
       summary: get table entry-attachment
@@ -509,19 +509,17 @@ components:
           enum:
             - AlreadyStored
             - Success
-        uid:
+        id:
           $ref: "#/components/schemas/uid"
       required:
         - Status
         - Path
-        - uid
+        - id
       description: status reply for store operations
     dbentry:
       type: object
       properties:
         id:
-          $ref: "#/components/schemas/uid"
-        uid:
           $ref: "#/components/schemas/uid"
         Name:
           type: string
@@ -536,7 +534,7 @@ components:
           examples:
             - "104249.315000"
       required:
-        - uid
+        - id
       description: |-
         A database entry object.
         Its exact content depends on the configuration

@@ -5,17 +5,16 @@ pub mod verify;
 mod error;
 pub mod conv;
 pub mod tar;
+pub mod csa;
 
 use crate::db;
-use crate::db::{lookup_uid, Entry, RecordId, DB};
-use crate::tools::Error::DicomError;
+use crate::db::{lookup_uid, Pickable, RecordId, DB};
+use crate::tools::Error::{DicomError, NotFound};
 use dicom::object::DefaultDicomObject;
 pub use error::{Context, Error, Result, Source};
-use std::iter::repeat;
-use std::ops::Bound::Included;
 use std::path::{Path, PathBuf};
-use surrealdb::opt::Resource;
-use surrealdb::sql;
+use surrealdb::types as db_types;
+use tokio::signal;
 
 pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 {
@@ -57,29 +56,27 @@ pub async fn lookup_instance_file(id:String) -> Result<Option<db::File>>
 
 pub async fn entries_for_record(id:&RecordId,table:&str) -> Result<Vec<db::Entry>>
 {
-	let size = match table { 
-		"instances" => 18,
-		"series" => 12,
-		_ => unreachable!()
-	};
 	let ctx = format!("listing children of {}",id);
-	let id_vec= id.key_vec().to_vec();
-	let max_gen = repeat(i64::MAX).map(sql::Value::from).take(size-id_vec.len());
-	let min_gen = repeat(i64::MIN).map(sql::Value::from).take(size-id_vec.len());
-
-	
-	let begin:Vec<_> = id_vec.iter().map(|v|v.clone()).chain(min_gen)
-		.map(surrealdb::Value::from_inner).collect();
-	let end:Vec<_> = id_vec.into_iter().chain(max_gen)
-		.map(surrealdb::Value::from_inner).collect();
-	let results = DB.select::<surrealdb::Value>(Resource::Table(table.to_string()))
-		.range((Included(begin),Included(end))).await?.into_inner();
-	if let sql::Value::Array(instances) = results {
-		instances.0.into_iter().map(surrealdb::Value::from_inner).map(Entry::try_from)
-			.collect::<Result<Vec<_>>>().context(ctx)
-	} else {
-		Err(Error::UnexpectedResult {expected:"list of entries".into(),found: results.kindof()})
+	let my_table = id.table.as_str();
+	let mut me= db::lookup(id).await?.ok_or(NotFound)?;
+	let mut ret = vec![];
+	let values = match (my_table, table){
+		("studies","instances") => { // grandchildren need special query
+			DB.query("select array::flatten(series.instances) as series from $rec").bind(("rec",id.0.to_owned()))
+				.await?.take::<Option<Vec<db_types::Value>>>("series")?.ok_or(NotFound).context(ctx)?
+				.into_iter()
+		},
+		// every entry knows its children anyway
+		("series","instances") => me.pick_remove("instances").context(ctx)?.into_array()?.into_iter(),
+		("studies","series") => me.pick_remove("series").context(ctx)?.into_array()?.into_iter(),
+		_ => {return Ok(vec![me])}
+	};
+	for v in values
+	{
+		ret.push(db::lookup(&RecordId(v.into_record()?)).await?.expect("failed accessing children of study"));
 	}
+	Ok(ret)
+
 }
 
 pub fn extract_from_dicom(obj:&'_ DefaultDicomObject,tag:dicom::core::Tag) -> Result<std::borrow::Cow<'_, str>>
@@ -88,4 +85,30 @@ pub fn extract_from_dicom(obj:&'_ DefaultDicomObject,tag:dicom::core::Tag) -> Re
 		.element(tag).map_err(|e|DicomError(e.into()))
 		.and_then(|v|v.to_str().map_err(|e|DicomError(e.into())))
 		.context(format!("getting {} from dicom object",tag))
+}
+
+pub async fn shutdown_signal() {
+	let ctrl_c = async {
+		signal::ctrl_c()
+			.await
+			.expect("failed to install Ctrl+C handler");
+		eprintln!("Got CTRL+C trying graceful shutdown");
+	};
+
+	#[cfg(unix)]
+	let terminate = async {
+		signal::unix::signal(signal::unix::SignalKind::terminate())
+			.expect("failed to install signal handler")
+			.recv()
+			.await;
+		eprintln!("Got CTRL+C trying graceful shutdown");
+	};
+
+	#[cfg(not(unix))]
+	let terminate = std::future::pending::<()>();
+
+	tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }

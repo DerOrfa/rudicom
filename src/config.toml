@@ -15,7 +15,8 @@ Time = ["InstanceCreationTime"]
 
 [limits]
 upload_sizelimit = "200M"
-max_files = 32 # max amount of concurrently processed files
+max_files = 10 # max amount of concurrently processed files
+db_capacity = 0 # https://docs.rs/surrealdb/3.0.5/surrealdb/struct.Connect.html#method.with_capacity
 
 [paths]
 #use dicom tag names in "{}" to generate file names (obviously those should be unique)
@@ -23,3 +24,9 @@ max_files = 32 # max amount of concurrently processed files
 #removing caracters from the right or left respectively
 filename_pattern = "{PatientID}/{StudyDate:>6}_{StudyTime:<6}/S{SeriesNumber}_{SeriesDescription}/{Modality}.{SOPInstanceUID}.ima"
 #storage_path = "/tmp/db_store" #will be used if filename_pattern does not result in an absolute path / uncomment to override dynamic default
+
+[dimse]
+aet = "RUDICOM"
+address = "0.0.0.0:4242"
+
+[dimse.peers]

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use config::{Config,ConfigError, File, FileFormat::Toml};
 use std::sync::OnceLock;
@@ -9,9 +10,15 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::dcm::AttributeSelector;
 
 #[derive(Debug,Serialize,Deserialize)]
-pub struct Limits{pub upload_sizelimit:byte_unit::Byte, pub max_files:u16}
+pub struct Limits{pub upload_sizelimit:byte_unit::Byte, pub max_files:u16, pub db_capacity:usize}
 #[derive(Debug,Serialize,Deserialize)]
 pub struct Paths{pub filename_pattern:String,pub storage_path:PathBuf}
+#[derive(Debug,Serialize,Deserialize)]
+pub struct DimseCfg{
+	pub aet:String,
+	pub address:String,
+	pub peers:HashMap<String,SocketAddr>,
+}
 
 #[derive(Debug,Serialize,Deserialize)]
 pub struct ConfigStruct
@@ -20,13 +27,19 @@ pub struct ConfigStruct
 	pub series_tags:HashMap<String,Vec<AttributeSelector>>,
 	pub study_tags:HashMap<String,Vec<AttributeSelector>>,
 	pub limits: Limits,
-	pub paths: Paths
+	pub paths: Paths,
+	pub dimse: DimseCfg
+
 }
 
 impl Serialize for AttributeSelector {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer
 	{
-		serializer.serialize_str(self.0.to_string().as_str())
+		let v = match self {
+			AttributeSelector::Core(c) => c.to_string(),
+			AttributeSelector::CSA { base, element } => format!("{}#CSA.{}", base, element),
+		};
+		serializer.serialize_str(v.as_str())
 	}
 }
 impl<'de> Deserialize<'de> for AttributeSelector {
@@ -35,9 +48,15 @@ impl<'de> Deserialize<'de> for AttributeSelector {
 		let dict = StandardDataDictionary::default();
 
 		let parts=String::deserialize(deserializer)?;
-		dict.parse_selector(parts.as_str())
-			.map(AttributeSelector)
-			.map_err(serde::de::Error::custom)
+		if let Some(p) = parts.find("#CSA"){
+			let base = &parts[..p];
+			let base = dict.parse_selector(base).map_err(serde::de::Error::custom)?;
+			Ok(AttributeSelector::CSA {base,element:parts[p+5..].to_string()})
+		} else {
+			dict.parse_selector(parts.as_str())
+				.map(AttributeSelector::Core)
+				.map_err(serde::de::Error::custom)
+		}
 	}
 }
 
