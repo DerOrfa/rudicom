@@ -32,8 +32,11 @@ impl InnerHttpError
 		let error_code = root.downcast_ref::<tools::Error>().map(
 			|e|match e {
 				tools::Error::NotFound | tools::Error::IdNotFound {..} => StatusCode::NOT_FOUND,
-				tools::Error::FileIOError { inner, .. } if inner.kind() == ErrorKind::StorageFull
-					=> StatusCode::INSUFFICIENT_STORAGE,
+				tools::Error::FileIOError { inner, .. } =>
+					match inner.kind() {
+						ErrorKind::StorageFull | ErrorKind::QuotaExceeded => StatusCode::INSUFFICIENT_STORAGE,
+						_ => StatusCode::INTERNAL_SERVER_ERROR,
+					}
 				tools::Error::DataConflict(_)|tools::Error::FieldConflict {..} => StatusCode::CONFLICT,
 				_ => StatusCode::INTERNAL_SERVER_ERROR
 			});
