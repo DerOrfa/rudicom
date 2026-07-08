@@ -51,7 +51,7 @@ pub async fn store_file<S>(filename:PathBuf, session: &mut S) -> tools::Result<R
 /// If the existing data has a different checksum, an error is returned
 pub async fn import_file<S>(path:&Path, session: &mut S) -> tools::Result<RegisterResult> where S: Session<Any>
 {
-	let (info,obj) = db::File::new_from_existing(path,is_storage(path)).await?;
+	let (info,obj) = File::new_from_existing(path,is_storage(path)).await?;
 	import_file_ob(info, obj, session).await
 }
 
@@ -87,7 +87,7 @@ pub async fn move_file_ob<S>(info: File, obj: DefaultDicomObject, session: &mut 
 	if info.owned { // if the file is already owned just import it
 		import_file_ob(info,obj, session).await
 	} else { // if not, store (aka copy) file and delete the source once we're done
-		let stored = store_ob(obj, session).await?;
+		let stored = db::register_instance(obj, &mut FileInfo::Store, session).await?;
 		if let RegisterResult::Stored(_) = stored { //no error and no previously existing file, we can delete the source
 			tokio::fs::remove_file(info.get_path()).await.context(format!("moving file {}", info.get_path().display()))?;
 		}

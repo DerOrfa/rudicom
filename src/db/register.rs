@@ -135,7 +135,7 @@ pub async fn register_instance<S>(
 	let obj = obj.into();
 	loop {
 		// make sure we have a transaction
-		let t= match &mut transaction{
+		let t= match &mut transaction {
 			Some(t) => t,
 			None => {
 				transaction = Some(session.begin().await?);
@@ -170,7 +170,7 @@ pub async fn register_instance<S>(
 				},
 		};
 		// should only be here because of a final error, cancel transaction and get out of here
-		if let Some(t) = transaction{
+		if let Some(t) = transaction {
 			t.cancel().await?;
 		}
 		return Err(fall_throu)
