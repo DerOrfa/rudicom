@@ -37,7 +37,7 @@ def filter(input:dict[tuple[int,int],Any]) -> dict[tuple[int,int],Optional[Any]]
 #[test]
 fn replace_filter()  -> Result<(), Box<dyn std::error::Error>>
 {
-	tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
+//	tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 	let code = CString::new(REPLACE_TIME)?;
 	let mut obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1).into_inner();
 	assert_eq!(String::get(&obj, tags::STUDY_DATE)?, "20250101");
@@ -57,7 +57,7 @@ fn replace_filter()  -> Result<(), Box<dyn std::error::Error>>
 #[test]
 fn missing_input()  -> Result<(), Box<dyn std::error::Error>>
 {
-	tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
+//	tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 	let code = CString::new(MISSING_INPUT)?;
 	let mut obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1).into_inner();
 	Python::attach(|py|{
@@ -76,7 +76,7 @@ fn missing_input()  -> Result<(), Box<dyn std::error::Error>>
 #[tokio::test]
 async fn filtered_store()  -> Result<(), Box<dyn std::error::Error>>
 {
-	tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
+//	tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 	init_db().await?.health().await?;
 	let mut sess = LocalSession::create(&DB, 1);
 	let mut obj = dcm::synthesize_series(&dcm::UidSynthesizer::default(), 1, 1, 2);

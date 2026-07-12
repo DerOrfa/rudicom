@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use crate::db::{lookup_uid, Entry, LocalSession, Session};
+use crate::dcm::AttributeSelector;
+use crate::tools::store::store_ob;
 use crate::{db, tools};
-use crate::db::{lookup_uid, Entry, FileInfo, LocalSession, Session};
+use dicom::core::VR;
 use dicom::dictionary_std::tags;
 use dicom::object::{FileDicomObject, InMemDicomObject};
 use dimse::definitions::FailureCode;
@@ -8,11 +10,10 @@ use dimse::identifier::Identifier;
 use dimse::io::ItemResult;
 use dimse::status::{failure, success, Comment, Offending, Status, StatusFailure};
 use dimse::RetrieveLevel;
-use futures::{StreamExt, stream, stream::BoxStream};
+use futures::{stream, stream::BoxStream, StreamExt};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use dicom::core::VR;
 use surrealdb::types::ToSql;
-use crate::dcm::AttributeSelector;
 
 #[derive(Clone)]
 pub struct Accessor {}
@@ -30,8 +31,7 @@ impl dimse::io::FileAccess for Accessor {
 	}
 
 	async fn store_file(&mut self, file: FileDicomObject<InMemDicomObject>) -> Status {
-		let mut state = FileInfo::Store;
-		db::register_instance(file, &mut state, &mut LocalSession::create(&db::DB,1)).await
+		store_ob(file, &mut LocalSession::create(&db::DB,1)).await
 			.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))
 			.map(|_| success().into())
 	}
