@@ -60,6 +60,8 @@ impl Default for UidSynthesizer {
 
 pub fn synthesize_dicom_obj(uid_synthesizer: &UidSynthesizer, stdy_num:u16, ser_num:u16, image_num:u16) -> FileDicomObject<InMemDicomObject> {
 	let str_tags = [
+		(tags::SERIES_DATE, VR::DA, "20250101"),
+		(tags::SERIES_TIME, VR::TM, "000000.000000"),
 		(tags::STUDY_DATE, VR::DA, "20250101"),
 		(tags::STUDY_TIME, VR::TM, "000000.000000"),
 		(tags::STUDY_ID, VR::SH, "John_Doe_Study"),

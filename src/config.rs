@@ -28,7 +28,8 @@ pub struct ConfigStruct
 	pub study_tags:HashMap<String,Vec<AttributeSelector>>,
 	pub limits: Limits,
 	pub paths: Paths,
-	pub dimse: DimseCfg
+	pub dimse: DimseCfg,
+	pub filters:HashMap<String,String>,
 
 }
 

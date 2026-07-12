@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ffi::CStr;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use dicom::core::header::Header;
 use dicom::core::{DataDictionary, PrimitiveValue, Tag, VR};
@@ -142,10 +141,10 @@ fn make_element(val: Bound<PyAny>, tag: Tag) -> Result<InMemElement, PyErr> {
 	} else { Err(PyValueError::new_err(format!("Invalid VR for tag {}", tag.to_string()))) }
 }
 
-pub fn filter(code:&CStr, obj:&mut InMemDicomObject, py:Python) -> tools::Result<()>
+pub fn filter(code:Bound<PyModule>, obj:&mut InMemDicomObject) -> tools::Result<()>
 {
-	let module = PyModule::from_code(py, code, c"", c"test")?;
-	let input = module.getattr_opt("input_tags")?
+	let py = code.py();
+	let input = code.getattr_opt("input_tags")?
 		.map(|i|i.extract::<Vec<(u16,u16)>>()).transpose()?
 		.unwrap_or_default();
 	let input = input.into_iter().map(Tag::from)
@@ -160,8 +159,7 @@ pub fn filter(code:&CStr, obj:&mut InMemDicomObject, py:Python) -> tools::Result
 			error!("Ignoring {} as it is not a primitive value", e.to_str().unwrap());
 		}
 	}
-	let res:HashMap<(u16,u16),Option<Bound<PyAny>>> = module
-		.call_method1("filter", (param,))?.extract()?;
+	let res:HashMap<(u16,u16),Option<Bound<PyAny>>> = code.call_method1("filter", (param,))?.extract()?;
 	for (tag,val) in res {
 		let tag = Tag::from(tag);
 		if let Some(val) = val {

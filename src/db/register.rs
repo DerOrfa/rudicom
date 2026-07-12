@@ -12,7 +12,6 @@ use surrealdb::method::Transaction;
 use surrealdb::{types as db_types, Connection};
 use surrealdb::engine::any::Any;
 use surrealdb::types::{SurrealValue, ToSql};
-use tokio::task;
 use tracing::{debug};
 use crate::tools::Error::{DataConflict, FieldConflict};
 
@@ -200,7 +199,7 @@ async fn _register_instance<'a,C>(
 		}
 		_ =>{}
 	};
-	debug!("task {} registering instance {}",task::id(),instance_uid);
+	debug!("registering instance {}",instance_uid);
 
 	if insert(&*obj, &instance_id, add_meta, &INSTANCE_TAGS, &transaction	).await?
 	{ // normal insert, didn't exist before. So make sure its series/study exists (this may also update non-existing entries)

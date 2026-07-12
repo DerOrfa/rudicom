@@ -30,3 +30,21 @@ aet = "RUDICOM"
 address = "0.0.0.0:4242"
 
 [dimse.peers]
+
+
+[filters]
+no_report_timestamp = 	"""
+from typing import Any, Optional
+
+modality_tag = (0x0008,0x0060)
+input_tags = [modality_tag]
+
+def filter(input:dict[tuple[int,int],Any]) -> dict[tuple[int,int],Optional[Any]]:
+	if input[modality_tag]=="SR":
+		return {
+			(0x0008,0x0021):None,
+			(0x0008,0x0031):None
+		}
+	else:
+		return {}
+"""

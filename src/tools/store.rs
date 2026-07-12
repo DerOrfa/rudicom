@@ -1,11 +1,14 @@
+use std::ffi::CString;
 use crate::db::RegisterResult::AlreadyStored;
 use crate::db::{lookup, File, FileInfo, RegisterResult, Session};
 use crate::storage::async_store;
 use crate::tools::{Context, Error};
-use crate::{db, tools};
+use crate::{db, tools, config};
 use dicom::object::DefaultDicomObject;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use pyo3::prelude::PyModule;
+use pyo3::Python;
 use surrealdb::engine::any::Any;
 
 /// check if a path is a subdirectory of the storage path defined in config
@@ -17,8 +20,20 @@ pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
 /// Stores a dicom object as a file and registers it as owned (might change data).
 /// 
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
-pub async fn store_ob<S>(obj:DefaultDicomObject, session: &mut S) -> tools::Result<RegisterResult> where S:Session<Any>
+pub async fn store_ob<S>(mut obj:DefaultDicomObject, session: &mut S) -> tools::Result<RegisterResult> where S:Session<Any>
 {
+	if !config::get().filters.is_empty(){
+		Python::attach::<_,tools::Result<()>>(|py| {
+			for (name,code) in &config::get().filters{
+				let code = CString::new(code.as_str()).unwrap();
+				let name = CString::new(name.as_str()).unwrap();
+				let code = PyModule::from_code(py, code.as_ref(), c"", name.as_ref())?;
+				tools::filter::filter(code, &mut obj)?;
+			}
+			Ok(())
+		})?;
+
+	}
 	db::register_instance(Arc::new(obj), &mut FileInfo::Store, session).await
 }
 

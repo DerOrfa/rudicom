@@ -17,7 +17,6 @@ async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
 	if let RegisterResult::Stored(_) = store_ob(obj.clone(), &mut LocalSession::create(&DB, 1)).await? {}
 	else { panic!("First store should return stored."); }
-	debug!("inserted object");
 	if let RegisterResult::AlreadyStored(stored) = store_ob(obj.clone(), &mut LocalSession::create(&DB, 1)).await? {
 		let stored = lookup(&stored).await?.expect("existing object should be found");
 		let path = stored.get_file()?.get_path();
