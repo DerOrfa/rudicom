@@ -64,26 +64,28 @@ async fn main() -> Result<(),String>
 			info!("storage path is {}",inf.storage_path);
 
 			let mut set= tokio::task::JoinSet::new();
-			// DICOM DIMSE
-			let scp_bind = FullAeAddr::new(
-				&config::get().dimse.aet,
-				TcpListener::bind(&config::get().dimse.address).await
-					.map_err(|e|format!("Binding to {} failed: {e}",config::get().dimse.address))?
-			);
-			let scp_peers = config::get().dimse.peers.iter()
-				.map(|(k,v)|FullAeAddr::new(k.clone(),v.clone()));
+			if let Some(dimse) = &config::get().dimse{
+				// DICOM DIMSE
+				let scp_bind = FullAeAddr::new(
+					&dimse.aet,
+					TcpListener::bind(&dimse.address).await
+						.map_err(|e|format!("Binding to {} failed: {e}",dimse.address))?
+				);
+				let scp_peers = dimse.peers.iter()
+					.map(|(k,v)|FullAeAddr::new(k.clone(),v.clone()));
 
-			let (signal_tx, signal_rx) = watch::channel(());
-			tokio::spawn(async move {
-				rudicom::tools::shutdown_signal().await;
-				tracing::debug!("Telling SCP to shutdown");
-				drop(signal_rx);
-			});
-			set.spawn(async {
-				let title = format!("SCP server {}@{}",scp_bind.ae_title(),scp_bind.socket_addr().local_addr().unwrap().to_string());
-				dimse::serve(scp_bind,scp_peers,signal_tx,db::dimse_access::Accessor{}).await
-					.map(|_|title).map_err(|d|d.into())
-			});
+				let (signal_tx, signal_rx) = watch::channel(());
+				tokio::spawn(async move {
+					rudicom::tools::shutdown_signal().await;
+					tracing::debug!("Telling SCP to shutdown");
+					drop(signal_rx);
+				});
+				set.spawn(async {
+					let title = format!("SCP server {}@{}",scp_bind.ae_title(),scp_bind.socket_addr().local_addr().unwrap().to_string());
+					dimse::serve(scp_bind,scp_peers,signal_tx,db::dimse_access::Accessor{}).await
+						.map(|_|title).map_err(|d|d.into())
+				});
+			}
 
 			// axum HTTP
 			for a in address{
