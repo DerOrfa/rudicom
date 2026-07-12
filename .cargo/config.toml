@@ -1,3 +1,7 @@
 [build]
 #rustflags = ["--cfg", "tokio_unstable"]
-rustflags = []
+
+[target.'cfg(target_os = "macos")']
+rustflags = [
+	"-C", "link-args=-Wl,-rpath,/Library/Developer/CommandLineTools/Library/Frameworks"
+]

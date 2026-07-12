@@ -2,6 +2,7 @@ use glob::{GlobError, PatternError};
 use std::fmt::{Debug, Display, Formatter};
 use std::path::PathBuf;
 use dimse::error::DimseError;
+use pyo3::PyErr;
 use thiserror::Error;
 use crate::db::{Entry, RecordId};
 
@@ -148,10 +149,10 @@ pub enum Error
 	DataConflict(Entry),
 	#[error("Data fields {fields} in the entry {id} conflict with new update")]
 	FieldConflict{fields:String,id:RecordId},
-
 	#[error("Entry {existing_id} already exists with different data")]
 	Md5Conflict {existing_md5:String, my_md5:String, existing_id:RecordId},
-
+	#[error("Python error {0}")]
+	PythonErr(#[from]PyErr),
 }
 
 impl Error {

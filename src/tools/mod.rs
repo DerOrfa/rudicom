@@ -6,6 +6,7 @@ mod error;
 pub mod conv;
 pub mod tar;
 pub mod csa;
+pub mod filter;
 
 use crate::db;
 use crate::db::{lookup_uid, Pickable, RecordId, DB};
