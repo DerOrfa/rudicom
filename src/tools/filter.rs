@@ -107,7 +107,7 @@ fn auto_unarray<'a, T,A,E>(v:C<T>,py:Python<'a>) -> Result<Bound<'a,PyAny>,PyErr
 fn from_primitive(v:PrimitiveValue, py:Python) -> Result<Bound<PyAny>, PyErr> {
 	match v {
 		PrimitiveValue::Empty => None::<()>.into_pyobject(py).map_err(PyErr::from),
-		PrimitiveValue::Strs(s) => s.into_pyobject(py),
+		PrimitiveValue::Strs(s) => auto_unarray(s,py),
 		PrimitiveValue::Str(s) => Ok(s.into_pyobject(py)?.into_any()),
 		PrimitiveValue::U8(v) => auto_unarray(v,py),
 		PrimitiveValue::I16(v) => auto_unarray(v,py),
@@ -159,6 +159,7 @@ pub fn filter(code:Bound<PyModule>, obj:&mut InMemDicomObject) -> tools::Result<
 			error!("Ignoring {} as it is not a primitive value", e.to_str().unwrap());
 		}
 	}
+	debug!("Running filter {code}");
 	let res:HashMap<(u16,u16),Option<Bound<PyAny>>> = code.call_method1("filter", (param,))?.extract()?;
 	for (tag,val) in res {
 		let tag = Tag::from(tag);
