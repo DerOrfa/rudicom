@@ -25,10 +25,13 @@ db_capacity = 0 # https://docs.rs/surrealdb/3.0.5/surrealdb/struct.Connect.html#
 filename_pattern = "{PatientID}/{StudyDate:>6}_{StudyTime:<6}/S{SeriesNumber}_{SeriesDescription}/{Modality}.{SOPInstanceUID}.ima"
 #storage_path = "/tmp/db_store" #will be used if filename_pattern does not result in an absolute path / uncomment to override dynamic default
 
+# enable DICOM SCP service
 #[dimse]
 #aet = "RUDICOM"
 #address = "0.0.0.0:4242"
 
+# list of DICOM Dimse peers e.g. for usage in MOVE operations
+# format is <AET>=<IP>:<PORT>
 #[dimse.peers]
 
 
@@ -37,8 +40,17 @@ report_no_timestamp = 	"""
 from typing import Any, Optional
 
 modality_tag = (0x0008,0x0060)
-input_tags = [modality_tag]
+input_tags = [modality_tag] # needed, list of tags filter expects as input
 
+# needed, called by the server with any store operation that is allowed to change data (all but import-ops)
+# expects a dictionary of dicom values (tags:value) as input
+# some requested input might not exist or be "None", if the values don't exist in the dicom object
+# exceptions can be thrown and will be forwared as store-failures
+# returns a dictionary of tag:value pairs to replace in the same dicom object, value=None means removal
+#
+# The example here helps with dealing with report modalities which tend to have inconsistent series
+# timestamps by removing the SeriesTime/Date entries from them
+# replace with 'report_no_timestamp = ""' to disable this
 def filter(input:dict[tuple[int,int],Any]) -> dict[tuple[int,int],Optional[Any]]:
 	if input[modality_tag]=="SR":
 		return {

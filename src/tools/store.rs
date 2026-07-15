@@ -24,7 +24,9 @@ pub async fn store_ob<S>(mut obj:DefaultDicomObject, session: &mut S) -> tools::
 {
 	if !config::get().filters.is_empty(){
 		Python::attach::<_,tools::Result<()>>(|py| {
-			for (name,code) in &config::get().filters {
+			for (name,code) in config::get().filters.iter()
+				.filter(|(_,code)| !code.is_empty())
+			{
 				let code = CString::new(code.as_str()).unwrap();
 				let name = CString::new(name.as_str()).unwrap();
 				let code = PyModule::from_code(py, code.as_ref(), c"", name.as_ref())?;
