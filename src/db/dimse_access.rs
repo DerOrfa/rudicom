@@ -1,5 +1,5 @@
 use crate::db::{lookup_uid, Entry, LocalSession, Session};
-use crate::dcm::AttributeSelector;
+use crate::dcm::{AttributeSelector, INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::store::store_ob;
 use crate::{db, tools};
 use dicom::core::VR;
@@ -11,8 +11,10 @@ use dimse::io::ItemResult;
 use dimse::status::{failure, success, Comment, Offending, Status, StatusFailure};
 use dimse::RetrieveLevel;
 use futures::{stream, stream::BoxStream, StreamExt};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::ops::Deref;
 use std::path::PathBuf;
+use dicom::object::mem::InMemElement;
 use surrealdb::types::ToSql;
 
 #[derive(Clone)]
@@ -79,10 +81,10 @@ impl dimse::io::FileAccess for Accessor {
 		// 	.map(|e|e.to_str().map(Cow::into_owned)).transpose()
 		// 	.map_err(|e|failure(FailureCode::InvalidArgument).offending([tags::TIMEZONE_OFFSET_FROM_UTC]).comment(e))?;
 
-		let (table,known_db_tags) = match ident.level {
-			Some(RetrieveLevel::IMAGE) => Ok(("instances",crate::config::get().instance_tags.clone())),
-			Some(RetrieveLevel::SERIES) => Ok(("series",crate::config::get().series_tags.clone())),
-			Some(RetrieveLevel::STUDY) => Ok(("studies",crate::config::get().study_tags.clone())),
+		let (table, id_tag,known_db_tags) = match ident.level {
+			Some(RetrieveLevel::IMAGE) => Ok(("instances",tags::SOP_INSTANCE_UID,INSTANCE_TAGS.deref())),
+			Some(RetrieveLevel::SERIES) => Ok(("series",tags::SERIES_INSTANCE_UID,SERIES_TAGS.deref())),
+			Some(RetrieveLevel::STUDY) => Ok(("studies",tags::STUDY_INSTANCE_UID,STUDY_TAGS.deref())),
 			Some(RetrieveLevel::PATIENT) => return Err(failure(FailureCode::InvalidArgument).comment("Cannot do patient level find")),
 			None => Err(tags::QUERY_RETRIEVE_LEVEL)
 		}.map_err(|e|failure(FailureCode::MissingAttribute).offending([e]))?;
@@ -96,18 +98,28 @@ impl dimse::io::FileAccess for Accessor {
 			}
 		}
 
-		let entries:Vec<_>= db::list_entries(table).await.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))?
-			.into_iter().filter_map(|entry|{
-				let mut matcher = InMemDicomObject::new_empty();
-				for (tag, db) in &search_map {
-					if let Some(found) = entry.get(db).and_then(|v|v.as_string()){
-						matcher.put_str(tag.to_owned(),VR::LO,found);
-					}
-				}
-				ident.matches_all(&matcher).then_some(Ok(matcher))
+		let entries = db::list_entries(table).await.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))?;
+		let mut ret =vec![];
+		for entry in entries.iter() {
+			let parents = db::find_down_tree(entry.id()).await.map_err(|e|failure(FailureCode::InvalidArgument).comment(e))?
+				.into_iter().rev()
+				.zip([tags::STUDY_INSTANCE_UID,tags::SERIES_INSTANCE_UID,tags::SOP_INSTANCE_UID]);
+			let mut matcher = InMemDicomObject::new_empty();
+			for (id,t) in parents
+			{
+				matcher.put(InMemElement::new(t,VR::UI,id.str_key()));
 			}
-		).collect();
-		Ok(stream::iter(entries).boxed())
+			for (tag, db) in &search_map {
+				if let Some(found) = entry.get(db).and_then(|v|v.as_string()){
+					matcher.put_str(tag.to_owned(),VR::LO,found);
+				}
+			}
+			ret.push(matcher);
+		}
+		let ret:Vec<_> = ret.into_iter()
+			.filter_map(|matcher|ident.matches_all(&matcher).then_some(Ok(matcher)))
+			.collect();
+		Ok(stream::iter(ret).boxed())
 
 	}
 }
