@@ -43,7 +43,7 @@ impl<'a,T> Write for Md5Proxy<'a, T> where T: Write + Sized
 }
 
 #[derive(Clone,Deserialize)]
-pub struct File
+pub struct FileInfo
 {
 	path:PathBuf,
 	pub owned:bool,
@@ -51,11 +51,12 @@ pub struct File
 	pub size:u64
 }
 
-impl File {
-	pub fn new<T>(path:T, md5:md5::Digest, owned:bool, size:u64) -> File where PathBuf:From<T>
+impl FileInfo {
+	pub fn new<T>(path:T, md5:md5::Digest, owned:bool, size:u64) -> FileInfo
+	where PathBuf:From<T>
 	{
 		let path = PathBuf::from(path);
-		File{path,size, owned, md5:format!("{:x}", md5)}
+		FileInfo {path,size, owned, md5:format!("{:x}", md5)}
 	}
 
 	/// get the complete path of the file
@@ -69,7 +70,7 @@ impl File {
 	pub fn get_md5(&self) -> &str { self.md5.as_str() }
 
 	/// writes a new file taking an object and returning that object plus a file info
-	pub async fn new_from_obj(obj:Arc<DefaultDicomObject>) -> Result<File>{
+	pub async fn new_from_obj(obj:Arc<DefaultDicomObject>) -> Result<FileInfo>{
 		let path=PathBuf::from(gen_filepath(&obj)?);
 		let path = complete_filepath(&path);
 		let p=path.parent().unwrap();
@@ -88,7 +89,7 @@ impl File {
 		Ok(Self::new(path, checksum.finalize(), true,size))
 	}
 	/// creates fileinfo struct and reads dicom object directly from path
-	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> Result<(File,DefaultDicomObject)>
+	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> Result<(FileInfo, DefaultDicomObject)>
 	{
 		let path = path.as_ref();
 		let size = tokio::fs::metadata(path).await.context(format!("getting metadata for {}",path.display()))?.len();
@@ -132,6 +133,7 @@ impl File {
 			file:filename.to_string_lossy().into()
 		})}
 	}
+
 	pub async fn remove(self) -> Result<()>{
 		if self.owned {
 			let mut path = self.get_path();
@@ -150,7 +152,7 @@ impl File {
 	} 
 }
 
-impl TryFrom<db_types::Value> for File
+impl TryFrom<db_types::Value> for FileInfo
 {
 	type Error = Error;
 
@@ -164,11 +166,11 @@ impl TryFrom<db_types::Value> for File
 	}
 }
 
-impl TryFrom<File> for db_types::Value
+impl TryFrom<FileInfo> for db_types::Value
 {
 	type Error = Error;
 
-	fn try_from(file: File) -> std::result::Result<Self, Self::Error> {
+	fn try_from(file: FileInfo) -> std::result::Result<Self, Self::Error> {
 		let mut ret=db_types::Object::default();
 		let file_path = file.path.to_str().ok_or(Error::InvalidFilename {name:file.path.clone()})?;
 		ret.insert("path",file_path.to_string());
@@ -179,7 +181,7 @@ impl TryFrom<File> for db_types::Value
 	}
 }
 
-impl Serialize for File
+impl Serialize for FileInfo
 {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> where S: Serializer {
         let mut ser = serializer.serialize_struct("file",3)?;
@@ -194,7 +196,7 @@ impl Serialize for File
     }
 }
 
-impl TryFrom<db_types::Object> for File
+impl TryFrom<db_types::Object> for FileInfo
 {
 	type Error = Error;
 
@@ -204,6 +206,6 @@ impl TryFrom<db_types::Object> for File
 		let md5 = obj.pick_remove("md5")?.into_string()?;
 		let size = obj.pick_remove("size")
 			.map(|v|if let db_types::Value::Number(num) = v { num.to_int().unwrap_or_default()} else {0})?;
-		Ok(File{path:path.into(),owned,md5,size:size as u64})
+		Ok(FileInfo {path:path.into(),owned,md5,size:size as u64})
 	}
 }

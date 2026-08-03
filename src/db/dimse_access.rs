@@ -11,7 +11,7 @@ use dimse::io::ItemResult;
 use dimse::status::{failure, success, Comment, Offending, Status, StatusFailure};
 use dimse::RetrieveLevel;
 use futures::{stream, stream::BoxStream, StreamExt};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
 use dicom::object::mem::InMemElement;

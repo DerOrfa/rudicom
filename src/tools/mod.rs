@@ -44,7 +44,7 @@ pub async fn get_instance_dicom(id:String) -> Result<Option<DefaultDicomObject>>
 		Err(e) => Err(e)
 	}
 }
-pub async fn lookup_instance_file(id:String) -> Result<Option<db::File>>
+pub async fn lookup_instance_file(id:String) -> Result<Option<db::FileInfo>>
 {
 	let ctx = format!("failed looking for file for instance {id}");
 	match lookup_uid("instances",id).await

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use crate::db::{if_retry, Entry, File, RecordId, RegisterResult, Session};
+use crate::db::{if_retry, Entry, FileInfo, RecordId, RegisterResult, Session};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::{extract_from_dicom, Error};
 use crate::{dcm, tools};
@@ -23,24 +23,24 @@ struct Diff
 	value:db_types::Value,
 }
 
-pub enum FileInfo{
-	Exists(File),
-	Stored(Option<File>),
+pub enum FileState {
+	Exists(FileInfo),
+	Stored(Option<FileInfo>),
 	Store
 }
 
-impl FileInfo{
+impl FileState {
 	pub fn commit(&mut self){
-		if let FileInfo::Stored(s) = self {
+		if let FileState::Stored(s) = self {
 			s.take();
 		} else {
 			debug!("commiting non-stored file");
 		}
 	}
 }
-impl Drop for FileInfo{
+impl Drop for FileState {
 	fn drop(&mut self) {
-		if let FileInfo::Stored(s) = self {
+		if let FileState::Stored(s) = self {
 			if let Some(f) = s.take() {
 				debug!("dropping uncommited file {}",f.get_path().display());
 				tokio::spawn(f.remove());
@@ -125,7 +125,7 @@ async fn upsert<'a,C>(
 /// 
 pub async fn register_instance<S>(
 	obj:impl Into<Arc<DefaultDicomObject>>,
-	file_info:&mut FileInfo,
+	file_info:&mut FileState,
 	session: &mut S,
 ) -> tools::Result<RegisterResult> where S:Session<Any>
 {
@@ -180,7 +180,7 @@ pub async fn register_instance<S>(
 
 async fn _register_instance<'a,C>(
 	obj:Arc<DefaultDicomObject>,
-	fileinfo:&mut FileInfo,
+	fileinfo:&mut FileState,
 	transaction: &Transaction<C>
 ) -> tools::Result<RegisterResult> where C:Connection
 {
@@ -194,7 +194,7 @@ async fn _register_instance<'a,C>(
 	let mut add_meta = vec![("series",series_id.0.to_owned().into_value())];
 
 	match fileinfo{
-		FileInfo::Exists(file)|FileInfo::Stored(Some(file)) => {
+		FileState::Exists(file)| FileState::Stored(Some(file)) => {
 			add_meta.push(("file", file.clone().try_into()?));
 		}
 		_ =>{}
@@ -208,9 +208,9 @@ async fn _register_instance<'a,C>(
 
 		// everything successfully inserted
 		// now do the file, if it's not there yet
-		if let FileInfo::Store = fileinfo{
-			let file = File::new_from_obj(obj).await?; // storing failed, abort
-			*fileinfo = FileInfo::Stored(Some(file.clone()));
+		if let FileState::Store = fileinfo{
+			let file = FileInfo::new_from_obj(obj).await?; // storing failed, abort
+			*fileinfo = FileState::Stored(Some(file.clone()));
 			transaction.query("UPDATE $rec SET file = $file")
 				.bind(("rec",instance_id.0.clone()))
 				.bind(("file", db_types::Value::try_from(file)?))

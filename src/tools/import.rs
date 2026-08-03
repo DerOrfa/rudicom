@@ -1,4 +1,4 @@
-use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSession, File};
+use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSession, FileInfo};
 use crate::tools::Error;
 use futures::{stream, Stream, TryStreamExt};
 use glob::glob;
@@ -99,7 +99,7 @@ impl Serialize for ImportResult
 	}
 }
 
-async fn import_file_ob<S>(info: File, obj: DefaultDicomObject, mode: ImportMode, session: &mut S) -> ImportResult where S:Session<Any>
+async fn import_file_ob<S>(info: FileInfo, obj: DefaultDicomObject, mode: ImportMode, session: &mut S) -> ImportResult where S:Session<Any>
 {
 	let filename = info.get_path().to_string_lossy().to_string();
 	let import =
@@ -141,7 +141,7 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 					ImportMode::Store => true,
 					ImportMode::Move => is_storage(&p)
 				};
-				File::new_from_existing(p, owned)
+				FileInfo::new_from_existing(p, owned)
 			})
 			.try_buffer_unordered(max_files as usize)
 			.and_then(move|(info,obj)|{

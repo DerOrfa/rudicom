@@ -82,7 +82,7 @@ impl Entry
 	}
 	
 	/// list all file objects in this entry
-	pub async fn get_files(&self) -> Result<Vec<db::File>>
+	pub async fn get_files(&self) -> Result<Vec<db::FileInfo>>
 	{
 		match self {
 			Instance(_) => {self.get_file().map(|f|vec![f])},
@@ -115,7 +115,7 @@ impl Entry
 		self.as_mut().insert(key.into(),value.into())
 	}
 
-	pub fn get_file(&self) -> Result<db::File>
+	pub fn get_file(&self) -> Result<db::FileInfo>
 	{
 		let context= format!("trying to extract a File object from {}",self.id());
 		let result = if let Instance((_,inst)) = &self
@@ -130,7 +130,7 @@ impl Entry
 		let files=self.get_files().await?;
 		// makes PathBuf of them
 		if files.is_empty()	{Ok(PathBuf::default())} 
-		else { Ok(reduce_path(files.iter().map(db::File::get_path).collect())) }
+		else { Ok(reduce_path(files.iter().map(db::FileInfo::get_path).collect())) }
 		
 	}
 	 /// Compare the Entry to a Dicom object.
