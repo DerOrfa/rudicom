@@ -30,16 +30,26 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run tests
         run: cargo test
       - name: Build binaries in "release" mode
         run: cargo build -r
-      - name: Upload
+      - name: Upload Unix
+        if: matrix.config.os != 'windows-latest'
         uses: actions/upload-artifact@v7
         with:
           name: rudicom-${{ matrix.os }}-${{ matrix.architecture }}
-          path: target/release/rudicom[.exe if ${{matrix.os}} == 'windows-latest']
+          path: target/release/rudicom
+          archive: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Windows
+        if: matrix.config.os == 'windows-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: rudicom-${{ matrix.os }}-${{ matrix.architecture }}
+          path: target/release/rudicom.exe
           archive: false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
