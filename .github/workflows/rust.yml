@@ -36,7 +36,7 @@ jobs:
       - name: Build binaries in "release" mode
         run: cargo build -r
       - name: Upload Unix
-        if: matrix.config.os != 'windows-latest'
+        if: startsWith(matrix.os, 'windows') != true
         uses: actions/upload-artifact@v7
         with:
           name: rudicom-${{ matrix.os }}-${{ matrix.architecture }}
@@ -45,10 +45,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload Windows
-        if: matrix.config.os == 'windows-latest'
+        if: startsWith(matrix.os, 'windows')
         uses: actions/upload-artifact@v7
         with:
-          name: rudicom-${{ matrix.os }}-${{ matrix.architecture }}
+          name: rudicom-${{ matrix.os }}-${{ matrix.architecture }}.exe
           path: target/release/rudicom.exe
           archive: false
         env:
