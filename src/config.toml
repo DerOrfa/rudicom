@@ -19,10 +19,12 @@ max_files = 10 # max amount of concurrently processed files
 db_capacity = 0 # https://docs.rs/surrealdb/3.0.5/surrealdb/struct.Connect.html#method.with_capacity
 
 [paths]
-#use dicom tag names in "{}" to generate file names (obviously those should be unique)
-#tag names can be followed by ":<" or ":>" and a number where resulting string will be cropped to the given size by
-#removing caracters from the right or left respectively
+# use dicom tag names in "{}" to generate file names (obviously those should be unique)
+# tag names can be followed by ":<" or ":>" and a number where resulting string will be cropped to the given size by
+# removing caracters from the right or left respectively
+# using subdirectories is allowed, but they must all be in the same filesystem/mount as the storage path
 filename_pattern = "{PatientID}/{StudyDate:>6}_{StudyTime:<6}/S{SeriesNumber}_{SeriesDescription}/{Modality}.{SOPInstanceUID}.ima"
+# root path the filename-pattern above will be relative to
 #storage_path = "/tmp/db_store" #will be used if filename_pattern does not result in an absolute path / uncomment to override dynamic default
 
 # enable DICOM SCP service

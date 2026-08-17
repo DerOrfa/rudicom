@@ -125,6 +125,8 @@ pub enum Error
 		inner:std::io::Error,
 		path:PathBuf,
 	},
+	#[error("File {path} was already commited")]
+	FileAlreadyCommited{path:PathBuf},
 
 	#[error("Failed to parse {to_parse} ({source})")]
 	ParseError{
