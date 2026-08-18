@@ -22,7 +22,7 @@ use tracing::error;
 mod into_db_value;
 mod register;
 mod entry;
-mod file;
+pub(crate) mod file;
 mod record;
 mod session;
 pub mod dimse_access;

@@ -5,13 +5,13 @@ use tracing::error;
 use crate::tools;
 use crate::tools::Context;
 
-pub trait Committable: Sized {
+pub trait Committable: Sized + Write + Send {
 	fn create(filename:PathBuf) -> std::io::Result<Self>;
 	fn create_async(filename:PathBuf) -> tokio::task::JoinHandle<std::io::Result<Self>> where Self: Sized + Send + 'static {
 		tokio::task::spawn_blocking(move || Self::create(filename))
 	}
 	fn commit(&mut self) -> tools::Result<std::fs::File>;
-	fn cancel(&mut self);
+	fn cancel(self){} //default impl silently drops the file
 }
 
 pub struct CompatibleFile<W> {
@@ -35,7 +35,7 @@ impl Committable for CompatibleFile<std::fs::File> {
 		}
 	}
 
-	fn cancel(&mut self) {
+	fn cancel(mut self) {
 		if let Some(_) = self.un_commited.take() {
 			// just drop it, that's literally what it's made for
 		} else {
