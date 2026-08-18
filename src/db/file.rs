@@ -13,10 +13,10 @@ use tracing::log::warn;
 use crate::dcm::gen_filepath;
 use crate::tools::Error::{DicomError, FileIOError};
 
-struct Md5Proxy<'a,R> where R: Sized
+pub(crate) struct Md5Proxy<'a,R> where R: Sized
 {
-	context:&'a mut md5::Context,
-	inner:R,
+	pub(crate) context:&'a mut md5::Context,
+	pub(crate) inner:R,
 }
 
 impl<'a,T> Read for Md5Proxy<'a, T> where T: Read + Sized
