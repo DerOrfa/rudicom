@@ -48,16 +48,16 @@ impl Drop for FileState {
 		}
 	}
 }
-fn prepare_content<'a>(
+pub(crate) fn prepare_content<'a>(
 	obj:&DefaultDicomObject,
 	add_meta:impl IntoIterator<Item=(&'a str, db_types::Value)>,
 	tags:&'a HashMap<String, Vec<AttributeSelector>>
-) -> impl SurrealValue
+) -> BTreeMap<String, db_types::Value>
 {
 	dcm::extract(&obj, &tags).into_iter()
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
-		.collect::<BTreeMap<_, _>>()
+		.collect()
 }
 
 async fn insert<'a,C>(
