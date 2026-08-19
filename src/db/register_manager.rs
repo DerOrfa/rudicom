@@ -7,12 +7,25 @@ use dicom::object::DefaultDicomObject;
 use std::collections::{BTreeMap, HashMap, LinkedList};
 use std::sync::Arc;
 use std::time::Duration;
+use itertools::Itertools;
 use surrealdb::types as db_types;
 use surrealdb::types::SurrealValue;
 use tokio::spawn;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Mutex, oneshot};
 
+
+fn btree_diff(a:&BTreeMap<String,db_types::Value>, mut b:BTreeMap<String,db_types::Value>) -> Vec<String> {
+	let mut diff = vec![];
+	for (k, v) in a {
+		if b.remove(k).as_ref() != Some(v) { // remove from b, so that all that remains in b is
+			diff.push(k.to_owned());
+		}
+	}
+	// add all what's left in b
+	diff.append(&mut b.into_keys().collect());
+	diff
+}
 #[derive(Debug)]
 struct QEntry {
 	tx: Sender<()>,
@@ -45,7 +58,7 @@ impl RegisterManager {
 		let study_id = RecordId::from_study(study_uid.as_ref());
 		let series_elements = db::register::prepare_content(
 			&obj,
-			vec![("study", study_id.0.into_value())],
+			[("study", study_id.0.into_value())],
 			&crate::dcm::SERIES_TAGS
 		);
 
@@ -67,9 +80,12 @@ impl RegisterManager {
 		});
 
 		// detect conflict and reject object if necessary
-		if queue.series_elements != series_elements{
-			todo!();
-			return Err(FieldConflict { fields: "".to_string(), id: series_id })
+		let diff = btree_diff(&queue.series_elements, series_elements);
+		if !diff.is_empty() {
+			return Err(FieldConflict{
+				fields: diff.into_iter().map(|d|format!("{}",d)).join(":"),
+				id: series_id
+			})
 		}
 
 		// insert
