@@ -1,54 +1,37 @@
 use crate::db::RecordId;
-use crate::tools::Error::{DicomError, FieldConflict};
-use crate::tools::{Context, extract_from_dicom};
+use crate::tools::Error::FieldConflict;
+use crate::tools::extract_from_dicom;
 use crate::{db, tools};
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
-use futures::FutureExt;
-use futures::future::BoxFuture;
-use std::collections::{BTreeMap, LinkedList};
+use std::collections::{BTreeMap, HashMap, LinkedList};
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::types as db_types;
 use surrealdb::types::SurrealValue;
+use tokio::spawn;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Mutex, oneshot};
-use tokio::time::sleep;
 
+#[derive(Debug)]
 struct QEntry {
 	tx: Sender<()>,
-	obj: DefaultDicomObject
+	obj: DefaultDicomObject,
 }
 
 /// A list of instances of the same series to be commited "in bulk"
 ///
-/// Keeps a series signature to detect insertion conflicts early as well as a timer to
-/// automatically trigger commit if not done explicitly by the manager
+/// Keeps a series signature to detect insertion conflicts early
+#[derive(Clone,Debug,Default)]
 struct Queue
 {
 	objects: Arc<Mutex<LinkedList<QEntry>>>,
 	series_elements:BTreeMap<String,db_types::Value>,
-	timer:BoxFuture<'static,()>
 }
 
-async fn commit(objs: Arc<Mutex<LinkedList<QEntry>>>){
-	todo!()
-}
-impl Queue
-{
-	fn new(obj:&DefaultDicomObject, series_elements:&BTreeMap<String,db_types::Value>) -> Queue {
-		// trigger my own commit unless I'm commited before
-		let objects:Arc<Mutex<LinkedList<QEntry>>> = Default::default();
-		let objects_shared = objects.clone();
-		let timer = async move { // force commit after 200ms
-			sleep(Duration::from_millis(200)).await;
-			commit(objects_shared).await
-		}.boxed();
-		Queue{objects,timer,series_elements:series_elements.clone()}
-	}
-}
+#[derive(Debug,Clone)]
 struct RegisterManager {
-	queues:BTreeMap<String, Queue>,
+	queues:Arc<Mutex<HashMap<String, Queue>>>,
 }
 
 impl RegisterManager {
@@ -70,9 +53,18 @@ impl RegisterManager {
 		let series_uid = extract_from_dicom(&obj, tags::SERIES_INSTANCE_UID)?.to_string();
 		let series_id = RecordId::from_series(series_uid.as_ref());
 
-		// get or make a new "bulk"
-		let queue = self.queues.entry(series_uid.clone())
-			.or_insert_with(||Queue::new(&obj,&series_elements));
+		// get or make a new queue
+		let mut queues = self.queues.lock().await;
+		let queue = queues.entry(series_uid.clone()).or_insert_with(|| {
+			// it's a new queue, make a timeout commit task for it
+			let series_uid_shared = series_uid.clone();
+			let self_shared = self.clone();
+			spawn(async move {
+				tokio::time::sleep(Duration::from_millis(200)).await;
+				self_shared.commit(series_uid_shared).await;
+			});
+			Queue::default()
+		});
 
 		// detect conflict and reject object if necessary
 		if queue.series_elements != series_elements{
@@ -85,18 +77,22 @@ impl RegisterManager {
 		objects.push_back(QEntry{tx,obj});
 
 		// if bulk is big enough, trigger commit
+		let self_shared = self.clone();
 		if objects.len() >= crate::config::get().limits.max_files as usize{
-			drop(objects); // release mutex so commit below can have it
-			let objects=self.queues.remove(&series_uid).unwrap().objects;
-			// queue-entry for series/bulk will be dropped here and with it the timer
-			// so commit won't be triggered from it running out
-			tokio::task::spawn(commit(objects));
+			spawn(async move {self_shared.commit(series_uid).await});
 		};
+
 		Ok(rx)
 	}
+	pub async fn commit(&self,series_uid:String){
+		let objects = self.queues.lock().await.remove(&series_uid).unwrap().objects;
+		todo!()
+	}
 	pub async fn flush(self) {
-		for (_, queue) in self.queues {
-			commit(queue.objects).await
+		// keep the lock short
+		let queues = self.queues.lock().await.drain().collect::<Vec<_>>();
+		for (series_uid, _) in queues {
+			self.commit(series_uid).await
 		}
 	}
 }
