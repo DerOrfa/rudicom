@@ -35,10 +35,10 @@ struct QEntry {
 /// A list of instances of the same series to be commited "in bulk"
 ///
 /// Keeps a series signature to detect insertion conflicts early
-#[derive(Clone,Debug,Default)]
+#[derive(Debug,Default)]
 struct Queue
 {
-	objects: Arc<Mutex<LinkedList<QEntry>>>,
+	objects: LinkedList<QEntry>,
 	series_elements:BTreeMap<String,db_types::Value>,
 }
 
@@ -89,19 +89,20 @@ impl RegisterManager {
 		}
 
 		// insert
-		let mut objects = queue.objects.lock().await;
-		objects.push_back(QEntry{tx,obj});
+		queue.objects.push_back(QEntry{tx,obj});
 
 		// if bulk is big enough, trigger commit
 		let self_shared = self.clone();
-		if objects.len() >= crate::config::get().limits.max_files as usize{
+		if queue.objects.len() >= crate::config::get().limits.max_files as usize{
 			spawn(async move {self_shared.commit(series_uid).await});
 		};
 
 		Ok(rx)
 	}
-	pub async fn commit(&self,series_uid:String){
-		let objects = self.queues.lock().await.remove(&series_uid).unwrap().objects;
+	pub async fn commit(&self,series_uid:String) {
+		if let Some(objects) = self.queues.lock().await.remove(&series_uid).map(|q|q.objects){
+
+		};
 		todo!()
 	}
 	pub async fn flush(self) {
