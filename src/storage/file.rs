@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::io::{ErrorKind, Write};
 use tempfile::NamedTempFile;
 use tracing::error;
@@ -12,8 +12,11 @@ pub trait Committable: Sized + Write + Send {
 	}
 	fn commit(&mut self) -> tools::Result<std::fs::File>;
 	fn cancel(self){} //default impl silently drops the file
+
+	fn get_targetpath(&self) -> &Path;
 }
 
+#[derive(Debug)]
 pub struct CompatibleFile<W> {
 	un_commited: Option<NamedTempFile<W>>,
 	target: PathBuf,
@@ -42,6 +45,8 @@ impl Committable for CompatibleFile<std::fs::File> {
 			error!("Cancelling already committed file")
 		}
 	}
+
+	fn get_targetpath(&self) -> &Path { self.target.as_path() }
 }
 
 impl<W> Write for CompatibleFile<W> where W:Write {

@@ -1,6 +1,6 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, LinkedList};
 use std::sync::Arc;
-use crate::db::{if_retry, Entry, FileInfo, RecordId, RegisterResult, Session};
+use crate::db::{if_retry, Entry, FileInfo, RecordId, RegisterResult, Session, register_manager};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::{extract_from_dicom, Error};
 use crate::{dcm, tools};
@@ -12,7 +12,7 @@ use surrealdb::method::Transaction;
 use surrealdb::{types as db_types, Connection};
 use surrealdb::engine::any::Any;
 use surrealdb::types::{SurrealValue, ToSql};
-use tracing::{debug};
+use tracing::{debug, error};
 use crate::tools::Error::{DataConflict, FieldConflict};
 
 #[derive(Default,Debug,Clone,SurrealValue)]
@@ -48,13 +48,26 @@ impl Drop for FileState {
 		}
 	}
 }
+
+fn extract_record_ids(obj: &DefaultDicomObject) -> tools::Result<(RecordId, RecordId, RecordId)>
+{
+	let study_uid = extract_from_dicom(obj, tags::STUDY_INSTANCE_UID)?;
+	let series_uid = extract_from_dicom(obj, tags::SERIES_INSTANCE_UID)?;
+	let instance_uid = extract_from_dicom(obj, tags::SOP_INSTANCE_UID)?;
+
+	Ok((
+		RecordId::from_instance(instance_uid.as_ref()),
+		RecordId::from_series(series_uid.as_ref()),
+		RecordId::from_study(study_uid.as_ref()),
+	))
+}
 pub(crate) fn prepare_content<'a>(
 	obj:&DefaultDicomObject,
 	add_meta:impl IntoIterator<Item=(&'a str, db_types::Value)>,
 	tags:&'a HashMap<String, Vec<AttributeSelector>>
 ) -> BTreeMap<String, db_types::Value>
 {
-	dcm::extract(&obj, &tags).into_iter()
+	dcm::extract(obj, &tags).into_iter()
 		.chain(add_meta)
 		.map(|(k,v)| (k.to_string(), v))
 		.collect()
@@ -85,6 +98,55 @@ async fn insert<'a,C>(
 	}
 }
 
+/// Runs insert on all images and then an upsert on the series and study entry.
+///
+/// The study and series data a generated from the first image.
+/// The user must guarantee that all images would generate the same data.
+///
+/// Early fails will send the error back to their respective receivers and drop the image
+/// (and thus its file if uncommited).
+///
+/// The transaction is not commited here.
+///
+/// returns all QEntries whose insert succeeded (aka returned Ok(true))
+async fn bulk_insert<'a,C>(
+	images:impl IntoIterator<Item=register_manager::QEntry>,
+	transaction: &Transaction<C>
+) -> tools::Result<impl IntoIterator<Item=register_manager::QEntry>> where C:Connection
+{
+	let mut results:LinkedList<_> = Default::default();
+	let mut images = images.into_iter().peekable();
+	if let Some(first) = images.peek().map(|q|q.image.as_ref()).cloned() {
+		let (_, series_id, study_id) = extract_record_ids(&first)?;
+		// go through all instances and insert them
+		for entry in images {
+			let instance_id = RecordId::from_instance(extract_from_dicom(entry.image.as_ref(), tags::SOP_INSTANCE_UID)?.as_ref());
+
+			let add_meta = vec![
+				("series",series_id.clone().0.into_value()),
+				("file", entry.image.get_fileinfo().try_into()?),
+			];
+
+			match insert(entry.image.as_ref(), &instance_id, add_meta, &INSTANCE_TAGS, &transaction).await {
+				// keep those that succeeded (not including already existing entries)
+				Ok(true) =>  results.push_back(entry),
+				// everything else can already be dropped, just let the receiver know
+				r => if let Err(e) = entry.tx.send(r) { // log error if that fails
+					error!("failed to let receiver know about failed insert ({})",
+					e.map(|_|"already exists".to_string()).unwrap_or_else(|e|e.to_string()));
+				}
+			}
+		}
+
+		// if at least one was inserted, do study and series as well
+		if !results.is_empty() {
+			upsert(&first, &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await?;
+			upsert(&first, &study_id, vec![], &STUDY_TAGS, &transaction).await?;
+		}
+	}
+	Ok(results)
+}
+
 async fn upsert<'a,C>(
 	obj:&DefaultDicomObject,
 	record_id: &RecordId,
@@ -94,6 +156,14 @@ async fn upsert<'a,C>(
 ) -> tools::Result<bool> where C:Connection
 {
 	let meta= prepare_content(obj, add_meta, tags);
+	upsert_meta(meta,record_id,transaction).await
+}
+async fn upsert_meta<'a,C>(
+	meta:BTreeMap<String,db_types::Value>,
+	record_id: &RecordId,
+	transaction: &Transaction<C>
+) -> tools::Result<bool> where C:Connection
+{
 	let q = transaction.query("UPSERT ONLY $rec MERGE $content RETURN diff")
 		.bind(("content",meta)).bind(("rec",record_id.0.clone()));
 	let diff  = q.await?.take::<Vec<Diff>>(0)?.into_iter()
@@ -184,13 +254,7 @@ async fn _register_instance<'a,C>(
 	transaction: &Transaction<C>
 ) -> tools::Result<RegisterResult> where C:Connection
 {
-	let study_uid = extract_from_dicom(&*obj, tags::STUDY_INSTANCE_UID)?;
-	let series_uid = extract_from_dicom(&*obj, tags::SERIES_INSTANCE_UID)?;
-	let instance_uid = extract_from_dicom(&*obj, tags::SOP_INSTANCE_UID)?;
-
-	let study_id = RecordId::from_study(study_uid.as_ref());
-	let series_id= RecordId::from_series(series_uid.as_ref());
-	let instance_id = RecordId::from_instance(instance_uid.as_ref());
+	let (instance_id, series_id, study_id) = extract_record_ids(obj.as_ref())?;
 	let mut add_meta = vec![("series",series_id.0.to_owned().into_value())];
 
 	match fileinfo{
@@ -199,7 +263,7 @@ async fn _register_instance<'a,C>(
 		}
 		_ =>{}
 	};
-	debug!("registering instance {}",instance_uid);
+	debug!("registering instance {}",instance_id.to_string());
 
 	if insert(&*obj, &instance_id, add_meta, &INSTANCE_TAGS, &transaction	).await?
 	{ // normal insert, didn't exist before. So make sure its series/study exists (this may also update non-existing entries)
