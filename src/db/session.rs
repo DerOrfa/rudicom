@@ -175,7 +175,7 @@ impl<C> Drop for LocalSession<C> where C:Connection {
 	}
 }
 
-/// Same as `LocalSessionStream` but can be shared across threads.
+/// Same as `LocalSession` but can be shared across threads.
 ///
 /// The internal pool will be shared as well.
 pub type SharedSession<C>=Arc<Mutex<LocalSession<C>>>;

@@ -76,7 +76,7 @@ pub async fn lookup_uid<S>(table:S, uid:String) -> Result<Option<Entry>> where d
 		.map(Entry::try_from).transpose().context(ctx)
 }
 
-/// returns [me,parent,parents_parent]
+/// returns \[me,parent,parents_parent\]
 pub async fn find_down_tree(id:&RecordId) -> Result<Vec<RecordId>>
 {
 	let query_context = format!("looking for parents of {id}");
