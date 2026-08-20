@@ -1,7 +1,7 @@
 use crate::db::RecordId;
 use crate::tools::Error::FieldConflict;
 use crate::tools::extract_from_dicom;
-use crate::{db, tools};
+use crate::{db, storage, tools};
 use dicom::dictionary_std::tags;
 use dicom::object::DefaultDicomObject;
 use std::collections::{BTreeMap, HashMap, LinkedList};
@@ -27,9 +27,9 @@ fn btree_diff(a:&BTreeMap<String,db_types::Value>, mut b:BTreeMap<String,db_type
 	diff
 }
 #[derive(Debug)]
-struct QEntry {
-	tx: Sender<()>,
-	obj: DefaultDicomObject,
+pub struct QEntry {
+	pub tx: Sender<tools::Result<bool>>,
+	pub image: crate::storage::Image,
 }
 
 /// A list of instances of the same series to be commited "in bulk"
@@ -48,23 +48,22 @@ struct RegisterManager {
 }
 
 impl RegisterManager {
-	pub async fn register(&mut self,obj:DefaultDicomObject) -> tools::Result<oneshot::Receiver<()>>
+	pub async fn register(&mut self,image:storage::Image) -> tools::Result<oneshot::Receiver<tools::Result<bool>>>
 	{
 		// create oneshot channel to notify caller about result of registry
 		let (tx, rx) = oneshot::channel();
 
 		// determine series signature so we can detect conflicts early
-		let study_uid = extract_from_dicom(&obj, tags::STUDY_INSTANCE_UID)?;
+		let study_uid = extract_from_dicom(image.as_ref(), tags::STUDY_INSTANCE_UID)?;
 		let study_id = RecordId::from_study(study_uid.as_ref());
 		let series_elements = db::register::prepare_content(
-			&obj,
+			image.as_ref(),
 			[("study", study_id.0.into_value())],
 			&crate::dcm::SERIES_TAGS
 		);
 
 		// determine series to group objects so we can insert them in bulk
-		let series_uid = extract_from_dicom(&obj, tags::SERIES_INSTANCE_UID)?.to_string();
-		let series_id = RecordId::from_series(series_uid.as_ref());
+		let series_uid = extract_from_dicom(image.as_ref(), tags::SERIES_INSTANCE_UID)?.to_string();
 
 		// get or make a new queue
 		let mut queues = self.queues.lock().await;
@@ -84,12 +83,12 @@ impl RegisterManager {
 		if !diff.is_empty() {
 			return Err(FieldConflict{
 				fields: diff.into_iter().map(|d|format!("{}",d)).join(":"),
-				id: series_id
+				id: RecordId::from_series(series_uid.as_ref())
 			})
 		}
 
 		// insert
-		queue.objects.push_back(QEntry{tx,obj});
+		queue.objects.push_back(QEntry{tx, image });
 
 		// if bulk is big enough, trigger commit
 		let self_shared = self.clone();

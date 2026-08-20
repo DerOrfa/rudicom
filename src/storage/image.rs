@@ -11,7 +11,8 @@ use tokio::task::spawn_blocking;
 use tracing::warn;
 use crate::db::FileInfo;
 
-enum Image<C> where C: Committable,
+#[derive(Debug)]
+pub enum Image<C> where C: Committable,
 {
 	/// An object ready to be created as a file
 	Create{
@@ -22,7 +23,7 @@ enum Image<C> where C: Committable,
 		path:PathBuf,
 		owned:bool,
 		size:u64,
-		checksum:String,
+		checksum:Digest,
 		obj:DefaultDicomObject
 	},
 	/// A file has been created, not yet commited
@@ -30,7 +31,7 @@ enum Image<C> where C: Committable,
 	Created{
 		committable:C,
 		size:u64,
-		checksum:String,
+		checksum:Digest,
 	},
 }
 
@@ -54,7 +55,7 @@ impl<C> Image<C> where C:Committable + 'static {
 		let size = std::fs::metadata(&path)?.len();
 		Ok(Self::Created{
 			committable,
-			checksum:format!("{:x}", checksum.finalize()),
+			checksum:checksum.finalize(),
 			size
 		})
 	}
@@ -76,7 +77,7 @@ impl<C> Image<C> where C:Committable + 'static {
 		Ok(Image::Existing {
 			path:path.to_path_buf(),
 			owned, size,
-			checksum: format!("{:x}", md5_context.finalize()),
+			checksum: md5_context.finalize(),
 			obj: obj.map_err(|e|DicomError(e.into())).context(reader_ctx)?,
 		})
 	}
@@ -85,11 +86,12 @@ impl<C> Image<C> where C:Committable + 'static {
 		let image = Self::new_from_existing(info.get_path(), info.owned).await?;
 		if let Image::Existing { path, owned, size, checksum, obj } = &image
 		{
+			let checksum = format!("{:x}", checksum);
 			if *size != info.size {
 				warn!("Image size mismatch: filesize: {} != image size: {}", info.size, size);
 			}
 			if checksum != info.get_md5(){
-				return Err(tools::Error::ChecksumErr { checksum:checksum.clone(), file: path.to_string_lossy().to_string() })
+				return Err(tools::Error::ChecksumErr { checksum, file: path.to_string_lossy().to_string() })
 			}
 		} else { unreachable!(); }
 		Ok(image)
@@ -98,6 +100,15 @@ impl<C> Image<C> where C:Committable + 'static {
 		match self {
 			Image::Existing { owned , .. } => *owned,
 			Image::Create { .. } | Image::Created { .. } => true,
+		}
+	}
+	pub fn get_fileinfo(&self) -> FileInfo{
+		match self {
+			Image::Create { .. } => panic!("File was not created yet"),
+			Image::Existing { path, owned, size, checksum, .. }
+				=> FileInfo::new(path,checksum.clone(),*owned,*size),
+			Image::Created { committable, size, checksum }
+				=> FileInfo::new(committable.get_targetpath(),checksum.clone(),true,*size),
 		}
 	}
 }
