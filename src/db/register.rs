@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, LinkedList};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use crate::db::{if_retry, Entry, FileInfo, RecordId, RegisterResult, Session, register_manager};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
@@ -103,35 +103,35 @@ async fn insert<'a,C>(
 /// The study and series data a generated from the first image.
 /// The user must guarantee that all images would generate the same data.
 ///
-/// Early fails will send the error back to their respective receivers and drop the image
-/// (and thus its file if uncommited).
+/// Early fails will send the error back to their respective receivers and the images are removed
+/// from the list (and thus the file if uncommited).
 ///
-/// The transaction is not commited here.
-///
-/// returns all QEntries whose insert succeeded (aka returned Ok(true))
-async fn bulk_insert<'a,C>(
-	images:impl IntoIterator<Item=register_manager::QEntry>,
-	transaction: &Transaction<C>
-) -> tools::Result<impl IntoIterator<Item=register_manager::QEntry>> where C:Connection
+/// A single transaction is started from `session` and either commited (returns Ok), or canceled (returns Err).
+/// A failed transaction does not remove images from the list, they can used on the retry.
+pub(crate) async fn bulk_insert<'a,S,C>(
+	images:&mut Vec<register_manager::QEntry>,
+	session: &mut S
+) -> tools::Result<()> where S:Session<C>, C:Connection
 {
-	let mut results:LinkedList<_> = Default::default();
-	let mut images = images.into_iter().peekable();
-	if let Some(first) = images.peek().map(|q|q.image.as_ref()).cloned() {
-		let (_, series_id, study_id) = extract_record_ids(&first)?;
+	let mut retry = 0;
+	while let Some(first) = images.first() {
+		let (_, series_id, study_id) = extract_record_ids(first.image.as_ref())?;
 		// go through all instances and insert them
-		for entry in images {
-			let instance_id = RecordId::from_instance(extract_from_dicom(entry.image.as_ref(), tags::SOP_INSTANCE_UID)?.as_ref());
+		let transaction = session.begin().await?;
+		let mut idx = 0;
+		while idx < images.len() {
+			let instance_id = RecordId::from_instance(extract_from_dicom(images[idx].image.as_ref(), tags::SOP_INSTANCE_UID)?.as_ref());
 
 			let add_meta = vec![
 				("series",series_id.clone().0.into_value()),
-				("file", entry.image.get_fileinfo().try_into()?),
+				("file", images[idx].image.get_fileinfo().try_into()?),
 			];
 
-			match insert(entry.image.as_ref(), &instance_id, add_meta, &INSTANCE_TAGS, &transaction).await {
+			match insert(images[idx].image.as_ref(), &instance_id, add_meta, &INSTANCE_TAGS, &transaction).await {
 				// keep those that succeeded (not including already existing entries)
-				Ok(true) =>  results.push_back(entry),
+				Ok(true) =>  idx+=1,
 				// everything else can already be dropped, just let the receiver know
-				r => if let Err(e) = entry.tx.send(r) { // log error if that fails
+				r => if let Err(e) = images.remove(idx).tx.send(r) { // log error if that fails
 					error!("failed to let receiver know about failed insert ({})",
 					e.map(|_|"already exists".to_string()).unwrap_or_else(|e|e.to_string()));
 				}
@@ -139,12 +139,21 @@ async fn bulk_insert<'a,C>(
 		}
 
 		// if at least one was inserted, do study and series as well
-		if !results.is_empty() {
-			upsert(&first, &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await?;
-			upsert(&first, &study_id, vec![], &STUDY_TAGS, &transaction).await?;
+		if !images.is_empty() {
+			upsert(images[0].image.as_ref(), &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await?;
+			upsert(images[0].image.as_ref(), &study_id, vec![], &STUDY_TAGS, &transaction).await?;
 		}
+		// do commit and possibly try again if error was just write conflict
+		let result = match transaction.commit().await {
+			Err(e) => if let Ok(true) = if_retry(&e, &mut retry).await {// retry maybe
+				retry += 1;
+				continue
+			} else { Err(e) },
+			result => result
+		};
+		return result.map_err(|e|e.into())
 	}
-	Ok(results)
+	Ok(())
 }
 
 async fn upsert<'a,C>(

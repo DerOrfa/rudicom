@@ -1,12 +1,11 @@
 use crate::dcm::gen_filepath;
-use crate::storage::file::{Committable, CompatibleFile};
+use crate::storage::file::{Committable, StandardFile};
 use crate::tools;
 use crate::tools::Error::DicomError;
 use crate::tools::{Context, complete_filepath};
 use dicom::object::{DefaultDicomObject, from_reader};
 use md5::Digest;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tokio::task::spawn_blocking;
 use tracing::warn;
 use crate::db::FileInfo;
@@ -33,35 +32,16 @@ pub enum Image<C> where C: Committable,
 		size:u64,
 		checksum:Digest,
 	},
+	Committed{
+		path:PathBuf
+	}
 }
 
 impl<C> Image<C> where C:Committable + 'static {
 	/// writes a new file taking an object and returning that object plus a file info
-	pub async fn new_from_obj(obj:Arc<DefaultDicomObject>) -> tools::Result<Self> {
-		let path=PathBuf::from(gen_filepath(&obj)?);
-		let path = complete_filepath(&path);
-		let p=path.parent().unwrap();
-		tokio::fs::create_dir_all(p).await
-			.context(format!("Failed creating storage path {}",p.display()))?;
-
-		let path_clone=path.clone();
-		let (committable,checksum) = spawn_blocking(move || {
-			let inner = C::create(path_clone)?;
-			let mut checksum = md5::Context::new();
-			let mut writer = crate::db::file::Md5Proxy {context:&mut checksum,inner};
-			obj.write_all(&mut writer).map_err(|e|DicomError(e.into()))?;
-			Ok::<_, tools::Error>((writer.inner,checksum))
-		}).await??;
-		let size = std::fs::metadata(&path)?.len();
-		Ok(Self::Created{
-			committable,
-			checksum:checksum.finalize(),
-			size
-		})
-	}
+	pub async fn new_from_obj(obj:DefaultDicomObject) -> Self {Self::Create {obj}}
 	/// creates fileinfo struct and reads dicom object directly from path
-	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> tools::Result<Self>
-	{
+	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> tools::Result<Self> {
 		let path = path.as_ref();
 		let size = tokio::fs::metadata(path).await.context(format!("getting metadata for {}",path.display()))?.len();
 		let reader_ctx = format!("reading {}", path.display());
@@ -81,8 +61,7 @@ impl<C> Image<C> where C:Committable + 'static {
 			obj: obj.map_err(|e|DicomError(e.into())).context(reader_ctx)?,
 		})
 	}
-	async fn load(info:&FileInfo) -> tools::Result<Self>
-	{
+	pub async fn new_from_fileinfo(info:&FileInfo) -> tools::Result<Self> {
 		let image = Self::new_from_existing(info.get_path(), info.owned).await?;
 		if let Image::Existing { path, owned, size, checksum, obj } = &image
 		{
@@ -96,24 +75,65 @@ impl<C> Image<C> where C:Committable + 'static {
 		} else { unreachable!(); }
 		Ok(image)
 	}
-	fn owned(&self) -> bool {
+	pub async fn into_saved(self) -> tools::Result<Self> {
+		match self {
+			// file needs to be created, write into a committable
+			Image::Create { obj } => {
+				let path=PathBuf::from(gen_filepath(&obj)?);
+				let path = complete_filepath(&path);
+				let p=path.parent().unwrap();
+				tokio::fs::create_dir_all(p).await
+					.context(format!("Failed creating storage path {}",p.display()))?;
+
+				let path_clone=path.clone();
+				let (committable,checksum) = spawn_blocking(move || {
+					let inner = C::create(path_clone)?;
+					let mut checksum = md5::Context::new();
+					let mut writer = crate::db::file::Md5Proxy {context:&mut checksum,inner};
+					obj.write_all(&mut writer).map_err(|e|DicomError(e.into()))?;
+					Ok::<_, tools::Error>((writer.inner,checksum))
+				}).await??;
+				let size = std::fs::metadata(&path)?.len();
+				Ok(Self::Created{
+					committable,
+					checksum:checksum.finalize(),
+					size
+				})
+			},
+			// file already exists, nothing to do
+			Image::Existing { .. } | Image::Created {..} | Image::Committed{..} => Ok(self)
+		}
+	}
+	pub fn owned(&self) -> bool {
 		match self {
 			Image::Existing { owned , .. } => *owned,
-			Image::Create { .. } | Image::Created { .. } => true,
+			Image::Create { .. } | Image::Created { .. } | Image::Committed {..} => true,
 		}
 	}
 	pub fn get_fileinfo(&self) -> FileInfo{
 		match self {
 			Image::Create { .. } => panic!("File was not created yet"),
+			Image::Committed { .. } => panic!("File was already committed"),
 			Image::Existing { path, owned, size, checksum, .. }
 				=> FileInfo::new(path,checksum.clone(),*owned,*size),
 			Image::Created { committable, size, checksum }
 				=> FileInfo::new(committable.get_targetpath(),checksum.clone(),true,*size),
 		}
 	}
+	pub fn commit(&mut self) {
+		let path = self.get_fileinfo().get_path();
+		match std::mem::replace(self, Image::Committed { path }) {
+			Image::Create { .. } => panic!("Trying to commit not yet saved image."),
+			Image::Existing { .. } => (), // file exists already, nothing to be done
+			Image::Committed {..} => (), // file was already committed, nothing to be done
+			Image::Created { mut committable, size, checksum } => {
+				committable.commit()
+			}
+		}
+	}
 }
 
-impl From<DefaultDicomObject> for Image<CompatibleFile<std::fs::File>> {
+impl From<DefaultDicomObject> for Image<StandardFile> {
 	fn from(obj:DefaultDicomObject) -> Self {Self::Create {obj}}
 }
 
@@ -122,7 +142,8 @@ impl<C> AsRef<DefaultDicomObject> for Image<C> where C:Committable {
 		match self {
 			Image::Create {obj, .. }
 			| Image::Existing {obj, ..} => obj,
-			Image::Created {..} => panic!("Invalid object reference on created image file")
+			Image::Created {..} => panic!("Invalid object reference on created image file"),
+			Image::Committed {..} => panic!("Invalid object reference on committed image file"),
 		}
 	}
 }
