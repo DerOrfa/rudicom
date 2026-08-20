@@ -1,66 +1,63 @@
 use std::path::{Path, PathBuf};
 use std::io::{ErrorKind, Write};
-use tempfile::NamedTempFile;
-use tracing::error;
-use crate::tools;
-use crate::tools::Context;
+use tracing::warn;
 
 pub trait Committable: Sized + Write + Send {
+	/// Create the file, trying to create an existing file should fail
 	fn create(filename:PathBuf) -> std::io::Result<Self>;
 	fn create_async(filename:PathBuf) -> tokio::task::JoinHandle<std::io::Result<Self>> where Self: Sized + Send + 'static {
 		tokio::task::spawn_blocking(move || Self::create(filename))
 	}
-	fn commit(&mut self) -> tools::Result<std::fs::File>;
-	fn cancel(self){} //default impl silently drops the file
 
+	/// commiting to the file
+	/// This must be non-failable
+	fn commit(&mut self);
+	/// This may fail
+	fn cancel(&mut self) -> std::io::Result<()>;
+
+	/// Get intended path for the commited file
 	fn get_targetpath(&self) -> &Path;
 }
 
 #[derive(Debug)]
-pub struct CompatibleFile<W> {
-	un_commited: Option<NamedTempFile<W>>,
-	target: PathBuf,
+pub struct StandardFile {
+	filepath: PathBuf,
+	file: std::fs::File,
+	committed: bool,
 }
 
-impl Committable for CompatibleFile<std::fs::File> {
-	fn create(target:PathBuf) -> std::io::Result<Self> {
-		NamedTempFile::with_prefix_in("rudicom_tmp_",&crate::config::get().paths.storage_path)
-			.map(|t|Self{un_commited: Some(t),target})
+impl Committable for StandardFile {
+	fn create(filepath:PathBuf) -> std::io::Result<Self> {
+		std::fs::File::create_new(&filepath)
+			.map(|file|Self{filepath,file,committed:false})
 	}
 
-	fn commit(&mut self) -> tools::Result<std::fs::File> {
-		if let Some(mut tmp) = self.un_commited.take() {
-			tmp.flush()?;
-			tmp.persist(self.target.as_path()).map_err(|p|p.error)
-				.context(format!("Failed to commit {}", self.target.display()))
-		} else {
-			Err(tools::Error::FileAlreadyCommited {path: self.target.clone()})
+	fn commit(&mut self) {self.committed = true;}
+
+	fn cancel(&mut self) -> std::io::Result<()> {
+		if self.committed {
+			warn!("Cancelling already committed file")
+		} else if let Err(e) = std::fs::remove_file(&self.filepath) {
+			match e.kind() {
+				ErrorKind::NotFound => {} // that's fine, weird though
+				_ => return Err(e)
+			}
 		}
+		Ok(())
 	}
 
-	fn cancel(mut self) {
-		if let Some(_) = self.un_commited.take() {
-			// just drop it, that's literally what it's made for
-		} else {
-			error!("Cancelling already committed file")
-		}
-	}
-
-	fn get_targetpath(&self) -> &Path { self.target.as_path() }
+	fn get_targetpath(&self) -> &Path { self.filepath.as_path() }
 }
 
-impl<W> Write for CompatibleFile<W> where W:Write {
-	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-		match &mut self.un_commited {
-			Some(f) => f.write(buf),
-			None => Err(std::io::Error::new(ErrorKind::AlreadyExists,"File already commited")),
+impl Drop for StandardFile {
+	fn drop(&mut self) {
+		if !self.committed && let Err(e) = self.cancel(){
+			warn!("Cancelling file {:?} failed ({e})", self.filepath.display());
 		}
 	}
+}
 
-	fn flush(&mut self) -> std::io::Result<()> {
-		match &mut self.un_commited {
-			Some(f) => f.flush(),
-			None => Err(std::io::Error::new(ErrorKind::AlreadyExists,"File already commited")),
-		}
-	}
+impl Write for StandardFile {
+	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {self.file.write(buf)}
+	fn flush(&mut self) -> std::io::Result<()> {self.file.flush()}
 }
