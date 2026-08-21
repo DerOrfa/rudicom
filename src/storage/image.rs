@@ -11,7 +11,7 @@ use tracing::warn;
 use crate::db::FileInfo;
 
 #[derive(Debug)]
-pub enum Image<C> where C: Committable,
+pub enum Image<C> where C:Committable,
 {
 	/// An object ready to be created as a file
 	Create{
@@ -24,6 +24,21 @@ pub enum Image<C> where C: Committable,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
+	},
+	/// An already existing file, but should be moved
+	Move {
+		org_path:PathBuf,
+		path:PathBuf,
+		owned:bool,
+		size:u64,
+		checksum:Digest,
+		obj:DefaultDicomObject
+	},
+	Moved {
+		org_path:PathBuf,
+		committable:C,
+		size:u64,
+		checksum:Digest,
 	},
 	/// A file has been created, not yet commited
 	/// dropping this will cause a rollback (aka file will be removed)
@@ -58,6 +73,15 @@ impl<C> Image<C> where C:Committable + 'static {
 			checksum: md5_context.finalize(),
 			obj: obj.map_err(|e|DicomError(e.into())).context(reader_ctx)?,
 		})
+	}
+	pub async fn move_from_existing<P:AsRef<Path>>(org_path:P, dest_path:P, owned:bool) -> tools::Result<Self>{
+		if let Self::Existing { path, owned, size, checksum, obj } = Self::new_from_existing(org_path, owned).await?{
+			Ok(Self::Move {
+				org_path: path,
+				path: dest_path.as_ref().to_path_buf(),
+				owned, size, checksum, obj,
+			})
+		} else { unreachable!(); }
 	}
 	pub async fn new_from_fileinfo(info:&FileInfo) -> tools::Result<Self> {
 		let image = Self::new_from_existing(info.get_path(), info.owned).await?;
@@ -98,23 +122,37 @@ impl<C> Image<C> where C:Committable + 'static {
 					size
 				})
 			},
+			Image::Move { org_path, path: dest_path, owned, size, checksum, obj } => {
+				if let Err(_)=tokio::fs::hard_link(&org_path,&dest_path).await{
+					tokio::fs::copy(&org_path,&dest_path).await?;
+				}
+				Ok(Self::Moved {
+					org_path,
+					committable: C::from_existing(dest_path)?,
+					size,
+					checksum,
+				})
+			},
 			// file already exists, nothing to do
-			Image::Existing { .. } | Image::Created {..} | Image::Committed{..} => Ok(self)
+			Image::Existing {..} | Image::Created {..} | Image::Committed{..} | Image::Moved {..}
+				=> Ok(self),
 		}
 	}
 	pub fn owned(&self) -> bool {
 		match self {
-			Image::Existing { owned , .. } => *owned,
-			Image::Create { .. } | Image::Created { .. } | Image::Committed {..} => true,
+			Image::Existing { owned , .. } | Image::Move {owned,..} => *owned,
+			Image::Create { .. } | Image::Created { .. } | Image::Committed {..} | Image::Moved {..} => true, // @todo check if owned
 		}
 	}
 	pub fn get_fileinfo(&self) -> FileInfo{
 		match self {
 			Image::Create { .. } => panic!("File was not created yet"),
 			Image::Committed { .. } => panic!("File was already committed"),
-			Image::Existing { path, owned, size, checksum, .. }
+			Image::Existing { path, owned, size, checksum, .. }|
+			Image::Move { path, owned, size, checksum, .. }
 				=> FileInfo::new(path,checksum.clone(),*owned,*size),
-			Image::Created { committable, size, checksum }
+			Image::Created { committable, size, checksum } |
+			Image::Moved {committable, size, checksum, ..}
 				=> FileInfo::new(committable.get_targetpath(),checksum.clone(),true,*size),
 		}
 	}
@@ -122,10 +160,17 @@ impl<C> Image<C> where C:Committable + 'static {
 		let path = self.get_fileinfo().get_path();
 		match std::mem::replace(self, Image::Committed { path }) {
 			Image::Create { .. } => panic!("Trying to commit not yet saved image."),
+			Image::Move { .. } => panic!("Trying to commit not yet moved image."),
 			Image::Existing { .. } => (), // file exists already, nothing to be done
 			Image::Committed {..} => (), // file was already committed, nothing to be done
-			Image::Created { mut committable, size, checksum } => {
+			Image::Created { mut committable, .. } => {
 				committable.commit()
+			},
+			Image::Moved { org_path, mut committable, .. } => {
+				committable.commit();
+				if let Err(e) = std::fs::remove_file(&org_path){
+					warn!("Failed to remove original file {} in a move op ({e})", org_path.display());
+				}
 			}
 		}
 	}
@@ -139,9 +184,11 @@ impl<C> AsRef<DefaultDicomObject> for Image<C> where C:Committable {
 	fn as_ref(&self) -> &DefaultDicomObject {
 		match self {
 			Image::Create {obj, .. }
-			| Image::Existing {obj, ..} => obj,
+			| Image::Existing {obj, ..}
+			| Image::Move {obj, ..} => obj,
 			Image::Created {..} => panic!("Invalid object reference on created image file"),
 			Image::Committed {..} => panic!("Invalid object reference on committed image file"),
+			Image::Moved {..} => panic!("Invalid object reference on moved image file"),
 		}
 	}
 }
