@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use crate::db::{if_retry, Entry, FileInfo, RecordId, RegisterResult, Session, register_manager};
+use crate::db::{if_retry, Entry, FileInfo, RecordId, RegisterResult, Session, register_manager, lookup};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::{extract_from_dicom, Error};
 use crate::{dcm, tools};
@@ -13,6 +13,7 @@ use surrealdb::{types as db_types, Connection};
 use surrealdb::engine::any::Any;
 use surrealdb::types::{SurrealValue, ToSql};
 use tracing::{debug, error};
+use crate::db::RegisterResult::AlreadyStored;
 use crate::tools::Error::{DataConflict, FieldConflict};
 
 #[derive(Default,Debug,Clone,SurrealValue)]
@@ -79,7 +80,7 @@ async fn insert<'a,C>(
 	add_meta:impl IntoIterator<Item=(&'a str,db_types::Value)>,
 	tags:&'a HashMap<String, Vec<AttributeSelector>>,
 	transaction: &Transaction<C>
-) -> tools::Result<bool> where C:Connection
+) -> tools::Result<RegisterResult> where C:Connection
 {
 	let meta= prepare_content(obj, add_meta, tags).into_value();
 	// use UPSERT so we can get a BEFORE to compare it if data existed, the whole transaction will
@@ -91,10 +92,13 @@ async fn insert<'a,C>(
 		.take::<Option<db_types::Value>>(0)?
 		.map(Entry::try_from).transpose()?
 	{
-		if existing == *obj {Ok(false)} // @todo should not compare file as this validly might not be there yet
-		else {Err(DataConflict(existing))}
+		if existing == *obj {
+			Ok(RegisterResult::AlreadyStored(record_id.clone()))
+		} else {
+			Err(DataConflict(existing))
+		}
 	} else {
-		Ok(true)
+		Ok(RegisterResult::Stored(record_id.clone()))
 	}
 }
 
@@ -124,16 +128,36 @@ pub(crate) async fn bulk_insert<'a,S,C>(
 
 			let add_meta = vec![
 				("series",series_id.clone().0.into_value()),
-				("file", images[idx].image.get_fileinfo().try_into()?),
+				("file", images[idx].image.get_fileinfo().expect("Image should have fileinfo").try_into()?),
 			];
 
 			match insert(images[idx].image.as_ref(), &instance_id, add_meta, &INSTANCE_TAGS, &transaction).await {
 				// keep those that succeeded (not including already existing entries)
-				Ok(true) =>  idx+=1,
+				Ok(RegisterResult::Stored(r)) => {
+					images[idx].register_result=Some(RegisterResult::Stored(r));
+					idx+=1
+				},
+				Ok(AlreadyStored(r)) => {
+					let entry = images.remove(idx);
+					let my_md5 = format!("{:x}", entry.image.get_md5().unwrap());
+					let existing_md5 = lookup(&r).await?
+						.expect("existing entry should exist").get_file()?.get_md5().to_string();
+					if let Err(e) = entry.tx.send(
+					if existing_md5 != my_md5 {
+							Err(Error::Md5Conflict {
+								existing_md5:existing_md5.to_string(),
+								existing_id:r.clone(),
+								my_md5:my_md5.to_string(),
+							})
+						} else { Ok(AlreadyStored(r)) }
+					) { // log error if that fails
+						error!("failed to let receiver know about failed insert ({})",
+						e.map(|_|"already exists".to_string()).unwrap_or_else(|e|e.to_string()));
+					};
+				},
 				// everything else can already be dropped, just let the receiver know
-				r => if let Err(e) = images.remove(idx).tx.send(r) { // log error if that fails
-					error!("failed to let receiver know about failed insert ({})",
-					e.map(|_|"already exists".to_string()).unwrap_or_else(|e|e.to_string()));
+				Err(e) => if let Err(e) = images.remove(idx).tx.send(Err(e)) { // log error if that fails
+					error!("failed to let receiver know about failed insert ({})",e.err().unwrap());
 				}
 			}
 		}
@@ -274,7 +298,7 @@ async fn _register_instance<'a,C>(
 	};
 	debug!("registering instance {}",instance_id.to_string());
 
-	if insert(&*obj, &instance_id, add_meta, &INSTANCE_TAGS, &transaction	).await?
+	if matches!(insert(&*obj, &instance_id, add_meta, &INSTANCE_TAGS, &transaction	).await?, RegisterResult::Stored(_))
 	{ // normal insert, didn't exist before. So make sure its series/study exists (this may also update non-existing entries)
 		upsert(&*obj, &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await?;
 		upsert(&*obj, &study_id, vec![], &STUDY_TAGS, &transaction).await?;

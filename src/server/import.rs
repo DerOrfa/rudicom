@@ -29,10 +29,7 @@ async fn import(headers: HeaderMap,Query(config): Query<ImportConfig>,mode:Impor
 async fn import_text(headers: HeaderMap,config: ImportConfig, mode:ImportMode, pattern:String) -> Result<Response, HttpError>
 {
 	let stream= import_glob_as_text(pattern,config,mode).into_http_error(&headers)?
-		.map(|r|match r {
-			Ok(s) => s+"\n",
-			Err(e) => format!("Import task panicked:{e}")
-		});
+		.map(|r|r+"\n");
 	Ok(axum_streams::StreamBodyAs::text(stream).into_response())
 }
 
@@ -40,11 +37,11 @@ async fn import_json(headers: HeaderMap,config:ImportConfig,mode:ImportMode, pat
 {
 
 	let stream=import_glob(pattern,config,mode).into_http_error(&headers)?
-		.map(|r|match r {
-			Ok(s) => serde_json::to_value(s)
-					.unwrap_or_else(|e|json!({"error":"serialisation failed","cause":format!("{e}")})),
-			Err(e) => json!({"task aborted":format!("{e}")})
-		});
+		.map(|r|serde_json::to_value(r)
+					.unwrap_or_else(|e|
+						json!({"error":"serialisation failed","cause":format!("{e}")})
+					)
+		);
 	Ok(axum_streams::StreamBodyAs::json_array(stream).into_response())
 }
 

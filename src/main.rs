@@ -110,10 +110,7 @@ async fn main() -> Result<(),String>
 				//filter doesn't do unpin, so we have to nail it down here
 				let mut stream = Box::pin(stream);
 				while let Some(result) = stream.next().await {
-					match result {
-						Ok(result) => println!("{result}"),
-						Err(e) => eprintln!("{e}")
-					}
+					println!("{result}")
 				}
 				info!("{glob} done..")
 			}

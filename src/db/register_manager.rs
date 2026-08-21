@@ -1,4 +1,4 @@
-use crate::db::{register, RecordId, Session, SharedSession, DB};
+use crate::db::{register, RecordId, Session, SharedSession, DB, RegisterResult};
 use crate::tools::Error::FieldConflict;
 use crate::tools::extract_from_dicom;
 use crate::{db, storage, tools};
@@ -33,8 +33,9 @@ fn btree_diff(a: &BTreeMap<String, db_types::Value>, mut b:BTreeMap<String,db_ty
 /// Consists of the [storage::Image] and a [oneshot::Sender] to notify about the eventual result of the insert
 #[derive(Debug)]
 pub struct QEntry {
-	pub tx: Sender<tools::Result<bool>>,
-	pub image: crate::storage::Image,
+	pub tx: Sender<tools::Result<RegisterResult>>,
+	pub register_result: Option<RegisterResult>,
+	pub image: storage::Image,
 }
 
 /// A list of [QEntry] to be commited "in bulk".
@@ -73,7 +74,7 @@ impl RegisterManager {
 	///
 	/// Returns a [oneshot::Receiver] that can be awaited to get notice of the insertion result.
 	/// Dropping this Receiver will trigger a warning message, but insertion will still be done if possible.
-	pub async fn register(&mut self,image:storage::Image) -> tools::Result<oneshot::Receiver<tools::Result<bool>>>
+	pub async fn register(&mut self,image:storage::Image) -> tools::Result<oneshot::Receiver<tools::Result<RegisterResult>>>
 	{
 		// create oneshot channel to notify caller about result of registry
 		let (tx, rx) = oneshot::channel();
@@ -113,7 +114,7 @@ impl RegisterManager {
 		}
 
 		// insert
-		queue.objects.push_back(QEntry{tx, image });
+		queue.objects.push_back(QEntry{tx, image, register_result: None });
 
 		// if bulk is big enough, trigger commit
 		if queue.objects.len() >= crate::config::get().limits.max_files as usize{
@@ -166,10 +167,11 @@ impl RegisterManager {
 			let mut saver = JoinSet::new();
 			let mut saved_entries = vec![];
 			let save_fn = async move |entry:QEntry| {
-				match entry.image.into_saved().await {
-					Ok(image) => Some(QEntry { tx: entry.tx, image }),
+				let QEntry{ tx, register_result, image } = entry;
+				match image.into_saved().await {
+					Ok(image) => Some(QEntry { tx, image, register_result }),
 					Err(e) => {
-						if let Err(Err(e)) = entry.tx.send(Err(e)){
+						if let Err(Err(e)) = tx.send(Err(e)){
 							error!("failed to let receiver know about failed insert ({e})")
 						};
 						None
@@ -197,10 +199,10 @@ impl RegisterManager {
 			// next commit to db /////////////////////////////////////////////
 			let commited_entries = Self::inner_commit(saved_entries,&mut self.session).await;
 
-			// last, commit the files now and let receivers know /////////////
+			// last, commit the files and let receivers know /////////////
 			commited_entries.into_iter().for_each(|mut entry|{
 				entry.image.commit();
-				if let Err(_) = entry.tx.send(Ok(true)){
+				if let Err(_) = entry.tx.send(Ok(entry.register_result.expect("Missing register result"))) {
 					error!("failed to let receiver know about successful insert")
 				}
 			});

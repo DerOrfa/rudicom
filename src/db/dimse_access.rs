@@ -1,20 +1,20 @@
-use crate::db::{lookup_uid, Entry, LocalSession, Session};
+use crate::db::{Entry, lookup_uid};
 use crate::dcm::{AttributeSelector, INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
-use crate::tools::store::store_ob;
+use crate::tools::store::store_single_ob;
 use crate::{db, tools};
 use dicom::core::VR;
 use dicom::dictionary_std::tags;
+use dicom::object::mem::InMemElement;
 use dicom::object::{FileDicomObject, InMemDicomObject};
+use dimse::RetrieveLevel;
 use dimse::definitions::FailureCode;
 use dimse::identifier::Identifier;
 use dimse::io::ItemResult;
-use dimse::status::{failure, success, Comment, Offending, Status, StatusFailure};
-use dimse::RetrieveLevel;
-use futures::{stream, stream::BoxStream, StreamExt};
+use dimse::status::{Comment, Offending, Status, StatusFailure, failure, success};
+use futures::{StreamExt, stream, stream::BoxStream};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
-use dicom::object::mem::InMemElement;
 use surrealdb::types::ToSql;
 
 #[derive(Clone)]
@@ -33,7 +33,7 @@ impl dimse::io::FileAccess for Accessor {
 	}
 
 	async fn store_file(&mut self, file: FileDicomObject<InMemDicomObject>) -> Status {
-		store_ob(file, &mut LocalSession::create(&db::DB,1)).await
+		store_single_ob(file).await
 			.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))
 			.map(|_| success().into())
 	}
