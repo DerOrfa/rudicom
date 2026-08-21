@@ -5,6 +5,7 @@ use tracing::warn;
 pub trait Committable: Sized + Write + Send {
 	/// Create the file, trying to create an existing file should fail
 	fn create(filename:PathBuf) -> std::io::Result<Self>;
+	fn from_existing(filename:PathBuf) -> std::io::Result<Self>;
 	fn create_async(filename:PathBuf) -> tokio::task::JoinHandle<std::io::Result<Self>> where Self: Sized + Send + 'static {
 		tokio::task::spawn_blocking(move || Self::create(filename))
 	}
@@ -29,6 +30,11 @@ pub struct StandardFile {
 impl Committable for StandardFile {
 	fn create(filepath:PathBuf) -> std::io::Result<Self> {
 		std::fs::File::create_new(&filepath)
+			.map(|file|Self{filepath,file,committed:false})
+	}
+
+	fn from_existing(filepath: PathBuf) -> std::io::Result<Self> {
+		std::fs::File::open(&filepath)
 			.map(|file|Self{filepath,file,committed:false})
 	}
 
