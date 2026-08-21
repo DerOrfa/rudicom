@@ -4,4 +4,4 @@ pub mod async_store;
 mod file;
 pub mod image;
 
-pub type Image<C= StandardFile> = image::Image<C>;
+pub type Image<C = StandardFile> = image::Image<C>;

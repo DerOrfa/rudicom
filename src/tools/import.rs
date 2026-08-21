@@ -1,19 +1,20 @@
-use crate::db::{Entry, RecordId, RegisterResult, DB, Session, SharedSession, FileInfo};
+use crate::db::register_manager::RegisterManager;
+use crate::db::{Entry, RecordId, RegisterResult};
 use crate::tools::Error;
-use futures::{stream, Stream, TryStreamExt};
+use crate::tools::store::is_storage;
+use crate::{storage, tools};
+use futures::{Stream, StreamExt, TryStreamExt, stream};
 use glob::glob;
 use itertools::Itertools;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::Display;
-use dicom::object::DefaultDicomObject;
-use surrealdb::engine::any::Any;
-use crate::tools::store::is_storage;
+use std::io::ErrorKind;
 
 pub enum ImportResult {
-	Registered{filename:String},
-	Existed{filename:String,existing_id:RecordId},
-	DataConflict {filename:String,existed:Entry},
+	Registered { filename: String },
+	Existed { filename: String, existing_id: RecordId },
+	DataConflict { filename:String,existed:Entry},
 	Md5Conflict {filename:String,existing_md5:String,my_md5:String, existing_id:RecordId},
 	Err{filename:String,error:Error},
 	GlobError(glob::GlobError)
@@ -99,57 +100,59 @@ impl Serialize for ImportResult
 	}
 }
 
-async fn import_file_ob<S>(info: FileInfo, obj: DefaultDicomObject, mode: ImportMode, session: &mut S) -> ImportResult where S:Session<Any>
-{
-	let filename = info.get_path().to_string_lossy().to_string();
-	let import =
-		match mode {
-			ImportMode::Import => {crate::tools::store::import_file_ob(info,obj, session).await}
-			ImportMode::Store => {crate::tools::store::store_ob(obj, session).await}
-			ImportMode::Move => {crate::tools::store::move_file_ob(info, obj, session).await}
-		};
-	match import
-	{
-		Ok(RegisterResult::Stored(_)) => ImportResult::Registered{ filename },
-		Ok(RegisterResult::AlreadyStored(existed)) =>
-			ImportResult::Existed {filename,existing_id:existed},
-		Err(Error::Md5Conflict {existing_md5,my_md5, existing_id}) =>  
-			ImportResult::Md5Conflict {filename,existing_md5,my_md5,existing_id},
-		Err(Error::DataConflict(existed)) => 
-			ImportResult::DataConflict { filename, existed },
-		Err(e) => ImportResult::Err{error:e,filename},
-	}
-}
-
-
-pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=crate::tools::Result<ImportResult>>> where T:AsRef<str>
+pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> tools::Result<impl Stream<Item=ImportResult>> where T:AsRef<str>
 {
 	let max_files = crate::config::get().limits.max_files;
 	let mut files= glob(pattern.as_ref())?.filter_map_ok(|p|
 		if p.is_file() {Some(p)} else {None}
 	);
-	let session_pool = SharedSession::<Any>::create(&DB, 1);
+	let manager = RegisterManager::new();
 
 	// if there is not at least one file, it's probably a good idea to return an error
-	if let Some(file)=files.next().transpose()?{
+	if let Some(file)=files.next().transpose()? {
 		let files = [Ok(file)].into_iter().chain(files);
 		let stream = stream::iter(files)
 			.map_err(move |e|e.into())
-			.map_ok(move|p|{
-				let owned = match mode {
-					ImportMode::Import => false,
-					ImportMode::Store => true,
-					ImportMode::Move => is_storage(&p)
-				};
-				FileInfo::new_from_existing(p, owned)
+			.map_ok(move|p|async move {
+				let filename = p.to_string_lossy().to_string();
+				let image = match mode {
+					ImportMode::Import => storage::Image::from_existing(p, false).await,
+					ImportMode::Store => storage::Image::copy_existing(p, true).await,
+					ImportMode::Move => storage::Image::move_existing(&p,is_storage(&p)).await,
+				}?;
+				Ok((filename,image))
 			})
-			.try_buffer_unordered(max_files as usize)
-			.and_then(move|(info,obj)|{
-				let mut session =session_pool.clone();
-				async move {
-					Ok(import_file_ob(info,obj,mode,&mut session).await)
-				}})
-			.try_filter(move |item|{
+			.try_buffer_unordered(max_files as usize) // load the images (parallel)
+			.and_then(move|(path,image)|{
+				let mut shared_manager = manager.clone();
+				async move { // feed the queue
+					shared_manager.register(image).await
+						.map(|r|(path.clone(),r))
+				}
+			})
+			.map(|r|async { // listen for results
+				match r {
+					Ok((filename,r)) =>
+						match r.await.unwrap_or_else(|e|Err(Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e))))
+						{
+							Ok(RegisterResult::Stored(_)) => ImportResult::Registered{ filename },
+							Ok(RegisterResult::AlreadyStored(existed)) =>
+								ImportResult::Existed {filename,existing_id:existed},
+							Err(Error::Md5Conflict {existing_md5,my_md5, existing_id}) =>
+								ImportResult::Md5Conflict {filename,existing_md5,my_md5,existing_id},
+							Err(Error::DataConflict(existed)) =>
+								ImportResult::DataConflict { filename, existed },
+							Err(e) => ImportResult::Err{error:e,filename},
+						}
+					Err(Error::GlobbingError(e)) => ImportResult::Err{
+						filename:e.path().to_string_lossy().to_string(),
+						error:Error::GlobbingError(e),
+					},
+					_ => unreachable!()
+				}
+			})
+			.buffer_unordered(max_files as usize) // load the images (parallel)
+			.filter(move |item|{
 				let ret =	match item.to_owned() {
 					ImportResult::Registered { .. } => config.echo,
 					ImportResult::Existed { .. } => config.echo_existing,
@@ -163,10 +166,10 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate
 	}
 }
 
-pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> crate::tools::Result<impl Stream<Item=crate::tools::Result<String>>> where T:AsRef<str>
+pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> tools::Result<impl Stream<Item=String>> where T:AsRef<str>
 {
 	Ok(import_glob(pattern, config, mode)?
-		.map_ok(|item| {
+		.map(|item| {
 			let register_msg = match item {
 				ImportResult::Registered { filename } => Ok(filename),
 				ImportResult::Existed { filename, existing_id } => {

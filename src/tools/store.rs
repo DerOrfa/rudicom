@@ -1,26 +1,48 @@
-use std::ffi::CString;
-use crate::db::RegisterResult::AlreadyStored;
-use crate::db::{lookup, FileInfo, FileState, RegisterResult, Session};
-use crate::storage::async_store;
-use crate::tools::{Context, Error};
-use crate::{db, tools, config};
+use crate::db::register_manager::RegisterManager;
+use crate::db::RegisterResult;
+use crate::{config, storage, tools};
 use dicom::object::DefaultDicomObject;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use pyo3::prelude::PyModule;
 use pyo3::Python;
-use surrealdb::engine::any::Any;
+use pyo3::prelude::PyModule;
+use std::ffi::CString;
+use std::io::ErrorKind;
+use std::path::Path;
+use tokio::sync::oneshot;
 
 /// check if a path is a subdirectory of the storage path defined in config
-pub fn is_storage<T:AsRef<Path>>(path:T) -> bool
+pub fn is_storage<T: AsRef<Path>>(path: T) -> bool
 {
-	path.as_ref().starts_with(&crate::config::get().paths.storage_path)
+	path.as_ref().starts_with(&config::get().paths.storage_path)
 }
 
-/// Stores a dicom object as a file and registers it as owned (might change data).
+pub async fn single_register(image:storage::Image)	-> tools::Result<RegisterResult>
+{
+	let mut session =RegisterManager::new();
+	let store = session.register(image).await?;
+	session.flush().await;
+	match store.await {
+		Ok(r) => r,
+		Err(e) => Err(tools::Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e)))
+	}
+}
+
+
+/// Stores a single dicom object as a file and registers it as owned (might change data).
 /// 
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
-pub async fn store_ob<S>(mut obj:DefaultDicomObject, session: &mut S) -> tools::Result<RegisterResult> where S:Session<Any>
+pub async fn store_single_ob(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
+{
+	let mut session =RegisterManager::new();
+	let store = store_ob(obj,&mut session).await?;
+	session.flush().await;
+	match store.await {
+		Ok(r) => r,
+		Err(e) => Err(tools::Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e)))
+	}
+}
+
+pub async fn store_ob(mut obj:DefaultDicomObject, session: &mut RegisterManager)
+	-> tools::Result<oneshot::Receiver<tools::Result<RegisterResult>>>
 {
 	if !config::get().filters.is_empty(){
 		Python::attach::<_,tools::Result<()>>(|py| {
@@ -35,64 +57,26 @@ pub async fn store_ob<S>(mut obj:DefaultDicomObject, session: &mut S) -> tools::
 			Ok(())
 		})?;
 	}
-	db::register_instance(Arc::new(obj), &mut FileState::Store, session).await
+	let image = storage::Image::from_obj(obj).await;
+	session.register(image).await
 }
 
-/// Stores given dicom file as file (makes a copy) and registers it as owned (might change data).
-/// 
-/// If the object already exists, the store is aborted but considered successful if existing data are equal.
-pub async fn store_file<S>(filename:PathBuf, session: &mut S) -> tools::Result<RegisterResult> where S:Session<Any>
-{
-	store_ob(async_store::read(&filename).await?, session).await
-}
-
-/// Registers an existing file without storing (data won't be changed).
+/// Registers a single existing file without storing (data won't be changed).
 ///
 /// If the data already exists, the store is aborted but considered successful if existing data are equal.
 /// 
 /// If the existing data has a different checksum, an error is returned
-pub async fn import_file<S>(path:&Path, session: &mut S) -> tools::Result<RegisterResult> where S: Session<Any>
+pub async fn import_single_file(path:&Path) -> tools::Result<RegisterResult>
 {
-	let (info,obj) = FileInfo::new_from_existing(path, is_storage(path)).await?;
-	import_file_ob(info, obj, session).await
+	single_register(storage::Image::from_existing(path, false).await?).await
 }
 
-pub async fn import_file_ob<S>(info: FileInfo, obj:DefaultDicomObject, session: &mut S) -> tools::Result<RegisterResult> where S:Session<Any>
-{
-	let my_md5= info.get_md5().to_string();
-	let registered=db::register_instance(Arc::new(obj), &mut FileState::Exists(info), session).await;
-	let registered = registered?;
-	if let AlreadyStored(existing) = &registered //if register says equal data exist, we check md5sum
-	{
-		let existing_file = lookup(existing).await?
-			.expect("existing entry should exist").get_file()?;
-		let existing_md5 = existing_file.get_md5();
-		if existing_md5 != my_md5 {
-			return Err(Error::Md5Conflict {
-				existing_md5:existing_md5.to_string(),
-				existing_id:existing.clone(),
-				my_md5:my_md5.to_string(),
-			})
-		}
-	}
-	Ok(registered)
-
-}
-
-/// Registers an existing file without storing (data won't be changed) and moves the file to the storage path.
+/// Registers an existing file and moves the file to the storage path (data won't be changed).
 ///
 /// If the data already exists, the store is aborted but considered successful if existing data are equal.
 ///
 /// If the existing data has a different checksum, an error is returned
-pub async fn move_file_ob<S>(info: FileInfo, obj: DefaultDicomObject, session: &mut S) -> tools::Result<RegisterResult> where S:Session<Any>
+pub async fn move_single_file(path:&Path) -> tools::Result<RegisterResult>
 {
-	if info.owned { // if the file is already owned just import it
-		import_file_ob(info,obj, session).await
-	} else { // if not, store (aka copy) file and delete the source once we're done
-		let stored = db::register_instance(obj, &mut FileState::Store, session).await?;
-		if let RegisterResult::Stored(_) = stored { //no error and no previously existing file, we can delete the source
-			tokio::fs::remove_file(info.get_path()).await.context(format!("moving file {}", info.get_path().display()))?;
-		}
-		Ok(stored)
-	}
+	single_register(storage::Image::move_existing(path, false).await?).await
 }

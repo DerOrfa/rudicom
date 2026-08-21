@@ -1,38 +1,38 @@
-use std::collections::HashMap;
-use crate::db::{Entry, LocalSession, RegisterResult, Session, DB};
+use crate::db;
+use crate::db::register_manager::RegisterManager;
+use crate::db::{Entry, RegisterResult};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
-use crate::tools::tar::{make_tar, TarStream};
-use crate::tools::{get_instance_dicom, lookup_instance_file,remove::remove,verify::verify_entry, Error};
+use crate::tools::store::store_ob;
+use crate::tools::tar::{TarStream, make_tar};
 use crate::tools::{Context, Error::DicomError};
-use crate::db;
+use crate::tools::{Error, get_instance_dicom, lookup_instance_file, remove::remove, verify::verify_entry};
+use async_compression::Level;
+use async_compression::tokio::write::{BzEncoder, GzipEncoder, XzEncoder};
+use axum::Json;
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, rejection::BytesRejection, ConnectInfo, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::extract::{ConnectInfo, Path, State, rejection::BytesRejection};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use axum::Json;
-use axum_extra::{body::AsyncReadBody,extract::OptionalQuery};
+use axum_extra::{body::AsyncReadBody, extract::OptionalQuery};
 use dicom::dictionary_std::tags;
-use dicom::pixeldata::{image::ImageFormat,PixelDecoder};
+use dicom::object::from_reader;
+use dicom::pixeldata::{PixelDecoder, image::ImageFormat};
 use mime::IMAGE_PNG;
 use serde::Deserialize;
 use serde_json::json;
-use std::io::Cursor;
+use std::collections::HashMap;
+use std::io::{Cursor, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
-use async_compression::Level;
-use async_compression::tokio::write::{GzipEncoder, BzEncoder, XzEncoder};
-use dicom::object::from_reader;
-use surrealdb::engine::any::Any;
 use tokio::sync::Mutex;
-use crate::tools::store::store_ob;
 
 pub(super) fn router() -> axum::Router
 {
-    let mut rtr= axum::Router::new();
+	let mut rtr= axum::Router::new();
 	rtr=rtr
 		.route("/statistics", get(get_statistics))
         .route("/instances",post(store_instance))
@@ -89,7 +89,7 @@ async fn filepath(headers: HeaderMap,Path(path):Path<(String, String)>) -> Resul
 async fn store_instance(
 	headers: HeaderMap,
 	ConnectInfo(addr): ConnectInfo<SocketAddr>,
-	State(sessions): State<Arc<Mutex<HashMap<IpAddr,LocalSession<Any>>>>>,
+	State(sessions): State<Arc<Mutex<HashMap<IpAddr,RegisterManager>>>>,
 	payload:Result<Bytes,BytesRejection>
 ) -> Result<Response, HttpError> {
 	let bytes = payload.map_err(|e|
@@ -100,8 +100,9 @@ async fn store_instance(
 	}
 	let obj= from_reader(Cursor::new(bytes)).map_err(|e|DicomError(e.into())).into_http_error(&headers)?;
 	let mut sessions = sessions.lock().await;
-	let session = sessions.entry(addr.ip()).or_insert_with(|| LocalSession::create(&DB,1));
-	match store_ob(obj, session).await {
+	let session = sessions.entry(addr.ip()).or_insert_with(|| RegisterManager::new());
+	let store = store_ob(obj, session).await.map_err(|e|HttpError::new(e, &headers))?;
+	match store.await.unwrap_or_else(|e|Err(Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e)))) {
 		Ok(RegisterResult::Stored(id)) => Ok((StatusCode::CREATED,
 			Json(json!({
 				"Status":"Success",
