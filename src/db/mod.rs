@@ -26,7 +26,7 @@ pub(crate) mod file;
 mod record;
 mod session;
 pub mod dimse_access;
-mod register_manager;
+pub mod register_manager;
 
 #[derive(Deserialize,Debug,SurrealValue)]
 pub struct AggregateData

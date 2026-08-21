@@ -38,9 +38,7 @@ pub enum Image<C> where C: Committable,
 }
 
 impl<C> Image<C> where C:Committable + 'static {
-	/// writes a new file taking an object and returning that object plus a file info
 	pub async fn new_from_obj(obj:DefaultDicomObject) -> Self {Self::Create {obj}}
-	/// creates fileinfo struct and reads dicom object directly from path
 	pub async fn new_from_existing<P:AsRef<Path>>(path:P, owned:bool) -> tools::Result<Self> {
 		let path = path.as_ref();
 		let size = tokio::fs::metadata(path).await.context(format!("getting metadata for {}",path.display()))?.len();
