@@ -28,16 +28,16 @@ fn btree_diff(a: &BTreeMap<String, db_types::Value>, mut b:BTreeMap<String,db_ty
 	diff
 }
 
-/// An entry for the insertion queue.
+/// An entry for the insertion an [storage::Image].
 ///
-/// Consists of an image and the Sender part of a oneshot channel to notify about the eventual result of the insert
+/// Consists of the [storage::Image] and a [oneshot::Sender] to notify about the eventual result of the insert
 #[derive(Debug)]
 pub struct QEntry {
 	pub tx: Sender<tools::Result<bool>>,
 	pub image: crate::storage::Image,
 }
 
-/// A list of QEntries to be commited "in bulk".
+/// A list of [QEntry] to be commited "in bulk".
 ///
 /// They are expected to belong to the same series.
 /// A series signature is kept to detect insertion conflicts early.
@@ -48,27 +48,30 @@ struct Queue
 	series_elements:BTreeMap<String,db_types::Value>,
 }
 
+/// Collects images to insert them "in bulk".
+///
+/// An internal [SharedSession] is used to create the transactions.
+/// Images are grouped by their [tags::SERIES_INSTANCE_UID].
+///
+/// Dropping it without calling [Self::flush] will drop all uncommitted data and cancel any open transaction.
+/// Call [Self::commit] to commit data for a specific series.
 #[derive(Clone)]
-struct RegisterManager {
+pub struct RegisterManager {
 	queues:Arc<Mutex<HashMap<String, Queue>>>,
 	session:SharedSession<Any>,
 }
 
-/// Manages inserts for a specific transaction.
-///
-/// Dropping it without calling [flush] will drop all uncommited data and end the transaction.
-/// Call [commit] to commit data for a specific series.
 impl RegisterManager {
 	pub fn new() -> Self {
 		Self{ queues: Arc::new(Default::default()), session: SharedSession::create(&DB, 5) }
 	}
-	/// Collect images to be inserted in bulk.
+	/// Collect images to be inserted "in bulk".
 	///
-	/// They will automatically be grouped by series.
-	/// Commits will automatically be done once the limit for open files is reached or 200ms since
-	/// first addition for the given group.
+	/// They will automatically be grouped by [tags::SERIES_INSTANCE_UID].
+	/// Commits will automatically be done once the limit for open files is reached or at least
+	/// 200ms after first addition for the given group.
 	///
-	/// returns a `oneshot::Receiver` that can be awaited to get notice of the insertion result.
+	/// Returns a [oneshot::Receiver] that can be awaited to get notice of the insertion result.
 	/// Dropping this Receiver will trigger a warning message, but insertion will still be done if possible.
 	pub async fn register(&mut self,image:storage::Image) -> tools::Result<oneshot::Receiver<tools::Result<bool>>>
 	{
@@ -121,15 +124,21 @@ impl RegisterManager {
 		Ok(rx)
 	}
 
-	/// runs bulk_insert on a list of Queue entries and bisects the list recursively if an error occurs
-	/// returns list of entries that where successful inserted
-	/// receivers are noticed about fails
+	/// Runs [register::bulk_insert] on a list of [QEntry] and bisects the list recursively if an
+	/// error occurs.
+	/// Returns list of entries that where successfully inserted.
+	/// Failed [QEntry] and their [storage::Image] will be dropped, together with their potentially uncommited files.
+	/// Receivers will be told about that via a [tools::Result].
 	async fn inner_commit<S,C>(mut entries:Vec<QEntry>, session: &mut S) -> Vec<QEntry> where S:Session<C>, C:Connection
 	{
 		if let Err(e) =  register::bulk_insert(&mut entries, session).await { // something is bad,
 			// if its just one entry
 			if entries.len()<=1{ // tell its receiver
-				entries.pop().map(|entry|entry.tx.send(Err(e)));
+				entries.pop().map(|entry|
+					if let Err(Err(e)) = entry.tx.send(Err(e)){
+						error!("failed to let receiver know about failed insert ({e})")
+					}
+				);
 				// entries is empty now / the image is dropped
 			} else { // bisect entries and try again
 				let b = entries.drain(entries.len()/2 ..).collect(); // take off half
@@ -140,8 +149,15 @@ impl RegisterManager {
 		entries
 	}
 
-	/// removes an image group from the queue and commits it
-	/// failing entries are dropped as well as their images
+	/// Removes an image group from the queue and commits it.
+	///
+	/// - Calls [storage::Image::into_saved] on all [storage::Image] in all [QEntry] in separate tasks
+	///   (The amount of concurrently run tasks is determined by the limit of concurrently open files)
+	/// - calls [Self::inner_commit] for all successfully saved images to register them in the DB in as little as possible transactions.
+	/// - calls [storage::Image::commit] on all successfully registered images
+	///
+	/// Failing [QEntry] are dropped as well as their [storage::Image].
+	/// Results are send to the receivers in [QEntry].
 	pub async fn commit(&mut self, series_uid:String) {
 		// if triggered by a timeout the queue might actually be gone already
 		if let Some(mut entries) = self.queues.lock().await.remove(&series_uid).map(|q|q.objects)
@@ -153,7 +169,9 @@ impl RegisterManager {
 				match entry.image.into_saved().await {
 					Ok(image) => Some(QEntry { tx: entry.tx, image }),
 					Err(e) => {
-						entry.tx.send(Err(e)).unwrap();
+						if let Err(Err(e)) = entry.tx.send(Err(e)){
+							error!("failed to let receiver know about failed insert ({e})")
+						};
 						None
 					},
 				}
@@ -188,6 +206,7 @@ impl RegisterManager {
 			});
 		}
 	}
+	/// Calls [Self::commit] on all remaining image groups.
 	pub async fn flush(mut self) {
 		// keep the lock short
 		let queues = self.queues.lock().await.drain().collect::<Vec<_>>();
