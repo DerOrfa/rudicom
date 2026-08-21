@@ -116,9 +116,9 @@ impl RegisterManager {
 		queue.objects.push_back(QEntry{tx, image });
 
 		// if bulk is big enough, trigger commit
-		let mut self_shared = self.clone();
 		if queue.objects.len() >= crate::config::get().limits.max_files as usize{
-			spawn(async move {self_shared.commit(series_uid).await});
+			drop(queues);
+			self.commit(series_uid).await;
 		};
 
 		Ok(rx)
