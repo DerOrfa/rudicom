@@ -93,7 +93,7 @@ async fn insert<'a,C>(
 		.map(Entry::try_from).transpose()?
 	{
 		if existing == *obj {
-			Ok(RegisterResult::AlreadyStored(record_id.clone()))
+			Ok(AlreadyStored(record_id.clone()))
 		} else {
 			Err(DataConflict(existing))
 		}
@@ -112,7 +112,7 @@ async fn insert<'a,C>(
 ///
 /// A single transaction is started from `session` and either commited (returns Ok), or canceled (returns Err).
 /// A failed transaction does not remove images from the list, they can used on the retry.
-pub(crate) async fn bulk_insert<'a,S,C>(
+pub(crate) async fn bulk_insert<S,C>(
 	images:&mut Vec<register_manager::QEntry>,
 	session: &mut S
 ) -> tools::Result<()> where S:Session<C>, C:Connection
@@ -168,14 +168,13 @@ pub(crate) async fn bulk_insert<'a,S,C>(
 			upsert(images[0].image.as_ref(), &study_id, vec![], &STUDY_TAGS, &transaction).await?;
 		}
 		// do commit and possibly try again if error was just write conflict
-		let result = match transaction.commit().await {
+		return match transaction.commit().await {
 			Err(e) => if let Ok(true) = if_retry(&e, &mut retry).await {// retry maybe
 				retry += 1;
 				continue
 			} else { Err(e) },
 			result => result
-		};
-		return result.map_err(|e|e.into())
+		}.map_err(|e|e.into())
 	}
 	Ok(())
 }
