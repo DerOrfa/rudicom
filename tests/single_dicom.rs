@@ -8,10 +8,10 @@ use rudicom::tools::store::store_single_ob;
 
 mod common;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 {
-	tracing_subscriber::fmt().with_max_level(tracing::Level::TRACE).init();
+	//tracing_subscriber::fmt().with_max_level(tracing::Level::TRACE).init();
 	init_db().await?.health().await?;
 	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
 	if let RegisterResult::Stored(_) = store_single_ob(obj.clone()).await? {}

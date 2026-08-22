@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::io::{ErrorKind, Write};
-use tracing::warn;
-use crate::tools::complete_filepath;
+use tracing::log::debug;
+use tracing::{error, warn};
+use crate::tools::{complete_filepath, Context};
 
 pub trait Committable: Sized + Write + Send {
 	/// Create the file
@@ -49,13 +50,23 @@ impl Committable for StandardFile {
 	fn commit(&mut self) {self.committed = true;}
 
 	fn cancel(&mut self) -> std::io::Result<()> {
+		let mut filename = complete_filepath(&self.filepath);
 		if self.committed {
-			warn!("Cancelling already committed file")
-		} else if let Err(e) = std::fs::remove_file(&self.filepath) {
-			match e.kind() {
-				ErrorKind::NotFound => {} // that's fine, weird though
-				_ => return Err(e)
-			}
+			warn!("Cancelling already committed file");
+		} else {
+			tokio::spawn(async move {
+				match tokio::fs::remove_file(&filename).await {
+					Ok(()) => {
+						if filename.pop(){// if there is a parent path, try to delete it as far as possible
+							crate::tools::remove::remove_path(filename, &crate::config::get().paths.storage_path).await
+						} else { Ok(()) }
+					},
+					Err(e) => match e.kind() {
+						ErrorKind::NotFound => {debug!("Canceled file {} disappeared??", filename.display());Ok(())}, // that's fine, weird though
+						_ => Err(e)
+					}
+				}.map_err(|e|error!("Cancelling file error: {e}"))
+			});
 		}
 		Ok(())
 	}
