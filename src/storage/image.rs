@@ -3,13 +3,14 @@ use crate::storage::file::{Committable, StandardFile};
 use crate::tools;
 use crate::tools::Error::DicomError;
 use crate::tools::{Context, complete_filepath};
-use dicom::object::{DefaultDicomObject, from_reader};
+use dicom::object::DefaultDicomObject;
 use md5::Digest;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::task::spawn_blocking;
 use tracing::warn;
 use crate::db::FileInfo;
+use crate::storage::checked_load;
 
 #[derive(Debug)]
 pub enum Image<C> where C:Committable,
@@ -70,21 +71,10 @@ impl<C> Image<C> where C:Committable + 'static {
 	pub async fn from_existing<P:AsRef<Path>>(path:P) -> tools::Result<Self> {
 		let path = path.as_ref();
 		let size = tokio::fs::metadata(path).await.context(format!("getting metadata for {}",path.display()))?.len();
-		let reader_ctx = format!("reading {}", path.display());
-		let reader = std::fs::File::open(path).context(format!("opening {}",path.display()))?;
-
-		let obj_task= spawn_blocking(move||{
-			let mut md5_context = md5::Context::new();
-			let reader = crate::db::file::Md5Proxy {context:&mut md5_context,inner:reader};
-			(from_reader(reader), md5_context)
-		});
-
-		let (obj,md5_context) = obj_task.await?;
+		let (obj, checksum) = checked_load(path).await?;
 		Ok(Image::Existing {
 			path:path.to_path_buf(),
-			size,
-			checksum: md5_context.finalize(),
-			obj: obj.map_err(|e|DicomError(e.into())).context(reader_ctx)?,
+			size,checksum,obj,
 		})
 	}
 	pub async fn move_existing<P:AsRef<Path>>(org_path:P) -> tools::Result<Self>{
