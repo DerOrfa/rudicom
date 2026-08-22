@@ -8,7 +8,7 @@ use rudicom::tools::remove::remove;
 use rudicom::db::{RegisterResult};
 use std::time::SystemTime;
 use tokio::task::JoinSet;
-use tracing::debug;
+use tracing::trace;
 use rudicom::db::register_manager::RegisterManager;
 use rudicom::storage::Image;
 use rudicom::tools::Error;
@@ -118,7 +118,7 @@ pub async fn cleanup() -> rudicom::tools::Result<()>
 {
 	let studies= db::list_entries("instances").await?;
 	for study in studies{
-		debug!("removing leftover {}", study.id());
+		trace!("removing leftover {}", study.id());
 		remove(study.id()).await?;
 	}
 	Ok(())

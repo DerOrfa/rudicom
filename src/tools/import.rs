@@ -13,7 +13,8 @@ use std::io::ErrorKind;
 pub enum ImportResult {
 	Registered { filename: String },
 	Existed { filename: String, existing_id: RecordId },
-	DataConflict { filename:String,existed:Entry},
+	DataConflict { filename:String,existed:Entry },
+	FieldConflict { filename:String,id:RecordId, fields:String },
 	Md5Conflict {filename:String,existing_md5:String,my_md5:String, existing_id:RecordId},
 	Err{filename:String,error:Error},
 	GlobError(glob::GlobError)
@@ -71,6 +72,14 @@ impl Serialize for ImportResult
 				s.serialize_field("filename",filename)?;
 				s.end()
 			}
+			ImportResult::FieldConflict { filename, id, fields } => {
+				let mut s=s.serialize_struct("existed_with_conflicting_fields",3)?;
+				s.serialize_field("existing path", id.str_path().as_str())?;
+				s.serialize_field("conflicting fields", fields)?;
+				s.serialize_field("filename",filename)?;
+				s.end()
+
+			}
 			ImportResult::Md5Conflict {filename, existing_id,existing_md5,my_md5} => {
 				let mut s=s.serialize_struct("existed_with_conflicting_checksum",3)?;
 				s.serialize_field("existing_path",existing_id.str_path().as_str())?;
@@ -99,6 +108,21 @@ impl Serialize for ImportResult
 	}
 }
 
+fn process_register_error(res:tools::Error,path:impl ToString) -> ImportResult
+{
+	let filename = path.to_string();
+	match res
+	{
+		Error::Md5Conflict {existing_md5,my_md5, existing_id} =>
+			ImportResult::Md5Conflict {filename,existing_md5,my_md5,existing_id},
+		Error::DataConflict(existed) =>
+			ImportResult::DataConflict { filename, existed },
+		Error::FieldConflict{ fields, id } =>
+			ImportResult::FieldConflict { filename, id, fields },
+		e => ImportResult::Err{error:e,filename},
+	}
+}
+
 pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> tools::Result<impl Stream<Item=ImportResult>> where T:AsRef<str>
 {
 	let max_files = crate::config::get().limits.max_files;
@@ -111,54 +135,48 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> tools
 	if let Some(file)=files.next().transpose()? {
 		let files = [Ok(file)].into_iter().chain(files);
 		let stream = stream::iter(files)
-			.map_err(move |e|e.into())
+			.map_err(ImportResult::GlobError)
 			.map_ok(move|p|async move {
 				let filename = p.to_string_lossy().to_string();
-				let image = match mode {
+				match mode {
 					ImportMode::Import => storage::Image::from_existing(p).await,
 					ImportMode::Store => storage::Image::copy_existing(p).await,
 					ImportMode::Move => storage::Image::move_existing(&p).await,
-				}?;
-				Ok((filename,image))
+				}
+				.map(|i|(filename.clone(),i))
+				.map_err(|e|process_register_error(e,filename))
 			})
 			.try_buffer_unordered(max_files as usize) // load the images (parallel)
 			.and_then(move|(path,image)|{
 				let mut shared_manager = manager.clone();
 				async move { // feed the queue
-					shared_manager.register(image).await
-						.map(|r|(path.clone(),r))
+					match shared_manager.register(image).await
+					{
+						Ok(r) => Ok((path.clone(),r)),
+						Err(e) => Err(process_register_error(e,path.clone()))
+					}
 				}
 			})
-			.map(|r|async { // listen for results
-				match r {
-					Ok((filename,r)) =>
-						match r.await.unwrap_or_else(|e|Err(Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e))))
-						{
-							Ok(RegisterResult::Stored(_)) => ImportResult::Registered{ filename },
-							Ok(RegisterResult::AlreadyStored(existed)) =>
-								ImportResult::Existed {filename,existing_id:existed},
-							Err(Error::Md5Conflict {existing_md5,my_md5, existing_id}) =>
-								ImportResult::Md5Conflict {filename,existing_md5,my_md5,existing_id},
-							Err(Error::DataConflict(existed)) =>
-								ImportResult::DataConflict { filename, existed },
-							Err(e) => ImportResult::Err{error:e,filename},
-						}
-					Err(Error::GlobbingError(e)) => ImportResult::Err{
-						filename:e.path().to_string_lossy().to_string(),
-						error:Error::GlobbingError(e),
-					},
-					_ => unreachable!()
+			.map_ok(|(filename,receiver)|async { // listen for results
+				match receiver.await.unwrap_or_else(|e|Err(Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e))))
+				{
+					Ok(RegisterResult::Stored(_)) => Ok(ImportResult::Registered{ filename }),
+					Ok(RegisterResult::AlreadyStored(existed)) =>
+						Ok(ImportResult::Existed {filename,existing_id:existed}),
+					Err(e) => Err(process_register_error(e,filename)),
 				}
 			})
-			.buffer_unordered(max_files as usize) // load the images (parallel)
-			.filter(move |item|{
-				let ret =	match item.to_owned() {
-					ImportResult::Registered { .. } => config.echo,
-					ImportResult::Existed { .. } => config.echo_existing,
-					_ => true
-				};
-				async move {ret}
-		});
+			.try_buffer_unordered(max_files as usize) // load the images (parallel)
+			.try_filter_map(move |item|{
+				async move {
+					if match &item {
+						ImportResult::Registered { .. } => config.echo,
+						ImportResult::Existed { .. } => config.echo_existing,
+						_ => true
+					}{Ok(Some(item))}else { Ok(None) }
+				}
+			})
+			.map(|item|item.unwrap_or_else(|e|e));
 		Ok(stream)
 	} else {
 		Err(Error::NotFound.context(format!("when looking for files in {}",pattern.as_ref())))
@@ -184,12 +202,14 @@ pub fn import_glob_as_text<T>(pattern:T, config:ImportConfig, mode: ImportMode) 
 						_ => Ok(format!("{filename} was rejected as {} already exists but its values differ", existed.id().str_path()))
 					}
 				},
-				ImportResult::Md5Conflict { filename, existing_id,.. } => 
+				ImportResult::FieldConflict { filename, id, fields } =>
+					Ok(format!("{filename} was rejected as {id} already exists but its fields \"{}\" differ", fields)),
+				ImportResult::Md5Conflict { filename, existing_id,.. } =>
 					Ok(format!("{filename} was rejected as {} already exists but its checksum differs", existing_id.str_path())),
 				ImportResult::Err { filename, error } => {
 					Err(error.context(format!("importing {filename}")))
 				}
-				ImportResult::GlobError(e) => Err(e.into())
+				ImportResult::GlobError(e) => Err(e.into()),
 			};
 			register_msg.unwrap_or_else(|e|
 				String::from("E:")+e.sources().join("\nE:>").as_str()

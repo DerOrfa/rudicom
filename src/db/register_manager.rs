@@ -100,7 +100,7 @@ impl RegisterManager {
 			let mut self_shared = self.clone();
 			let timer = spawn(async move {
 				tokio::time::sleep(Duration::from_millis(200)).await;
-				self_shared.commit(series_uid_shared).await;
+				self_shared.commit(series_uid_shared,false).await;
 			}).abort_handle();
 			Queue{ objects: Default::default(), series_elements:series_elements.clone(), timer }
 		});
@@ -120,7 +120,7 @@ impl RegisterManager {
 		// if bulk is big enough, trigger commit
 		if queue.objects.len() >= crate::config::get().limits.max_files as usize{
 			drop(queues);
-			self.commit(series_uid).await;
+			self.commit(series_uid,true).await;
 		};
 
 		Ok(rx)
@@ -160,52 +160,54 @@ impl RegisterManager {
 	///
 	/// Failing [QEntry] are dropped as well as their [storage::Image].
 	/// Results are send to the receivers in [QEntry].
-	async fn commit(&mut self, series_uid:String) {
-		// if triggered by a timeout the queue might actually be gone already
+	async fn commit(&mut self, series_uid:String, kill_timer:bool) {
 		let queue = self.queues.lock().await.remove(&series_uid);
 		if let Some(queue) = queue{
-			self._commit(queue).await;
+			self._commit(queue,kill_timer).await;
 		}
 	}
-	async fn _commit(&mut self, queue:Queue) {
-		// First save all images as uncommitted //////////////////////////
-		let mut saver = JoinSet::new();
-		let mut saved_entries = vec![];
-		let Queue { mut objects, timer, .. } = queue;
-		timer.abort(); // kill timer, we won't need it anymore
-		let save_fn = async move |entry:QEntry| {
-			let QEntry{ tx, register_result, image } = entry;
-			let instance_uid = extract_from_dicom(image.as_ref(), tags::SOP_INSTANCE_UID)
-				.expect("No SOPInstanceUID??").to_string();
+	async fn _save_fn(entry:QEntry) -> Option<QEntry> {
+		let QEntry{ tx, register_result, image } = entry;
+		let instance_uid = extract_from_dicom(image.as_ref(), tags::SOP_INSTANCE_UID)
+			.expect("No SOPInstanceUID??").to_string();
 
-			match image.into_saved().await {
-				Ok(image) => Some(QEntry { tx, image, register_result }),
-				Err(tools::Error::IoError(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-					// file exists, probably because its already registered
-					if let Some(entry) = lookup(&RecordId::from_instance(instance_uid)).await.ok().flatten(){ // yep already there, just tell the receiver
-						if let Err(_) = tx.send(Ok(RegisterResult::AlreadyStored(entry.id().clone()))) {
-							error!("failed to let receiver know about {} already being there",entry.id());
-						};
-						None
-					} else { // something weired is going on, bail
-						if let Err(Err(e)) = tx.send(Err(e.into())){
-							error!("failed to let receiver know about failed insert ({e})")
-						};
-						None
-					}
-				},
-				Err(e) => {
-					if let Err(Err(e)) = tx.send(Err(e)){
+		match image.into_saved().await {
+			Ok(image) => Some(QEntry { tx, image, register_result }),
+			Err(tools::Error::IoError(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+				// file exists, probably because its already registered
+				if let Some(entry) = lookup(&RecordId::from_instance(instance_uid)).await.ok().flatten(){ // yep already there, just tell the receiver
+					if let Err(_) = tx.send(Ok(RegisterResult::AlreadyStored(entry.id().clone()))) {
+						error!("failed to let receiver know about {} already being there",entry.id());
+					};
+					None
+				} else { // something weired is going on, bail
+					if let Err(Err(e)) = tx.send(Err(e.into())){
 						error!("failed to let receiver know about failed insert ({e})")
 					};
 					None
-				},
-			}
-		};
+				}
+			},
+			Err(e) => {
+				if let Err(Err(e)) = tx.send(Err(e)){
+					error!("failed to let receiver know about failed insert ({e})")
+				};
+				None
+			},
+		}
+	}
+	async fn _commit(&mut self, queue:Queue, kill_timer:bool) {
+		let Queue { mut objects, timer, .. } = queue;
+		if kill_timer{
+			timer.abort();
+		} // kill timer, we won't need it anymore
+
+		// First save all images as uncommitted //////////////////////////
+		let mut saver = JoinSet::new();
+		let mut saved_entries = vec![];
 		// fill up joinset
 		while saver.len() < crate::config::get().limits.max_files as usize {
 			if let Some(entry) = objects.pop_front() {
-				saver.spawn(save_fn(entry));
+				saver.spawn(Self::_save_fn(entry));
 			} else { break; }
 		}
 		// join one / add one until all are done
@@ -216,7 +218,7 @@ impl RegisterManager {
 				_ => {},
 			}
 			if let Some(new)= objects.pop_front(){
-				saver.spawn(save_fn(new));
+				saver.spawn(Self::_save_fn(new));
 			}
 		}
 
@@ -238,7 +240,7 @@ impl RegisterManager {
 			.map(|(_,q)|q)
 			.collect::<Vec<_>>();
 		for entries in queues {
-			self._commit(entries).await
+			self._commit(entries,true).await
 		}
 	}
 }

@@ -123,12 +123,12 @@ impl<C> Image<C> where C:Committable + 'static {
 			Image::Move { org_path, size, checksum, obj } => {
 				let path=PathBuf::from(gen_filepath(&obj)?);
 				let c_path = complete_filepath(&path);
-				if c_path != org_path.canonicalize()?{
+				if c_path != org_path.canonicalize()? { // if file is not already in place, create a copy
 					if std::fs::exists(&c_path)?{
 						return Err(tools::Error::FileAlreadyExists {path:c_path});
 					}
-					if let Err(_)=tokio::fs::hard_link(&org_path,&c_path).await{
-						tokio::fs::copy(&org_path,&c_path).await?;
+					if let Err(_)=tokio::fs::hard_link(&org_path,&c_path).await { // try hardlink
+						tokio::fs::copy(&org_path,&c_path).await?; // fall back to copy
 					}
 					Ok(Self::Moved {
 						org_path:Some(org_path),
