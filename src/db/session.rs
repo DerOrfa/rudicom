@@ -12,7 +12,7 @@ use surrealdb::Result;
 use surrealdb::{Connection, Surreal};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio::spawn;
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace, warn};
 
 /// A guard holding a session.
 ///
@@ -215,11 +215,5 @@ impl<C> Deref for TransactionGuard<C> where C:Connection {
 		if let SessionState::Busy(t) = self.0.deref() {
 			t
 		} else { panic!("transaction is already closed");}
-	}
-}
-
-impl<C> Drop for TransactionGuard<C> where C:Connection {
-	fn drop(&mut self) {
-		info!("{:?} dropping a transaction on session {}", thread::current().id(),self.1);
 	}
 }

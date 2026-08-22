@@ -42,7 +42,7 @@ async fn invalid_insert() -> Result<(), Box<dyn std::error::Error>>
 	let study_entry = lookup_uid("studies",study_id).await?
 		.expect("expected study entry");
 	let instances_per_study= study_entry.get_aggregate().await?.count;
-	assert_eq!(instances_per_study,ins1.len(),"Only {} instanced should have been inserted, but {} are there",ins1.len(),instances_per_study);
+	assert_eq!(instances_per_study,ins1.len(),"Only {} instances should have been inserted, but {} are there",ins1.len(),instances_per_study);
 
 	match messy_insert{
 		Err(Error::DataConflict(_)) | Err(Error::FieldConflict {..}) => {}

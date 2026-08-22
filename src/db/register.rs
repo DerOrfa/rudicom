@@ -14,7 +14,7 @@ use surrealdb::engine::any::Any;
 use surrealdb::types::{SurrealValue, ToSql};
 use tracing::{debug, error};
 use crate::db::RegisterResult::AlreadyStored;
-use crate::tools::Error::{DataConflict, FieldConflict};
+use crate::tools::Error::{DataConflict, FieldConflict, SurrealError};
 
 #[derive(Default,Debug,Clone,SurrealValue)]
 struct Diff
@@ -112,7 +112,7 @@ async fn insert<'a,C>(
 ///
 /// A single transaction is started from `session` and either commited (returns Ok), or canceled (returns Err).
 /// A failed transaction does not remove images from the list, they can used on the retry.
-pub(crate) async fn bulk_insert<S,C>(
+pub async fn bulk_insert<S,C>(
 	images:&mut Vec<register_manager::QEntry>,
 	session: &mut S
 ) -> tools::Result<()> where S:Session<C>, C:Connection
@@ -163,9 +163,24 @@ pub(crate) async fn bulk_insert<S,C>(
 		}
 
 		// if at least one was inserted, do study and series as well
-		if !images.is_empty() {
-			upsert(images[0].image.as_ref(), &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await?;
-			upsert(images[0].image.as_ref(), &study_id, vec![], &STUDY_TAGS, &transaction).await?;
+		if !images.is_empty() { // @would be usefull to let the caller know that the whole set failed
+			let ser = upsert(images[0].image.as_ref(), &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await;
+			let std = upsert(images[0].image.as_ref(), &study_id, vec![], &STUDY_TAGS, &transaction).await;
+			if ser.is_err() || std.is_err() { //the series or the study update failed, that means we can throw away the whole set
+				let e = ser.and(std).err().unwrap();
+				images.drain(..).for_each(|entry| {
+					let e_cloned= match &e { // some error can't be cloned, luckily the relevant ones can
+						SurrealError(e) => e.clone().into(),
+						FieldConflict { fields, id }
+							=> FieldConflict{fields:fields.clone(), id:id.clone()},
+						_ => unreachable!()
+					};
+					if let Err(e) = entry.tx.send(Err(e_cloned)) { // log error if that fails
+						error!("failed to let receiver know about failed insert ({})",e.err().unwrap());
+					}
+				});
+				return Err(e.into());
+			}
 		}
 		// do commit and possibly try again if error was just write conflict
 		return match transaction.commit().await {
@@ -185,7 +200,7 @@ async fn upsert<'a,C>(
 	add_meta:Vec<(&'a str,db_types::Value)>,
 	tags:&HashMap<String,Vec<AttributeSelector>>,
 	transaction: &Transaction<C>
-) -> tools::Result<bool> where C:Connection
+) -> tools::Result<()> where C:Connection
 {
 	let meta= prepare_content(obj, add_meta, tags);
 	upsert_meta(meta,record_id,transaction).await
@@ -194,7 +209,7 @@ async fn upsert_meta<'a,C>(
 	meta:BTreeMap<String,db_types::Value>,
 	record_id: &RecordId,
 	transaction: &Transaction<C>
-) -> tools::Result<bool> where C:Connection
+) -> tools::Result<()> where C:Connection
 {
 	let q = transaction.query("UPSERT ONLY $rec MERGE $content RETURN diff")
 		.bind(("content",meta)).bind(("rec",record_id.0.clone()));
@@ -203,7 +218,7 @@ async fn upsert_meta<'a,C>(
 		.filter(|d|!d.path.starts_with("/instances")).filter(|d|!d.path.starts_with("/series"))
 		.collect::<Vec<_>>();
 	if diff.is_empty(){
-		Ok(true)
+		Ok(())
 	} else {
 		debug!("Field conflicts in {}:\n{}", record_id, diff.clone().into_value().to_sql_pretty());
 		Err(FieldConflict{ fields: diff.into_iter().map(|d|format!("{}",d.path)).join(":"), id: record_id.clone() })
@@ -251,7 +266,7 @@ pub async fn register_instance<S>(
 				retry+=1;
 				_register_instance(obj.clone(), file_info, t).await
 		}{
-			Err(Error::SurrealError(e)) =>
+			Err(SurrealError(e)) =>
 				if let Ok(true) = if_retry(&e,&mut retry).await{continue} else { e.into() },
 			Err(e) => e,
 			Ok(r) => { // no inner errors, commit or cancel based on results

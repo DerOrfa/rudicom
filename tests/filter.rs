@@ -6,15 +6,15 @@ use dicom::core::value::Value;
 use dicom::dictionary_std::tags;
 use dicom::object::AccessError;
 use dimse::Taker;
-use pyo3::types::PyModule;
 use pyo3::Python;
-use rudicom::db::{lookup, LocalSession, RegisterResult, Session, DB};
+use pyo3::types::PyModule;
+use rudicom::db::{RegisterResult, lookup};
 use rudicom::tools;
-use rudicom::tools::store::store_ob;
 use rudicom::tools::Error::PythonErr;
+use rudicom::tools::store::store_single_ob;
 use std::ffi::CString;
 
-static REPLACE_TIME:&str = r#"
+static REPLACE_TIME: &str = r#"
 from typing import Any, Optional
 
 def filter(input:dict[tuple[int,int],Any]) -> dict[tuple[int,int],Optional[Any]]:
@@ -78,10 +78,9 @@ async fn filtered_store()  -> Result<(), Box<dyn std::error::Error>>
 {
 //	tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 	init_db().await?.health().await?;
-	let mut sess = LocalSession::create(&DB, 1);
 	let mut obj = dcm::synthesize_series(&dcm::UidSynthesizer::default(), 1, 1, 2);
 
-	if let RegisterResult::Stored(stored) = store_ob(obj.remove(0), &mut sess).await? {
+	if let RegisterResult::Stored(stored) = store_single_ob(obj.remove(0)).await? {
 		let stored = lookup(&stored).await?.expect("existing object should be found");
 		let red = stored.get_file()?.read().await?;
 		assert_eq!(stored.id().str_key(), red.element(tags::SOP_INSTANCE_UID)?.string()?);
@@ -93,7 +92,7 @@ async fn filtered_store()  -> Result<(), Box<dyn std::error::Error>>
 	else { panic!("Store should return stored."); }
 
 	assert!(obj[0].update_value(tags::MODALITY,|v|*v = Value::from("SR")));
-	if let RegisterResult::Stored(stored) = store_ob(obj.remove(0), &mut sess).await? {
+	if let RegisterResult::Stored(stored) = store_single_ob(obj.remove(0)).await? {
 		let stored = lookup(&stored).await?.expect("existing object should be found");
 		let red = stored.get_file()?.read().await?;
 		assert_eq!(stored.id().str_key(), red.element(tags::SOP_INSTANCE_UID)?.string()?);
