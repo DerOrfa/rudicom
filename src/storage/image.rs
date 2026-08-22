@@ -6,6 +6,7 @@ use crate::tools::{Context, complete_filepath};
 use dicom::object::{DefaultDicomObject, from_reader};
 use md5::Digest;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::task::spawn_blocking;
 use tracing::warn;
 use crate::db::FileInfo;
@@ -36,6 +37,7 @@ pub enum Image<C> where C:Committable,
 		committable:Result<C,PathBuf>,
 		size:u64,
 		checksum:Digest,
+		obj:DefaultDicomObject
 	},
 	/// An already existing file, but should be copied
 	Copy {
@@ -48,6 +50,7 @@ pub enum Image<C> where C:Committable,
 		committable:C,
 		size:u64,
 		checksum:Digest,
+		obj:DefaultDicomObject
 	},
 	/// A file has been created, not yet commited
 	/// dropping this will cause a rollback (aka file will be removed)
@@ -55,6 +58,7 @@ pub enum Image<C> where C:Committable,
 		committable:C,
 		size:u64,
 		checksum:Digest,
+		obj:DefaultDicomObject
 	},
 	Committed{
 		path:PathBuf
@@ -106,6 +110,8 @@ impl<C> Image<C> where C:Committable + 'static {
 				let path=PathBuf::from(gen_filepath(&obj)?);
 				let c_path = complete_filepath(&path);
 				let p=c_path.parent().unwrap();
+				let obj = Arc::new(obj);
+				let obj_shared=obj.clone();
 				tokio::fs::create_dir_all(p).await
 					.context(format!("Failed creating storage path {}",p.display()))?;
 
@@ -113,14 +119,15 @@ impl<C> Image<C> where C:Committable + 'static {
 					let inner = C::create(path)?;
 					let mut checksum = md5::Context::new();
 					let mut writer = crate::db::file::Md5Proxy {context:&mut checksum,inner};
-					obj.write_all(&mut writer).map_err(|e|DicomError(e.into()))?;
+					obj_shared.write_all(&mut writer).map_err(|e|DicomError(e.into()))?;
 					Ok::<_, tools::Error>((writer.inner,checksum))
 				}).await??;
 				let size = std::fs::metadata(&c_path)?.len();
 				Ok(Self::Created{
 					committable,
 					checksum:checksum.finalize(),
-					size
+					size,
+					obj:Arc::into_inner(obj).unwrap()
 				})
 			},
 			Image::Move { org_path, size, checksum, obj } => {
@@ -136,7 +143,7 @@ impl<C> Image<C> where C:Committable + 'static {
 					Ok(Self::Moved {
 						org_path:Some(org_path),
 						committable: Ok(C::from_existing(path)?),
-						size, checksum,
+						size, checksum,obj
 					})
 				} else {
 					// file is literally the same, so just take ownership and *don't* make it a
@@ -146,6 +153,7 @@ impl<C> Image<C> where C:Committable + 'static {
 						org_path:None,
 						committable: Err(path),
 						size, checksum,
+						obj
 					})
 				}
 			},
@@ -158,7 +166,7 @@ impl<C> Image<C> where C:Committable + 'static {
 				tokio::fs::copy(&org_path,&c_path).await?;
 				Ok(Self::Copied {
 					committable: C::from_existing(path)?,
-					size, checksum,
+					size, checksum, obj
 				})
 			},
 			// file already exists, nothing to do
@@ -245,11 +253,11 @@ impl<C> AsRef<DefaultDicomObject> for Image<C> where C:Committable {
 			Image::Create {obj, .. }
 			| Image::Existing {obj, ..}
 			| Image::Move {obj, ..}
-			| Image::Copy {obj, ..} => obj,
-			Image::Created {..} => panic!("Invalid object reference on created image file"),
+			| Image::Copy {obj, ..}
+			| Image::Created {obj, ..}
+			| Image::Moved {obj,..}
+			| Image::Copied {obj, ..} => obj,
 			Image::Committed {..} => panic!("Invalid object reference on committed image file"),
-			Image::Moved {..} => panic!("Invalid object reference on moved image file"),
-			Image::Copied {..} => panic!("Invalid object reference on copied image file"),
 		}
 	}
 }
