@@ -11,8 +11,8 @@ use surrealdb::method::Transaction;
 use surrealdb::Result;
 use surrealdb::{Connection, Surreal};
 use tokio::sync::{Mutex, OwnedMutexGuard};
-use tokio::{spawn, task};
-use tracing::{error, trace, warn};
+use tokio::spawn;
+use tracing::{error, info, trace, warn};
 
 /// A guard holding a session.
 ///
@@ -92,7 +92,7 @@ impl<C> Stream for SingleSessionStream<C> where C:Connection {
 
 	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>>{
 		let this = self.get_mut();
-		trace!("{:?} task {} polling session {}", thread::current().id(), task::id(),this.inner.id);
+		trace!("{:?} polling session {}", thread::current().id(),this.inner.id);
 		let res = ready!(this.active_future.get_or_insert_with(
 			||{
 				trace!("Handing over session {} to a new future",this.inner.id);
@@ -105,8 +105,8 @@ impl<C> Stream for SingleSessionStream<C> where C:Connection {
 		this.active_future = None;
 		match res {
 			Some(r) => {
-				trace!("{:?} task {} created new transaction on session {}",
-					thread::current().id(), task::id(), this.inner.id);
+				trace!("{:?} created new transaction on session {}",
+					thread::current().id(), this.inner.id);
 				Poll::Ready(Some(r))
 			},
 			None => {
@@ -215,5 +215,11 @@ impl<C> Deref for TransactionGuard<C> where C:Connection {
 		if let SessionState::Busy(t) = self.0.deref() {
 			t
 		} else { panic!("transaction is already closed");}
+	}
+}
+
+impl<C> Drop for TransactionGuard<C> where C:Connection {
+	fn drop(&mut self) {
+		info!("{:?} dropping a transaction on session {}", thread::current().id(),self.1);
 	}
 }

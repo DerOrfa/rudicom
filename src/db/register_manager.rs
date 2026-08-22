@@ -1,4 +1,4 @@
-use crate::db::{self, RecordId, Session, SharedSession, DB, RegisterResult};
+use crate::db::{self, RecordId, Session, SharedSession, DB, RegisterResult, lookup};
 use crate::tools::Error::FieldConflict;
 use crate::tools::extract_from_dicom;
 use crate::{storage, tools};
@@ -13,7 +13,7 @@ use surrealdb::types::SurrealValue;
 use tokio::spawn;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Mutex, oneshot};
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::{AbortHandle, JoinSet};
 use tracing::error;
 
 fn btree_diff(a: &BTreeMap<String, db_types::Value>, mut b:BTreeMap<String,db_types::Value>) -> Vec<String> {
@@ -47,7 +47,7 @@ struct Queue
 {
 	objects: LinkedList<QEntry>,
 	series_elements:BTreeMap<String,db_types::Value>,
-	timer:JoinHandle<()>
+	timer:AbortHandle
 }
 
 /// Collects images to insert them "in bulk".
@@ -101,7 +101,7 @@ impl RegisterManager {
 			let timer = spawn(async move {
 				tokio::time::sleep(Duration::from_millis(200)).await;
 				self_shared.commit(series_uid_shared).await;
-			});
+			}).abort_handle();
 			Queue{ objects: Default::default(), series_elements:series_elements.clone(), timer }
 		});
 
@@ -175,8 +175,25 @@ impl RegisterManager {
 		timer.abort(); // kill timer, we won't need it anymore
 		let save_fn = async move |entry:QEntry| {
 			let QEntry{ tx, register_result, image } = entry;
+			let instance_uid = extract_from_dicom(image.as_ref(), tags::SOP_INSTANCE_UID)
+				.expect("No SOPInstanceUID??").to_string();
+
 			match image.into_saved().await {
 				Ok(image) => Some(QEntry { tx, image, register_result }),
+				Err(tools::Error::IoError(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+					// file exists, probably because its already registered
+					if let Some(entry) = lookup(&RecordId::from_instance(instance_uid)).await.ok().flatten(){ // yep already there, just tell the receiver
+						if let Err(_) = tx.send(Ok(RegisterResult::AlreadyStored(entry.id().clone()))) {
+							error!("failed to let receiver know about {} already being there",entry.id());
+						};
+						None
+					} else { // something weired is going on, bail
+						if let Err(Err(e)) = tx.send(Err(e.into())){
+							error!("failed to let receiver know about failed insert ({e})")
+						};
+						None
+					}
+				},
 				Err(e) => {
 					if let Err(Err(e)) = tx.send(Err(e)){
 						error!("failed to let receiver know about failed insert ({e})")

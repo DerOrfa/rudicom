@@ -32,10 +32,10 @@ pub async fn single_register(image:storage::Image)	-> tools::Result<RegisterResu
 /// If the object already exists, the store is aborted but considered successful if existing data are equal.
 pub async fn store_single_ob(obj:DefaultDicomObject) -> tools::Result<RegisterResult>
 {
-	let mut session =RegisterManager::new();
+	let mut session = RegisterManager::new();
 	let store = store_ob(obj,&mut session).await?;
 	session.flush().await;
-	match store.await {
+	match store.await{
 		Ok(r) => r,
 		Err(e) => Err(tools::Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e)))
 	}

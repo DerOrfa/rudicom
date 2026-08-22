@@ -1,15 +1,17 @@
+use std::io::ErrorKind;
 use chrono::{DateTime, Utc};
 use dicom::core::{DataElement, VR};
 use dicom::dictionary_std::{tags, uids};
 use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
 use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
-use rudicom::tools::store::store_ob;
-use rudicom::db::{RegisterResult, Session, SharedSession, DB};
+use rudicom::db::{RegisterResult};
 use std::time::SystemTime;
-use surrealdb::engine::any::Any;
 use tokio::task::JoinSet;
 use tracing::debug;
+use rudicom::db::register_manager::RegisterManager;
+use rudicom::storage::Image;
+use rudicom::tools::Error;
 
 pub struct UidSynthesizer{
 	prefix: String,
@@ -98,27 +100,18 @@ pub async fn bulk_insert(instances:impl Iterator<Item=&FileDicomObject<InMemDico
 	-> tools::Result<Vec<RegisterResult>>
 {
 	let mut tasks = JoinSet::new();
-	let mut ret = Vec::<RegisterResult>::new();
-	let mut instances = instances.cloned();
-	let session: SharedSession<Any> = SharedSession::create(&DB, 1);
+	let mut session = RegisterManager::new();
 
-	while tasks.len() < 2 /*rudicom::config::get().limits.max_files as usize*/
-	{
-		if let Some(obj) = instances.next() {
-			let mut session = session.clone();
-			tasks.spawn(async move { store_ob(obj,&mut session).await });
-		} else {break} //abort if we already run out of instances
+	for obj in instances.cloned(){
+		// register all instances, will block once the buffer runs full
+		let store = session.register(Image::from_obj(obj)).await?;
+		// put all Receivers into a JoinSet and let them wait
+		tasks.spawn(store);
 	}
-	// take out the next finished import and thus drain the task list
-	while let Some(r) = tasks.join_next().await.transpose()?{
-		ret.push(r?);
-		// we finished one store task, add another one as long as we have them
-		if let Some(obj) = instances.next() {
-			let mut session = session.clone();
-			tasks.spawn(async move{ store_ob(obj,&mut session).await });
-		}
-	}
-	Ok(ret)
+	// collect all results, there cannot be any register pending => no flush necessary
+	tasks.join_all().await.into_iter()
+		.map(|r|r.unwrap_or_else(|e|Err(Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e)))))
+		.collect()
 }
 
 pub async fn cleanup() -> rudicom::tools::Result<()>
