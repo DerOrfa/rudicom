@@ -1,7 +1,7 @@
-use crate::db::{register, RecordId, Session, SharedSession, DB, RegisterResult};
+use crate::db::{self, RecordId, Session, SharedSession, DB, RegisterResult};
 use crate::tools::Error::FieldConflict;
 use crate::tools::extract_from_dicom;
-use crate::{db, storage, tools};
+use crate::{storage, tools};
 use dicom::dictionary_std::tags;
 use itertools::Itertools;
 use std::collections::{BTreeMap, HashMap, LinkedList};
@@ -13,7 +13,7 @@ use surrealdb::types::SurrealValue;
 use tokio::spawn;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Mutex, oneshot};
-use tokio::task::JoinSet;
+use tokio::task::{JoinHandle, JoinSet};
 use tracing::error;
 
 fn btree_diff(a: &BTreeMap<String, db_types::Value>, mut b:BTreeMap<String,db_types::Value>) -> Vec<String> {
@@ -42,11 +42,12 @@ pub struct QEntry {
 ///
 /// They are expected to belong to the same series.
 /// A series signature is kept to detect insertion conflicts early.
-#[derive(Debug,Default)]
+#[derive(Debug)]
 struct Queue
 {
 	objects: LinkedList<QEntry>,
 	series_elements:BTreeMap<String,db_types::Value>,
+	timer:JoinHandle<()>
 }
 
 /// Collects images to insert them "in bulk".
@@ -97,11 +98,11 @@ impl RegisterManager {
 			// it's a new queue, make a timeout commit task for it
 			let series_uid_shared = series_uid.clone();
 			let mut self_shared = self.clone();
-			spawn(async move {
+			let timer = spawn(async move {
 				tokio::time::sleep(Duration::from_millis(200)).await;
 				self_shared.commit(series_uid_shared).await;
 			});
-			Queue::default()
+			Queue{ objects: Default::default(), series_elements:series_elements.clone(), timer }
 		});
 
 		// detect conflict and reject object if necessary
@@ -132,7 +133,7 @@ impl RegisterManager {
 	/// Receivers will be told about that via a [tools::Result].
 	async fn inner_commit<S,C>(mut entries:Vec<QEntry>, session: &mut S) -> Vec<QEntry> where S:Session<C>, C:Connection
 	{
-		if let Err(e) =  register::bulk_insert(&mut entries, session).await { // something is bad,
+		if let Err(e) =  db::register::bulk_insert(&mut entries, session).await { // something is bad,
 			// if its just one entry
 			if entries.len()<=1{ // tell its receiver
 				entries.pop().map(|entry|
@@ -159,61 +160,68 @@ impl RegisterManager {
 	///
 	/// Failing [QEntry] are dropped as well as their [storage::Image].
 	/// Results are send to the receivers in [QEntry].
-	pub async fn commit(&mut self, series_uid:String) {
+	async fn commit(&mut self, series_uid:String) {
 		// if triggered by a timeout the queue might actually be gone already
-		if let Some(mut entries) = self.queues.lock().await.remove(&series_uid).map(|q|q.objects)
-		{
-			// First save all images as uncommitted //////////////////////////
-			let mut saver = JoinSet::new();
-			let mut saved_entries = vec![];
-			let save_fn = async move |entry:QEntry| {
-				let QEntry{ tx, register_result, image } = entry;
-				match image.into_saved().await {
-					Ok(image) => Some(QEntry { tx, image, register_result }),
-					Err(e) => {
-						if let Err(Err(e)) = tx.send(Err(e)){
-							error!("failed to let receiver know about failed insert ({e})")
-						};
-						None
-					},
-				}
-			};
-			// fill up joinset
-			while saver.len() < crate::config::get().limits.max_files as usize {
-				if let Some(entry) = entries.pop_front() {
-					saver.spawn(save_fn(entry));
-				} else { break; }
-			}
-			// join one / add one until all are done
-			while let Some(result) = saver.join_next().await {
-				match result {
-					Ok(Some(entry)) => saved_entries.push(entry),
-					Err(e) => error!("Task to write image failed: {e}"),
-					_ => {},
-				}
-				if let Some(new)= entries.pop_front(){
-					saver.spawn(save_fn(new));
-				}
-			}
-
-			// next commit to db /////////////////////////////////////////////
-			let commited_entries = Self::inner_commit(saved_entries,&mut self.session).await;
-
-			// last, commit the files and let receivers know /////////////
-			commited_entries.into_iter().for_each(|mut entry|{
-				entry.image.commit();
-				if let Err(_) = entry.tx.send(Ok(entry.register_result.expect("Missing register result"))) {
-					error!("failed to let receiver know about successful insert")
-				}
-			});
+		let queue = self.queues.lock().await.remove(&series_uid);
+		if let Some(queue) = queue{
+			self._commit(queue).await;
 		}
+	}
+	async fn _commit(&mut self, queue:Queue) {
+		// First save all images as uncommitted //////////////////////////
+		let mut saver = JoinSet::new();
+		let mut saved_entries = vec![];
+		let Queue { mut objects, timer, .. } = queue;
+		timer.abort(); // kill timer, we won't need it anymore
+		let save_fn = async move |entry:QEntry| {
+			let QEntry{ tx, register_result, image } = entry;
+			match image.into_saved().await {
+				Ok(image) => Some(QEntry { tx, image, register_result }),
+				Err(e) => {
+					if let Err(Err(e)) = tx.send(Err(e)){
+						error!("failed to let receiver know about failed insert ({e})")
+					};
+					None
+				},
+			}
+		};
+		// fill up joinset
+		while saver.len() < crate::config::get().limits.max_files as usize {
+			if let Some(entry) = objects.pop_front() {
+				saver.spawn(save_fn(entry));
+			} else { break; }
+		}
+		// join one / add one until all are done
+		while let Some(result) = saver.join_next().await {
+			match result {
+				Ok(Some(entry)) => saved_entries.push(entry),
+				Err(e) => error!("Task to write image failed: {e}"),
+				_ => {},
+			}
+			if let Some(new)= objects.pop_front(){
+				saver.spawn(save_fn(new));
+			}
+		}
+
+		// next commit to db /////////////////////////////////////////////
+		let commited_entries = Self::inner_commit(saved_entries,&mut self.session).await;
+
+		// last, commit the files and let receivers know /////////////
+		commited_entries.into_iter().for_each(|mut entry|{
+			entry.image.commit();
+			if let Err(_) = entry.tx.send(Ok(entry.register_result.expect("Missing register result"))) {
+				error!("failed to let receiver know about successful insert")
+			}
+		});
 	}
 	/// Calls [Self::commit] on all remaining image groups.
 	pub async fn flush(mut self) {
 		// keep the lock short
-		let queues = self.queues.lock().await.drain().collect::<Vec<_>>();
-		for (series_uid, _) in queues {
-			self.commit(series_uid).await
+		let queues = self.queues.lock().await.drain()
+			.map(|(_,q)|q)
+			.collect::<Vec<_>>();
+		for entries in queues {
+			self._commit(entries).await
 		}
 	}
 }
