@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::io::{ErrorKind, Write};
-use tracing::log::debug;
-use tracing::{error, warn};
-use crate::tools::{complete_filepath, Context};
+use tracing::{debug, error, warn};
+use crate::tools::complete_filepath;
 
 pub trait Committable: Sized + Write + Send {
 	/// Create the file
@@ -58,14 +57,14 @@ impl Committable for StandardFile {
 				match tokio::fs::remove_file(&filename).await {
 					Ok(()) => {
 						if filename.pop(){// if there is a parent path, try to delete it as far as possible
-							crate::tools::remove::remove_path(filename, &crate::config::get().paths.storage_path).await
+							crate::tools::remove::remove_path(filename.clone(), &crate::config::get().paths.storage_path).await
 						} else { Ok(()) }
 					},
 					Err(e) => match e.kind() {
-						ErrorKind::NotFound => {debug!("Canceled file {} disappeared??", filename.display());Ok(())}, // that's fine, weird though
+						ErrorKind::NotFound => {debug!("Trying to roll back file {}, but its not there??", filename.display());Ok(())}, // that's fine, weird though
 						_ => Err(e)
 					}
-				}.map_err(|e|error!("Cancelling file error: {e}"))
+				}.map_err(|e|error!("Error rolling back file {}: {e}",filename.display()))
 			});
 		}
 		Ok(())

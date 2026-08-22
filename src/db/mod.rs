@@ -6,7 +6,6 @@ pub use entry::Entry;
 pub use file::FileInfo;
 pub use into_db_value::IntoDbValue;
 pub use record::RecordId;
-pub use register::{register_instance, FileState};
 pub use session::{Session, LocalSession, SharedSession, TransactionGuard};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

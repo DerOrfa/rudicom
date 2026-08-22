@@ -2,7 +2,7 @@ pub mod store;
 pub mod remove;
 pub mod import;
 pub mod verify;
-mod error;
+pub(crate) mod error;
 pub mod conv;
 pub mod tar;
 pub mod csa;
