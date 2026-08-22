@@ -57,7 +57,7 @@ pub async fn store_ob(mut obj:DefaultDicomObject, session: &mut RegisterManager)
 			Ok(())
 		})?;
 	}
-	let image = storage::Image::from_obj(obj).await;
+	let image = storage::Image::from_obj(obj);
 	session.register(image).await
 }
 
@@ -68,7 +68,7 @@ pub async fn store_ob(mut obj:DefaultDicomObject, session: &mut RegisterManager)
 /// If the existing data has a different checksum, an error is returned
 pub async fn import_single_file(path:&Path) -> tools::Result<RegisterResult>
 {
-	single_register(storage::Image::from_existing(path, false).await?).await
+	single_register(storage::Image::from_existing(path).await?).await
 }
 
 /// Registers an existing file and moves the file to the storage path (data won't be changed).
@@ -78,5 +78,5 @@ pub async fn import_single_file(path:&Path) -> tools::Result<RegisterResult>
 /// If the existing data has a different checksum, an error is returned
 pub async fn move_single_file(path:&Path) -> tools::Result<RegisterResult>
 {
-	single_register(storage::Image::move_existing(path, false).await?).await
+	single_register(storage::Image::move_existing(path).await?).await
 }

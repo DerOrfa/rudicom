@@ -1,10 +1,18 @@
 use std::path::{Path, PathBuf};
 use std::io::{ErrorKind, Write};
 use tracing::warn;
+use crate::tools::complete_filepath;
 
 pub trait Committable: Sized + Write + Send {
-	/// Create the file, trying to create an existing file should fail
+	/// Create the file
+	///
+	/// Trying to create over an existing file should fail.
+	/// If filename is a relative path, file should be created in the configured storage path
+	/// (but only the relative path be saved).
 	fn create(filename:PathBuf) -> std::io::Result<Self>;
+	/// Construct a committable from an existing file.
+	/// If filename is a relative path, it should assume to be in the configured storage path
+	/// (but only the relative path be saved).
 	fn from_existing(filename:PathBuf) -> std::io::Result<Self>;
 	fn create_async(filename:PathBuf) -> tokio::task::JoinHandle<std::io::Result<Self>> where Self: Sized + Send + 'static {
 		tokio::task::spawn_blocking(move || Self::create(filename))
@@ -29,12 +37,12 @@ pub struct StandardFile {
 
 impl Committable for StandardFile {
 	fn create(filepath:PathBuf) -> std::io::Result<Self> {
-		std::fs::File::create_new(&filepath)
+		std::fs::File::create_new(complete_filepath(&filepath))
 			.map(|file|Self{filepath,file,committed:false})
 	}
 
 	fn from_existing(filepath: PathBuf) -> std::io::Result<Self> {
-		std::fs::File::open(&filepath)
+		std::fs::File::open(complete_filepath(&filepath))
 			.map(|file|Self{filepath,file,committed:false})
 	}
 

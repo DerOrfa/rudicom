@@ -20,7 +20,6 @@ pub enum Image<C> where C:Committable,
 	/// An already existing file, its object and parameters
 	Existing{
 		path:PathBuf,
-		owned:bool,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
@@ -28,21 +27,19 @@ pub enum Image<C> where C:Committable,
 	/// An already existing file, but should be moved
 	Move {
 		org_path:PathBuf,
-		owned:bool,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
 	},
 	Moved {
-		org_path:PathBuf,
-		committable:C,
+		org_path:Option<PathBuf>,
+		committable:Result<C,PathBuf>,
 		size:u64,
 		checksum:Digest,
 	},
 	/// An already existing file, but should be copied
 	Copy {
 		org_path:PathBuf,
-		owned:bool,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
@@ -65,8 +62,8 @@ pub enum Image<C> where C:Committable,
 }
 
 impl<C> Image<C> where C:Committable + 'static {
-	pub async fn from_obj(obj:DefaultDicomObject) -> Self {Self::Create {obj}}
-	pub async fn from_existing<P:AsRef<Path>>(path:P, owned:bool) -> tools::Result<Self> {
+	pub fn from_obj(obj:DefaultDicomObject) -> Self {Self::Create {obj}}
+	pub async fn from_existing<P:AsRef<Path>>(path:P) -> tools::Result<Self> {
 		let path = path.as_ref();
 		let size = tokio::fs::metadata(path).await.context(format!("getting metadata for {}",path.display()))?.len();
 		let reader_ctx = format!("reading {}", path.display());
@@ -81,86 +78,84 @@ impl<C> Image<C> where C:Committable + 'static {
 		let (obj,md5_context) = obj_task.await?;
 		Ok(Image::Existing {
 			path:path.to_path_buf(),
-			owned, size,
+			size,
 			checksum: md5_context.finalize(),
 			obj: obj.map_err(|e|DicomError(e.into())).context(reader_ctx)?,
 		})
 	}
-	pub async fn move_existing<P:AsRef<Path>>(org_path:P, owned:bool) -> tools::Result<Self>{
-		if let Self::Existing { path, owned, size, checksum, obj } = Self::from_existing(org_path, owned).await?{
+	pub async fn move_existing<P:AsRef<Path>>(org_path:P) -> tools::Result<Self>{
+		if let Self::Existing { path, size, checksum, obj } = Self::from_existing(org_path).await?{
 			Ok(Self::Move {
 				org_path: path,
-				owned, size, checksum, obj,
+				size, checksum, obj,
 			})
 		} else { unreachable!(); }
 	}
-	pub async fn copy_existing<P:AsRef<Path>>(org_path:P, owned:bool) -> tools::Result<Self>{
-		if let Self::Existing { path, owned, size, checksum, obj } = Self::from_existing(org_path, owned).await?{
+	pub async fn copy_existing<P:AsRef<Path>>(org_path:P) -> tools::Result<Self>{
+		if let Self::Existing { path, size, checksum, obj } = Self::from_existing(org_path).await?{
 			Ok(Self::Copy {
 				org_path: path,
-				owned, size, checksum, obj,
+				size, checksum, obj,
 			})
 		} else { unreachable!(); }
-	}
-	pub async fn from_fileinfo(info:&FileInfo) -> tools::Result<Self> {
-		let image = Self::from_existing(info.get_path(), info.owned).await?;
-		if let Image::Existing { path, owned, size, checksum, obj } = &image
-		{
-			let checksum = format!("{:x}", checksum);
-			if *size != info.size {
-				warn!("Image size mismatch: filesize: {} != image size: {}", info.size, size);
-			}
-			if checksum != info.get_md5(){
-				return Err(tools::Error::ChecksumErr { checksum, file: path.to_string_lossy().to_string() })
-			}
-		} else { unreachable!(); }
-		Ok(image)
 	}
 	pub async fn into_saved(self) -> tools::Result<Self> {
 		match self {
 			// file needs to be created, write into a committable
 			Image::Create { obj } => {
 				let path=PathBuf::from(gen_filepath(&obj)?);
-				let path = complete_filepath(&path);
-				let p=path.parent().unwrap();
+				let c_path = complete_filepath(&path);
+				let p=c_path.parent().unwrap();
 				tokio::fs::create_dir_all(p).await
 					.context(format!("Failed creating storage path {}",p.display()))?;
 
-				let path_clone=path.clone();
 				let (committable,checksum) = spawn_blocking(move || {
-					let inner = C::create(path_clone)?;
+					let inner = C::create(path)?;
 					let mut checksum = md5::Context::new();
 					let mut writer = crate::db::file::Md5Proxy {context:&mut checksum,inner};
 					obj.write_all(&mut writer).map_err(|e|DicomError(e.into()))?;
 					Ok::<_, tools::Error>((writer.inner,checksum))
 				}).await??;
-				let size = std::fs::metadata(&path)?.len();
+				let size = std::fs::metadata(&c_path)?.len();
 				Ok(Self::Created{
 					committable,
 					checksum:checksum.finalize(),
 					size
 				})
 			},
-			Image::Move { org_path, owned, size, checksum, obj } => {
+			Image::Move { org_path, size, checksum, obj } => {
 				let path=PathBuf::from(gen_filepath(&obj)?);
-				if std::fs::exists(&path)?{
-					return Err(tools::Error::FileAlreadyExists {path:path.to_path_buf()});
+				let c_path = complete_filepath(&path);
+				if c_path != org_path.canonicalize()?{
+					if std::fs::exists(&c_path)?{
+						return Err(tools::Error::FileAlreadyExists {path:c_path});
+					}
+					if let Err(_)=tokio::fs::hard_link(&org_path,&c_path).await{
+						tokio::fs::copy(&org_path,&c_path).await?;
+					}
+					Ok(Self::Moved {
+						org_path:Some(org_path),
+						committable: Ok(C::from_existing(path)?),
+						size, checksum,
+					})
+				} else {
+					// file is literally the same, so just take ownership and *don't* make it a
+					// committable, we don't want it to be deleted on an abort
+					// Just keep the (relative) path, we're gonna need it
+					Ok(Self::Moved {
+						org_path:None,
+						committable: Err(path),
+						size, checksum,
+					})
 				}
-				if let Err(_)=tokio::fs::hard_link(&org_path,&path).await{
-					tokio::fs::copy(&org_path,&path).await?;
-				}
-				Ok(Self::Moved {
-					org_path,
-					committable: C::from_existing(path)?,
-					size, checksum,
-				})
 			},
-			Image::Copy { org_path, owned, size, checksum, obj } => {
+			Image::Copy { org_path, size, checksum, obj } => {
 				let path=PathBuf::from(gen_filepath(&obj)?);
-				if std::fs::exists(&path)?{
-					return Err(tools::Error::FileAlreadyExists {path:path.to_path_buf()});
+				let c_path = complete_filepath(&path);
+				if std::fs::exists(&c_path)?{
+					return Err(tools::Error::FileAlreadyExists {path:c_path.to_path_buf()});
 				}
-				tokio::fs::copy(&org_path,&path).await?;
+				tokio::fs::copy(&org_path,&c_path).await?;
 				Ok(Self::Copied {
 					committable: C::from_existing(path)?,
 					size, checksum,
@@ -173,9 +168,9 @@ impl<C> Image<C> where C:Committable + 'static {
 	}
 	pub fn owned(&self) -> bool {
 		match self {
-			Image::Existing { owned , .. } | Image::Move {owned,..} | Image::Copy {owned,..}
-				=> *owned,
-			Image::Create { .. } | Image::Created { .. } | Image::Committed {..} | Image::Moved {..} | Image::Copied {..}
+			Image::Existing { .. } => false,
+			Image::Copy {..} | Image::Move {..} | Image::Create { .. } | Image::Created { .. }
+			| Image::Committed {..} | Image::Moved {..} | Image::Copied {..}
 				=> true, // @todo check if owned
 		}
 	}
@@ -183,12 +178,12 @@ impl<C> Image<C> where C:Committable + 'static {
 		match self {
 			Image::Create { .. } | Image::Committed { .. } | Image::Move { .. } | Image::Copy {..}
 				=> None,
-			Image::Existing { path, owned, size, checksum, .. }
-				=> Some(FileInfo::new(path,checksum.clone(),*owned,*size)),
-			Image::Created { committable, size, checksum }
-			| Image::Moved {committable, size, checksum, ..}
-			| Image::Copied {committable, size, checksum, ..}
-				=> Some(FileInfo::new(committable.get_targetpath(),checksum.clone(),true,*size)),
+			Image::Existing { path, size, checksum, .. }
+				=> Some(FileInfo::new(path,checksum.clone(),false, *size)),
+			Image::Created { size, checksum, .. }
+			| Image::Copied { size, checksum, ..}
+			| Image::Moved { size, checksum, .. }
+				=> Some(FileInfo::new(self.get_path(),checksum.clone(),true,*size)),
 		}
 	}
 	pub fn get_md5(&self) -> Option<&Digest> {
@@ -204,7 +199,13 @@ impl<C> Image<C> where C:Committable + 'static {
 		match self {
 			Image::Move { .. } | Image::Create { .. } | Image::Copy { .. } => panic!("File not yet created"),
 			Image::Committed { path } | Image::Existing { path, .. } => path,
-			Image::Created { committable, .. } | Image::Copied { committable, .. } | Image::Moved { committable, .. } => committable.get_targetpath(),
+			Image::Created { committable, .. } | Image::Copied { committable, .. }  => committable.get_targetpath(),
+			Image::Moved {committable, ..} =>
+				match &committable
+				{
+					Ok(c) => c.get_targetpath(),
+					Err(p)=>p,
+				},
 		}
 	}
 	pub fn commit(&mut self) {
@@ -217,10 +218,17 @@ impl<C> Image<C> where C:Committable + 'static {
 			Image::Created { mut committable, .. } | Image::Copied { mut committable, .. } => {
 				committable.commit()
 			},
-			Image::Moved { org_path, mut committable, .. } => {
-				committable.commit();
-				if let Err(e) = std::fs::remove_file(&org_path){
-					warn!("Failed to remove original file {} in a move op ({e})", org_path.display());
+			Image::Moved { org_path, committable, .. } => {
+				match committable {
+					Ok(mut c) => {
+						c.commit();
+						if let Some(org_path) = org_path {
+							if let Err(e) = std::fs::remove_file(&org_path) {
+								warn!("Failed to remove original file {} in a move op ({e})", org_path.display());
+							}
+						}
+					}
+					Err(_) => {} // not a Committable, nothing to be done, just keep it
 				}
 			}
 		}

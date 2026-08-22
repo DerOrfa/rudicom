@@ -1,7 +1,6 @@
 use crate::db::register_manager::RegisterManager;
 use crate::db::{Entry, RecordId, RegisterResult};
 use crate::tools::Error;
-use crate::tools::store::is_storage;
 use crate::{storage, tools};
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use glob::glob;
@@ -34,7 +33,7 @@ pub enum ImportMode{
 	Import,
 	/// won't touch the file but create an owned copy inside the configured storage path (which might collide with the source file)
 	Store,
-	/// if the source is inside the configured storage path the DB takes ownership of the existing file, otherwise file will be moved into the configured storage path
+	/// Like [ImportMode::Store] but moves the file into the configured storage path (if it's already there, DB just takes ownership)
 	Move
 }
 
@@ -116,9 +115,9 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> tools
 			.map_ok(move|p|async move {
 				let filename = p.to_string_lossy().to_string();
 				let image = match mode {
-					ImportMode::Import => storage::Image::from_existing(p, false).await,
-					ImportMode::Store => storage::Image::copy_existing(p, true).await,
-					ImportMode::Move => storage::Image::move_existing(&p,is_storage(&p)).await,
+					ImportMode::Import => storage::Image::from_existing(p).await,
+					ImportMode::Store => storage::Image::copy_existing(p).await,
+					ImportMode::Move => storage::Image::move_existing(&p).await,
 				}?;
 				Ok((filename,image))
 			})

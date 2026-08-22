@@ -81,7 +81,7 @@ impl dimse::io::FileAccess for Accessor {
 		// 	.map(|e|e.to_str().map(Cow::into_owned)).transpose()
 		// 	.map_err(|e|failure(FailureCode::InvalidArgument).offending([tags::TIMEZONE_OFFSET_FROM_UTC]).comment(e))?;
 
-		let (table, id_tag,known_db_tags) = match ident.level {
+		let (table, _id_tag,known_db_tags) = match ident.level {
 			Some(RetrieveLevel::IMAGE) => Ok(("instances",tags::SOP_INSTANCE_UID,INSTANCE_TAGS.deref())),
 			Some(RetrieveLevel::SERIES) => Ok(("series",tags::SERIES_INSTANCE_UID,SERIES_TAGS.deref())),
 			Some(RetrieveLevel::STUDY) => Ok(("studies",tags::STUDY_INSTANCE_UID,STUDY_TAGS.deref())),
