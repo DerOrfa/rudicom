@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use crate::dcm::gen_filepath;
 use crate::storage::file::{Committable, StandardFile};
 use crate::tools;
@@ -7,32 +8,44 @@ use dicom::object::DefaultDicomObject;
 use md5::Digest;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use pyo3::prelude::PyModule;
+use pyo3::Python;
 use tokio::task::spawn_blocking;
 use tracing::warn;
 use crate::db::FileInfo;
 use crate::storage::checked_load;
 
+/// An object representing an existing or about to be written dicom image file in its various stages.
+///
+/// Uses [std::fs::File] and [Committable] as backends.
 #[derive(Debug)]
 pub enum Image<C> where C:Committable,
 {
-	/// An object ready to be created as a file
+	/// An object ready to be created as a file (always owned)
 	Create{
 		obj:DefaultDicomObject
 	},
-	/// An already existing file, its object and parameters
+	/// An already existing file, its object and parameters (never owned)
 	Existing{
 		path:PathBuf,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
 	},
-	/// An already existing file, but should be moved
+	/// An already existing file, but should be moved.
+	///
+	/// Considered owned, but only the target file.
+	/// Source and target *can* be the same file.
+	/// Will delete the source if commited (unless it's the same as target).
 	Move {
 		org_path:PathBuf,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
 	},
+	/// The saved version of [Image::Move] (owned).
+	///
+	/// Dropping this will cause a rollback (aka target file will be removed).
 	Moved {
 		org_path:Option<PathBuf>,
 		committable:Result<C,PathBuf>,
@@ -40,34 +53,58 @@ pub enum Image<C> where C:Committable,
 		checksum:Digest,
 		obj:DefaultDicomObject
 	},
-	/// An already existing file, but should be copied
+	/// An already existing file, but should be copied (always owned)
 	Copy {
 		org_path:PathBuf,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
 	},
+	/// The saved version of [Image::Copy]
+	///
+	/// Dropping this will cause a rollback (aka file will be removed).
 	Copied {
 		committable:C,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
 	},
-	/// A file has been created, not yet commited
-	/// dropping this will cause a rollback (aka file will be removed)
+	/// The saved version of [Image::Create] (always owned)
+	///
+	/// Dropping this will cause a rollback (aka file will be removed).
 	Created{
 		committable:C,
 		size:u64,
 		checksum:Digest,
 		obj:DefaultDicomObject
 	},
+	/// The commited stage for all
 	Committed{
 		path:PathBuf
 	}
 }
 
 impl<C> Image<C> where C:Committable + 'static {
+	/// create a [Image::Create] from a [DefaultDicomObject]
 	pub fn from_obj(obj:DefaultDicomObject) -> Self {Self::Create {obj}}
+	/// create a [Image::Create] from a [DefaultDicomObject]
+	pub fn from_obj_filtered(mut obj:DefaultDicomObject) -> tools::Result<Self> {
+		if !crate::config::get().filters.is_empty(){
+			Python::attach::<_,tools::Result<()>>(|py| {
+				for (name,code) in crate::config::get().filters.iter()
+					.filter(|(_,code)| !code.is_empty())
+				{
+					let code = CString::new(code.as_str()).unwrap();
+					let name = CString::new(name.as_str()).unwrap();
+					let code = PyModule::from_code(py, code.as_ref(), c"", name.as_ref())?;
+					tools::filter::filter(code, &mut obj)?;
+				}
+				Ok(())
+			})?;
+		}
+		Ok(Self::from_obj(obj))
+	}
+	/// create a [Image::Existing]
 	pub async fn from_existing<P:AsRef<Path>>(path:P) -> tools::Result<Self> {
 		let path = path.as_ref();
 		let size = tokio::fs::metadata(path).await.context(format!("getting metadata for {}",path.display()))?.len();
@@ -77,6 +114,7 @@ impl<C> Image<C> where C:Committable + 'static {
 			size,checksum,obj,
 		})
 	}
+	/// create a [Image::Move]
 	pub async fn move_existing<P:AsRef<Path>>(org_path:P) -> tools::Result<Self>{
 		if let Self::Existing { path, size, checksum, obj } = Self::from_existing(org_path).await?{
 			Ok(Self::Move {
@@ -85,6 +123,7 @@ impl<C> Image<C> where C:Committable + 'static {
 			})
 		} else { unreachable!(); }
 	}
+	/// create a [Image::Copy]
 	pub async fn copy_existing<P:AsRef<Path>>(org_path:P) -> tools::Result<Self>{
 		if let Self::Existing { path, size, checksum, obj } = Self::from_existing(org_path).await?{
 			Ok(Self::Copy {
@@ -93,6 +132,8 @@ impl<C> Image<C> where C:Committable + 'static {
 			})
 		} else { unreachable!(); }
 	}
+	/// Transfer all variants into their saved (but uncommitted) stages.
+	/// Will do nothing if the stage is already saved or committed.
 	pub async fn into_saved(self) -> tools::Result<Self> {
 		match self {
 			// file needs to be created, write into a committable
@@ -120,6 +161,7 @@ impl<C> Image<C> where C:Committable + 'static {
 					obj:Arc::into_inner(obj).unwrap()
 				})
 			},
+			// make a cheap copy as [Committable], keep the source for now until commit
 			Image::Move { org_path, size, checksum, obj } => {
 				let path=PathBuf::from(gen_filepath(&obj)?);
 				let c_path = complete_filepath(&path);
@@ -147,6 +189,7 @@ impl<C> Image<C> where C:Committable + 'static {
 					})
 				}
 			},
+			// make a plain copy
 			Image::Copy { org_path, size, checksum, obj } => {
 				let path=PathBuf::from(gen_filepath(&obj)?);
 				let c_path = complete_filepath(&path);
@@ -164,14 +207,6 @@ impl<C> Image<C> where C:Committable + 'static {
 				=> Ok(self),
 		}
 	}
-	pub fn owned(&self) -> bool {
-		match self {
-			Image::Existing { .. } => false,
-			Image::Copy {..} | Image::Move {..} | Image::Create { .. } | Image::Created { .. }
-			| Image::Committed {..} | Image::Moved {..} | Image::Copied {..}
-				=> true, // @todo check if owned
-		}
-	}
 	pub fn get_fileinfo(&self) -> Option<FileInfo> {
 		match self {
 			Image::Create { .. } | Image::Committed { .. } | Image::Move { .. } | Image::Copy {..}
@@ -184,13 +219,13 @@ impl<C> Image<C> where C:Committable + 'static {
 				=> Some(FileInfo::new(self.get_path(),checksum.clone(),true,*size)),
 		}
 	}
-	pub fn get_md5(&self) -> Option<&Digest> {
+	pub fn get_md5(&self) -> Option<String> {
 		match self {
 			Image::Create { .. } | Image::Committed { .. } => None,
 			Image::Existing { checksum, .. } | Image::Move { checksum, .. }
 			| Image::Moved { checksum, .. } | Image::Copy { checksum, .. }
 			| Image::Copied { checksum, .. } | Image::Created { checksum, .. }
-			 	=> Some(checksum)
+			 	=> Some(format!("{:x}", checksum))
 		}
 	}
 	pub fn get_path(&self) -> &Path {
