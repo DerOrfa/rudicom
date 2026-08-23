@@ -3,7 +3,6 @@ use crate::db::register_manager::RegisterManager;
 use crate::db::{Entry, RegisterResult};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
-use crate::tools::store::store_ob;
 use crate::tools::tar::{TarStream, make_tar};
 use crate::tools::{Context, Error::DicomError};
 use crate::tools::{Error, get_instance_dicom, lookup_instance_file, remove::remove, verify::verify_entry};
@@ -29,6 +28,7 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use crate::storage::Image;
 
 pub(super) fn router() -> axum::Router
 {
@@ -99,9 +99,10 @@ async fn store_instance(
 		return Err(HttpError::new(InnerHttpError::BadRequest {message:"Ignoring empty upload".into()}, &headers))
 	}
 	let obj= from_reader(Cursor::new(bytes)).map_err(|e|DicomError(e.into())).into_http_error(&headers)?;
-	let mut sessions = sessions.lock().await;
-	let session = sessions.entry(addr.ip()).or_insert_with(|| RegisterManager::new());
-	let store = store_ob(obj, session).await.map_err(|e|HttpError::new(e, &headers))?;
+	let image = Image::from_obj_filtered(obj).map_err(|e|HttpError::new(e, &headers))?;
+	let store = sessions.lock().await
+		.entry(addr.ip()).or_insert_with(|| RegisterManager::new())
+		.register(image).await.into_http_error(&headers)?;
 	match store.await.unwrap_or_else(|e|Err(Error::IoError(std::io::Error::new(ErrorKind::BrokenPipe,e)))) {
 		Ok(RegisterResult::Stored(id)) => Ok((StatusCode::CREATED,
 			Json(json!({
@@ -124,6 +125,16 @@ async fn store_instance(
 					"Status":"ConflictingMetadata",
 					"ExistingPath":e.id().str_path(),
 					"ExistingData":serde_json::Value::from(e),
+				}))
+			).into_response())
+		}
+		Err(Error::FieldConflict{ fields, id }) => {
+			Ok((
+				StatusCode::CONFLICT,
+				Json(json!({
+					"Status":"ConflictingFields",
+					"ExistingPath":id.str_path(),
+					"ConflictingFields":fields,
 				}))
 			).into_response())
 		}

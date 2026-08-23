@@ -82,8 +82,8 @@ async fn insert<'a,C>(
 /// from the list (and thus the file if uncommited).
 ///
 /// A single transaction is started from `session` and either commited (returns Ok), or canceled (returns Err).
-/// A failed transaction does not remove images from the list, they can used on the retry.
-pub async fn bulk_insert<S,C>(
+/// A failed transaction does *not* remove images from the list, they can be used on the retry.
+pub async fn queued_insert<S,C>(
 	images:&mut Vec<register_manager::QEntry>,
 	session: &mut S
 ) -> tools::Result<()> where S:Session<C>, C:Connection
@@ -110,7 +110,7 @@ pub async fn bulk_insert<S,C>(
 				},
 				Ok(AlreadyStored(r)) => {
 					let entry = images.remove(idx);
-					let my_md5 = format!("{:x}", entry.image.get_md5().unwrap());
+					let my_md5 = entry.image.get_md5().expect("Image should be saved and should have a checksum");
 					let existing_md5 = lookup(&r).await?
 						.expect("existing entry should exist").get_file()?.get_md5().to_string();
 					if let Err(e) = entry.tx.send(
@@ -134,13 +134,13 @@ pub async fn bulk_insert<S,C>(
 		}
 
 		// if at least one was inserted, do study and series as well
-		if !images.is_empty() { // @would be usefull to let the caller know that the whole set failed
+		if !images.is_empty() { // @would be useful to let the caller know that the whole set failed
 			let ser = upsert(images[0].image.as_ref(), &series_id, vec![("study", study_id.0.clone().into_value())], &SERIES_TAGS, &transaction).await;
 			let std = upsert(images[0].image.as_ref(), &study_id, vec![], &STUDY_TAGS, &transaction).await;
 			if ser.is_err() || std.is_err() { //the series or the study update failed, that means we can throw away the whole set
 				let e = ser.and(std).err().unwrap();
-				images.drain(..).for_each(|entry| {
-					let e_cloned= match &e { // some error can't be cloned, luckily the relevant ones can
+				images.drain(..).for_each(|entry| { // let all receivers know
+					let e_cloned= match &e { // some errors can't be cloned, luckily the relevant ones can
 						SurrealError(e) => e.clone().into(),
 						FieldConflict { fields, id }
 							=> FieldConflict{fields:fields.clone(), id:id.clone()},

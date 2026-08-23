@@ -126,14 +126,14 @@ impl RegisterManager {
 		Ok(rx)
 	}
 
-	/// Runs [register::bulk_insert] on a list of [QEntry] and bisects the list recursively if an
+	/// Runs [register::queued_insert] on a list of [QEntry] and bisects the list recursively if an
 	/// error occurs.
 	/// Returns list of entries that where successfully inserted.
 	/// Failed [QEntry] and their [storage::Image] will be dropped, together with their potentially uncommited files.
 	/// Receivers will be told about that via a [tools::Result].
 	async fn inner_commit<S,C>(mut entries:Vec<QEntry>, session: &mut S) -> Vec<QEntry> where S:Session<C>, C:Connection
 	{
-		if let Err(e) =  db::register::bulk_insert(&mut entries, session).await { // something is bad,
+		if let Err(e) =  db::register::queued_insert(&mut entries, session).await { // something is bad,
 			// if its just one entry
 			if entries.len()<=1{ // tell its receiver
 				entries.pop().map(|entry|
