@@ -3,6 +3,8 @@ use std::io::{ErrorKind, Write};
 use tracing::{debug, error, warn};
 use crate::tools::complete_filepath;
 
+/// Wrapper around an implementor of [Write] that will be deleted from storage when dropped.
+/// Unless it's committed.
 pub trait Committable: Sized + Write + Send {
 	/// Create the file
 	///
@@ -18,13 +20,18 @@ pub trait Committable: Sized + Write + Send {
 		tokio::task::spawn_blocking(move || Self::create(filename))
 	}
 
-	/// commiting to the file
+	/// Commiting to the file.
+	///
 	/// This must be non-failable
 	fn commit(&mut self);
-	/// This may fail
+	/// Cancel, and with this remove the file.
+	///
+	/// This may fail.
 	fn cancel(&mut self) -> std::io::Result<()>;
 
-	/// Get intended path for the commited file
+	/// Get intended path for the commited file.
+	///
+	/// This returns the saved path not the canonical one.
 	fn get_targetpath(&self) -> &Path;
 }
 
@@ -51,7 +58,7 @@ impl Committable for StandardFile {
 	fn cancel(&mut self) -> std::io::Result<()> {
 		let mut filename = complete_filepath(&self.filepath);
 		if self.committed {
-			warn!("Cancelling already committed file");
+			error!("Cancelling already committed file");
 		} else {
 			tokio::spawn(async move {
 				match tokio::fs::remove_file(&filename).await {
