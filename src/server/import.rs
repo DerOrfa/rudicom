@@ -9,10 +9,11 @@ use crate::server::json::{get_mime, is_json};
 use crate::tools::import::{import_glob, import_glob_as_text, ImportConfig, ImportMode};
 
 
-pub(super) fn router() -> axum::Router
+pub fn router() -> axum::Router
 {
     axum::Router::new()
         .route("/import",post(|headers,config,pattern|import(headers,config,ImportMode::Import,pattern)))
+		.route("/copy",post(|headers,config,pattern|import(headers,config,ImportMode::Copy,pattern)))
 		.route("/store",post(|headers,config,pattern|import(headers,config,ImportMode::Store,pattern)))
 		.route("/move",post(|headers,config,pattern|import(headers,config,ImportMode::Move,pattern)))
 }
