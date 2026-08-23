@@ -9,6 +9,9 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::Display;
 use std::io::ErrorKind;
+use dicom::object::from_reader;
+use tokio::task::spawn_blocking;
+use crate::tools::Error::DicomError;
 
 pub enum ImportResult {
 	Registered { filename: String },
@@ -32,9 +35,11 @@ pub enum ImportMode{
 	/// won't touch or own the file, but register it in the DB
 	#[default]
 	Import,
-	/// won't touch the file but create an owned copy inside the configured storage path (which might collide with the source file)
+	/// won't touch the file but create an owned 1 to 1 copy inside the configured storage path (which might collide with the source file)
+	Copy,
+	/// won't touch the file but process (and possibly modify) the data and store it inside the configured storage path (which might collide with the source file)
 	Store,
-	/// Like [ImportMode::Store] but moves the file into the configured storage path (if it's already there, DB just takes ownership)
+	/// Like Store but moves the file into the configured storage path (if it's already there, DB just takes ownership)
 	Move
 }
 
@@ -43,6 +48,7 @@ impl Display for ImportMode
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let str = match self {
 			ImportMode::Import => "import",
+			ImportMode::Copy => "copy",
 			ImportMode::Store => "store",
 			ImportMode::Move => "move"
 		};
@@ -140,7 +146,13 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> tools
 				let filename = p.to_string_lossy().to_string();
 				match mode {
 					ImportMode::Import => storage::Image::from_existing(p).await,
-					ImportMode::Store => storage::Image::copy_existing(p).await,
+					ImportMode::Copy => storage::Image::copy_existing(p).await,
+					ImportMode::Store => {
+						spawn_blocking(||from_reader(std::fs::File::open(p)?)
+								.map_err(|e|DicomError(e.into()))
+						).await.map_err(Error::from).flatten()
+							.and_then(storage::Image::from_obj_filtered)
+					},
 					ImportMode::Move => storage::Image::move_existing(&p).await,
 				}
 				.map(|i|(filename.clone(),i))
