@@ -81,6 +81,7 @@ impl dimse::io::FileAccess for Accessor {
 		// 	.map(|e|e.to_str().map(Cow::into_owned)).transpose()
 		// 	.map_err(|e|failure(FailureCode::InvalidArgument).offending([tags::TIMEZONE_OFFSET_FROM_UTC]).comment(e))?;
 
+		// use the QUERY_RETRIEVE_LEVEL to get the table and DB field->dicom tags mapping
 		let (table, _id_tag,known_db_tags) = match ident.level {
 			Some(RetrieveLevel::IMAGE) => Ok(("instances",tags::SOP_INSTANCE_UID,INSTANCE_TAGS.deref())),
 			Some(RetrieveLevel::SERIES) => Ok(("series",tags::SERIES_INSTANCE_UID,SERIES_TAGS.deref())),
@@ -88,7 +89,7 @@ impl dimse::io::FileAccess for Accessor {
 			Some(RetrieveLevel::PATIENT) => return Err(failure(FailureCode::InvalidArgument).comment("Cannot do patient level find")),
 			None => Err(tags::QUERY_RETRIEVE_LEVEL)
 		}.map_err(|e|failure(FailureCode::MissingAttribute).offending([e]))?;
-
+		// compute a dicom tag -> db field mapping from that (multiple dicom tags might habe the same db field)
 		let mut search_map:HashMap<_,_> = Default::default();
 		for (db_key,dicom_attrs) in known_db_tags {
 			for attr in dicom_attrs.into_iter()
@@ -97,9 +98,11 @@ impl dimse::io::FileAccess for Accessor {
 				search_map.insert(attr.last_tag(),db_key.clone());
 			}
 		}
-
+		// get all entries from the table
+		// @todo do a propper DB lookup
 		let entries = db::list_entries(table).await.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))?;
 		let mut ret =vec![];
+		//Build a dicom object for each entry with its identifier and the fields in search_map
 		for entry in entries.iter() {
 			let parents = db::find_down_tree(entry.id()).await.map_err(|e|failure(FailureCode::InvalidArgument).comment(e))?
 				.into_iter().rev()
@@ -116,6 +119,7 @@ impl dimse::io::FileAccess for Accessor {
 			}
 			ret.push(matcher);
 		}
+		// filter those for match with the request
 		let ret:Vec<_> = ret.into_iter()
 			.filter_map(|matcher|ident.matches_all(&matcher).then_some(Ok(matcher)))
 			.collect();
