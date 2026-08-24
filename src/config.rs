@@ -82,7 +82,7 @@ pub fn init(config_file:Option<PathBuf>) -> Result<(),ConfigError>{
 		tracing::warn!(r#"no config file given loading defaults (use "write-config" subcommand to write it to a file)"#);
 	}
 
-	CONFIG.set(builder.build().unwrap().try_deserialize()?).expect("Failed to set config");
+	CONFIG.set(builder.build().and_then(|c|c.try_deserialize())?).ok();
 	Ok(())
 }
 
