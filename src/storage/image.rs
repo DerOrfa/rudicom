@@ -1,4 +1,5 @@
 use std::ffi::CString;
+use std::io::ErrorKind;
 use crate::dcm::gen_filepath;
 use crate::storage::file::{Committable, StandardFile};
 use crate::tools;
@@ -165,10 +166,15 @@ impl<C> Image<C> where C:Committable + 'static {
 			Image::Move { org_path, size, checksum, obj } => {
 				let path=PathBuf::from(gen_filepath(&obj)?);
 				let c_path = complete_filepath(&path);
-				if c_path != org_path.canonicalize()? { // if file is not already in place, create a copy
-					if std::fs::exists(&c_path)?{
-						return Err(tools::Error::FileAlreadyExists {path:c_path});
+				let exists = std::fs::exists(&c_path)?;
+				if !exists || c_path.canonicalize()? != org_path.canonicalize()? { // if file is not already in place, create a copy
+					if exists {
+						Err(std::io::Error::new(ErrorKind::AlreadyExists,format!("{} already exists", c_path.display())))?;
 					}
+					let p = c_path.parent().unwrap();
+					tokio::fs::create_dir_all(p).await
+						.context(format!("Failed creating storage path {}",p.display()))?;
+
 					if let Err(_)=tokio::fs::hard_link(&org_path,&c_path).await { // try hardlink
 						tokio::fs::copy(&org_path,&c_path).await?; // fall back to copy
 					}
@@ -194,8 +200,13 @@ impl<C> Image<C> where C:Committable + 'static {
 				let path=PathBuf::from(gen_filepath(&obj)?);
 				let c_path = complete_filepath(&path);
 				if std::fs::exists(&c_path)?{
-					return Err(tools::Error::FileAlreadyExists {path:c_path.to_path_buf()});
+					Err(std::io::Error::new(ErrorKind::AlreadyExists,format!("{} already exists", c_path.display())))?;
 				}
+
+				let p = c_path.parent().unwrap();
+				tokio::fs::create_dir_all(p).await
+					.context(format!("Failed creating storage path {}",p.display()))?;
+
 				tokio::fs::copy(&org_path,&c_path).await?;
 				Ok(Self::Copied {
 					committable: C::from_existing(path)?,

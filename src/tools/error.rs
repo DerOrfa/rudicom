@@ -125,9 +125,6 @@ pub enum Error
 		inner:std::io::Error,
 		path:PathBuf,
 	},
-	#[error("File {path} already exists")]
-	FileAlreadyExists{path:PathBuf},
-
 	#[error("Failed to parse {to_parse} ({source})")]
 	ParseError{
 		to_parse: String,
