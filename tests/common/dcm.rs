@@ -1,12 +1,15 @@
 use std::io::ErrorKind;
 use chrono::{DateTime, Utc};
-use dicom::core::{DataElement, VR};
+use dicom::core::{DataElement, PrimitiveValue, VR};
 use dicom::dictionary_std::{tags, uids};
 use dicom::object::{FileDicomObject, FileMetaTableBuilder, InMemDicomObject};
 use rudicom::{db, tools};
 use rudicom::tools::remove::remove;
 use rudicom::db::{RegisterResult};
 use std::time::SystemTime;
+use dicom::core::header::Header;
+use dicom::core::value::Value;
+use dicom::object::mem::InMemElement;
 use tokio::task::JoinSet;
 use tracing::trace;
 use rudicom::db::register_manager::RegisterManager;
@@ -122,4 +125,24 @@ pub async fn cleanup() -> rudicom::tools::Result<()>
 		remove(study.id()).await?;
 	}
 	Ok(())
+}
+
+pub fn diff(obj1:InMemDicomObject, mut obj2:InMemDicomObject)-> Vec<(Option<InMemElement>, Option<InMemElement>)>
+{
+	obj1.into_iter()
+		.filter_map(|org|{
+			let got = obj2.take(org.tag());
+			match got {
+				Some(g) => {
+					let same = if let Value::Primitive(PrimitiveValue::Str(_)) = org.value(){
+						org.to_str().unwrap() == g.to_str().unwrap()
+					} else {
+						org.value() == g.value()
+					};
+					if same {None} else {Some((Some(org),Some(g)))}
+				}
+				None => Some((Some(org), None)),
+			}
+		})
+		.collect()
 }
