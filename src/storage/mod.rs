@@ -8,7 +8,7 @@ use crate::tools::Context;
 use crate::tools::error::DicomError;
 
 pub mod async_store;
-mod file;
+pub mod file;
 pub mod image;
 
 pub type Image<C = StandardFile> = image::Image<C>;

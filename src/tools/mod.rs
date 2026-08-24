@@ -31,7 +31,7 @@ pub fn reduce_path(paths:Vec<PathBuf>) -> PathBuf
 }
 /// generate absolute path using "storage_path" from the config if given path is relative
 /// as "storage_path" is guaranteed to be absolute already, the result is guaranteed to be absolute
-pub fn complete_filepath<P>(path:&P) -> PathBuf where P:AsRef<Path>
+pub fn complete_filepath<P>(path:P) -> PathBuf where P:AsRef<Path>
 {
 	crate::config::get().paths.storage_path.join(path)
 }
