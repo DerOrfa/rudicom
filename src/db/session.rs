@@ -69,7 +69,8 @@ impl<C> SingleSession<C> where C:Connection {
 			.map(|e|{trace!("{thread:?} session {} {addr:x} is back to busy",self.id);e})
 			.map_err(|e|{
 				error!("error {e} when getting a new transaction, this Session is bad now..");
-				e})?;
+				e
+			})?;
 
 		Ok(Some(TransactionGuard(state,self.id)))
 	}
@@ -215,5 +216,23 @@ impl<C> Deref for TransactionGuard<C> where C:Connection {
 		if let SessionState::Busy(t) = self.0.deref() {
 			t
 		} else { panic!("transaction is already closed");}
+	}
+}
+
+impl<C> Drop for TransactionGuard<C> where C:Connection {
+	fn drop(&mut self) {
+		let inner_clone = OwnedMutexGuard::mutex(&self.0).clone();
+		let id = self.1;
+		if let SessionState::Busy(t) = mem::take(self.0.deref_mut()) {
+			spawn(async move {
+				trace!("{:?} auto-cancelling a transaction on session {}", thread::current().id(),id);
+				let mut inner_clone=inner_clone.lock().await;
+				if let Err(e) = t.cancel().await.map(|s| *inner_clone = SessionState::Ready(s)){
+					trace!("{:?} auto-cancel on session {} failed ({e})", thread::current().id(),id);
+				} else {
+					trace!("{:?} auto-cancel on session {} is done", thread::current().id(),id);
+				}
+			});
+		}
 	}
 }
