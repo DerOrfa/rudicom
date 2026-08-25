@@ -22,9 +22,12 @@ pub fn init_config() -> Result<(), Box<dyn std::error::Error>> {
 	// create a storage path where the default config would expect it
 	let storage_path = std::env::temp_dir().join("db_store");
 	println!("Using {}",storage_path.display());
-	if !storage_path.exists() {
-		std::fs::create_dir(&storage_path)?;
-	};
+	match std::fs::create_dir(&storage_path)
+	{
+		Ok(_) => (),
+		Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+		Err(e) => return Err(Box::new(e)),
+	}
 
 	config::init(None)?;
 

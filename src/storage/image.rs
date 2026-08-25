@@ -4,7 +4,7 @@ use crate::dcm::gen_filepath;
 use crate::storage::file::{Committable, StandardFile};
 use crate::tools;
 use crate::tools::Error::DicomError;
-use crate::tools::{Context, complete_filepath};
+use crate::tools::{complete_filepath, create_complete_path, Context};
 use dicom::object::DefaultDicomObject;
 use md5::Digest;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use pyo3::prelude::PyModule;
 use pyo3::Python;
 use tokio::task::spawn_blocking;
-use tracing::warn;
+use tracing::{trace, warn};
 use crate::db::FileInfo;
 use crate::storage::checked_load;
 
@@ -144,8 +144,9 @@ impl<C> Image<C> where C:Committable + 'static {
 				let p=c_path.parent().unwrap();
 				let obj = Arc::new(obj);
 				let obj_shared=obj.clone();
-				tokio::fs::create_dir_all(p).await
-					.context(format!("Failed creating storage path {}",p.display()))?;
+
+				trace!("Creating new image file {} from object",c_path.display());
+				create_complete_path(p).await?;
 
 				let (committable,checksum) = spawn_blocking(move || {
 					let inner = C::create(path)?;
@@ -166,17 +167,18 @@ impl<C> Image<C> where C:Committable + 'static {
 			Image::Move { org_path, size, checksum, obj } => {
 				let path=PathBuf::from(gen_filepath(&obj)?);
 				let c_path = complete_filepath(&path);
-				let exists = std::fs::exists(&c_path)?;
-				if !exists || c_path.canonicalize()? != org_path.canonicalize()? { // if file is not already in place, create a copy
+				let exists = std::fs::exists(&c_path).context(format!("Failed to check existence of {}",c_path.display()))?;
+				if !exists || c_path.canonicalize()? != org_path.canonicalize()? { // if file is not already in place, create a (cheap) copy
 					if exists {
 						Err(std::io::Error::new(ErrorKind::AlreadyExists,format!("{} already exists", c_path.display())))?;
 					}
 					let p = c_path.parent().unwrap();
-					tokio::fs::create_dir_all(p).await
-						.context(format!("Failed creating storage path {}",p.display()))?;
+					trace!("Moving image file from {} to {}", org_path.display(),c_path.display());
 
+					create_complete_path(p).await?;
 					if let Err(_)=tokio::fs::hard_link(&org_path,&c_path).await { // try hardlink
-						tokio::fs::copy(&org_path,&c_path).await?; // fall back to copy
+						tokio::fs::copy(&org_path,&c_path).await// fall back to copy
+							.context(format!("Failed copying {} to {}",org_path.display(),c_path.display()))?;
 					}
 					Ok(Self::Moved {
 						org_path:Some(org_path),
@@ -187,6 +189,7 @@ impl<C> Image<C> where C:Committable + 'static {
 					// file is literally the same, so just take ownership and *don't* make it a
 					// committable, we don't want it to be deleted on an abort
 					// Just keep the (relative) path, we're gonna need it
+					trace!("Taking ownership of image file {}", org_path.display());
 					Ok(Self::Moved {
 						org_path:None,
 						committable: Err(path),
@@ -203,11 +206,12 @@ impl<C> Image<C> where C:Committable + 'static {
 					Err(std::io::Error::new(ErrorKind::AlreadyExists,format!("{} already exists", c_path.display())))?;
 				}
 
+				trace!("Copying image file from {} to {}", org_path.display(),c_path.display());
 				let p = c_path.parent().unwrap();
-				tokio::fs::create_dir_all(p).await
-					.context(format!("Failed creating storage path {}",p.display()))?;
 
-				tokio::fs::copy(&org_path,&c_path).await?;
+				create_complete_path(p).await?;
+				tokio::fs::copy(&org_path,&c_path).await
+					.context(format!("Failed copying {} to {}",org_path.display(),c_path.display()))?;
 				Ok(Self::Copied {
 					committable: C::from_existing(path)?,
 					size, checksum, obj

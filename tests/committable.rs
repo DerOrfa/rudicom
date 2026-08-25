@@ -13,7 +13,7 @@ use crate::common::dcm::diff;
 static LOG_LEVEL: LevelFilter = LevelFilter::INFO;
 
 mod common;
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn from_obj() -> Result<(), Box<dyn std::error::Error>>
 {
 	init_config().unwrap();
@@ -48,7 +48,7 @@ async fn from_obj() -> Result<(), Box<dyn std::error::Error>>
 	Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn from_existing() -> Result<(), Box<dyn std::error::Error>>
 {
 	init_config().unwrap();
@@ -72,7 +72,7 @@ async fn from_existing() -> Result<(), Box<dyn std::error::Error>>
 	Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn move_existing() -> Result<(), Box<dyn std::error::Error>>
 {
 	init_config().unwrap();
@@ -116,7 +116,7 @@ async fn move_existing() -> Result<(), Box<dyn std::error::Error>>
 	Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn copy_existing() -> Result<(), Box<dyn std::error::Error>>
 {
 	init_config().unwrap();

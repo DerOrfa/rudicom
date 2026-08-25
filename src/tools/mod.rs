@@ -35,6 +35,17 @@ pub fn complete_filepath<P>(path:P) -> PathBuf where P:AsRef<Path>
 {
 	crate::config::get().paths.storage_path.join(path)
 }
+
+/// Calls [tokio::fs::create_dir_all], ignores AlreadyExists error
+pub async fn create_complete_path(p: impl AsRef<Path>) -> Result<()> {
+	let p = p.as_ref();
+	match tokio::fs::create_dir_all(p).await
+	{
+		Ok(_) => Ok(()),
+		Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+		e => e.context(format!("Failed creating storage path {}",p.display()))
+	}
+}
 pub async fn get_instance_dicom(id:String) -> Result<Option<DefaultDicomObject>>
 {
 	match lookup_instance_file(id).await
