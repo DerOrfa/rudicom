@@ -166,7 +166,7 @@ impl RegisterManager {
 			self._commit(queue,kill_timer).await;
 		}
 	}
-	async fn _save_fn(entry:QEntry) -> Option<QEntry> {
+	async fn write_image(entry:QEntry) -> Option<QEntry> {
 		let QEntry{ tx, register_result, image } = entry;
 		let instance_uid = extract_from_dicom(image.as_ref(), tags::SOP_INSTANCE_UID)
 			.expect("No SOPInstanceUID??").to_string();
@@ -207,7 +207,7 @@ impl RegisterManager {
 		// fill up joinset
 		while saver.len() < crate::config::get().limits.max_files as usize {
 			if let Some(entry) = objects.pop_front() {
-				saver.spawn(Self::_save_fn(entry));
+				saver.spawn(Self::write_image(entry));
 			} else { break; }
 		}
 		// join one / add one until all are done
@@ -218,7 +218,7 @@ impl RegisterManager {
 				_ => {},
 			}
 			if let Some(new)= objects.pop_front(){
-				saver.spawn(Self::_save_fn(new));
+				saver.spawn(Self::write_image(new));
 			}
 		}
 

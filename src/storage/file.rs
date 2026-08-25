@@ -31,7 +31,7 @@ pub trait Committable: Sized + Write + Send {
 
 	/// Get intended path for the commited file.
 	///
-	/// This returns the saved path not the canonical one.
+	/// This returns the saved path inside the storage, not the canonical one.
 	fn get_targetpath(&self) -> &Path;
 }
 
