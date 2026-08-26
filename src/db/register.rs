@@ -60,8 +60,7 @@ async fn insert<'a,C>(
 		.bind(("content",meta)).bind(("rec",record_id.0.clone()));
 
 	if let Some(existing) = q.await?
-		.take::<Option<db_types::Value>>(0)?
-		.map(Entry::try_from).transpose()?
+		.take::<Option<Entry>>(0)?
 	{
 		if existing == *obj {
 			Ok(AlreadyStored(record_id.clone()))

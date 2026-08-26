@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::opt::{IntoResource, PatchOp, Resource};
+use surrealdb::opt::{IntoResource, PatchOp};
 use surrealdb::types::{ErrorDetails, QueryError, SurrealValue, Value};
 use surrealdb::Surreal;
 use surrealdb::types as db_types;
@@ -44,35 +44,23 @@ pub enum RegisterResult
 	Stored(RecordId),
 	AlreadyStored(RecordId),
 }
-pub async fn list_entries<T>(table:T) -> Result<Vec<Entry>> where Resource: From<T>
+pub async fn list_entries(table: &str) -> Result<Vec<Entry>>
 {
-	let val = DB.select::<Value>(Resource::from(table)).await?;
-	let kind = val.kind().to_string();
-	if let Value::Array(array) = val {
-		array.into_iter().map(Entry::try_from)
-			.collect()
-	} else {
-		Err(UnexpectedResult {found: kind,expected:"list of entries".into()})
-	}
+	let ctx = format!("listing content of table {table}");
+	DB.select(table).await.context(&ctx)
 }
 
 pub async fn lookup(id:&RecordId) -> Result<Option<Entry>>
 {
 	let ctx = format!("looking up {id}");
-	let v:Option<Value> = DB.select(id.0.to_owned()).await.context(ctx.clone())?;
-	if let Some(v) = v {
-		Some(Entry::try_from(v)).transpose().context(ctx)
-	} else {
-		Ok(None)
-	}
+	DB.select(id.0.to_owned()).await.context(ctx.clone())
 }
 
 pub async fn lookup_uid<S>(table:S, uid:String) -> Result<Option<Entry>> where db_types::Table:From<S>
 {
 	let table:db_types::Table = table.into();
 	let ctx = format!("looking up {uid} in {table}");
-	DB.select::<Option<Value>>(db_types::RecordId::new(table, uid)).await.context(ctx.clone())?
-		.map(Entry::try_from).transpose().context(ctx)
+	DB.select::<Option<Entry>>(db_types::RecordId::new(table, uid)).await.context(ctx.clone()).context(ctx)
 }
 
 /// returns \[me,parent,parents_parent\]
@@ -172,7 +160,7 @@ impl Pickable for Value {
 	fn pick_ref<Q>(&self, element:Q) -> Result<&Value> where String: From<Q>{
 		let kind = self.kind().to_string();
 		match self {
-			db_types::Value::Object(obj) => obj.pick_ref(element),
+			Value::Object(obj) => obj.pick_ref(element),
 			_ => Err(UnexpectedResult {expected:"entry object".into(),found:kind})
 		}
 	}
@@ -180,7 +168,7 @@ impl Pickable for Value {
 	fn pick_remove<Q>(&mut self, element:Q) -> Result<Value> where String: From<Q> {
 		let kind = self.kind().to_string();
 		match self {
-			db_types::Value::Object(obj) => obj.pick_remove(element),
+			Value::Object(obj) => obj.pick_remove(element),
 			_ => Err(UnexpectedResult {expected:"entry object".into(),found:kind})
 		}
 	}
@@ -200,9 +188,10 @@ impl Pickable for db_types::Object {
 	}
 }
 
-pub async fn set_value(id:impl IntoResource<Option<Value>>, name:String, value:Value) -> Result<Value> {
+pub async fn set_value(id:impl IntoResource<Option<Value>>, name:impl ToString, value:Value) -> Result<Value> {
+	let name = name.to_string();
 	let ctx = format!("Updating column {name}");
-	let ob = db_types::Object::from(BTreeMap::<String, db_types::Value>::from([(name,value)]));
+	let ob = db_types::Object::from(BTreeMap::<String, Value>::from([(name,value)]));
 	DB.update(id).merge(ob).await.map(Option::unwrap_or_default).context(ctx)
 }
 pub async fn delete_value(id:impl IntoResource<Option<Value>>, name:impl AsRef<str>) -> Result<Value> {

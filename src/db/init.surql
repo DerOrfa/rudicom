@@ -1,4 +1,7 @@
 // set up instances table
+DEFINE TABLE IF NOT EXISTS instances PERMISSIONS
+	FOR delete WHERE protected != true // todo only affects record users
+	FOR select, create, update, delete FULL; // https://surrealdb.com/docs/learn/security/authorization/permissions-and-row-level-security
 DEFINE FIELD IF NOT EXISTS timestamp ON instances TYPE datetime DEFAULT time::now() READONLY;
 DEFINE FIELD IF NOT EXISTS series ON instances TYPE record<series> REFERENCE;
 DEFINE EVENT OVERWRITE del_instance ON TABLE instances WHEN $event == "DELETE" ASYNC THEN
