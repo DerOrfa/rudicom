@@ -1,20 +1,19 @@
-use std::ops::Deref;
 use self::Entry::{Instance, Series, Study};
-use crate::db;
-use crate::db::{AggregateData, Pickable, RecordId, DB};
-use crate::tools::Error::{NotFound, UnexpectedResult};
-use crate::tools::{entries_for_record, reduce_path, Context, Result};
+use crate::db::{self, AggregateData, DB, Pickable, RecordId};
+use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS, extract};
+use crate::tools::Error::NotFound;
+use crate::tools::{Context, Result, entries_for_record, reduce_path};
 use byte_unit::Byte;
-use std::path::PathBuf;
 use dicom::object::DefaultDicomObject;
-use crate::dcm::{extract, INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
+use std::ops::Deref;
+use std::path::PathBuf;
 use surrealdb::types as db_types;
-use surrealdb::types::{ToSql, Value};
+use surrealdb::types::{Kind, SerializationError, SurrealValue, ToSql};
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub enum Entry
 {
-	Instance((RecordId,db_types::Object)),
+	Instance((RecordId, db_types::Object)),
 	Series((RecordId,db_types::Object)),
 	Study((RecordId,db_types::Object))
 }
@@ -100,7 +99,7 @@ impl Entry
 			Instance(_) => self.get_file().map(|f|Byte::from(f.size)),
 			Series(_) | Study(_) => {
 				let ctx = format!("extracting size of {}",self.id().str_key());
-				self.get_aggregate().await.context(ctx.as_str())
+				Context::context(self.get_aggregate().await, ctx.as_str())
 					.map(|d|Byte::from(d.size))
 			}
 		}
@@ -122,7 +121,7 @@ impl Entry
 		{
 			inst.pick_ref("file")?.clone().try_into()
 		} else {Err(db::Error::UnexpectedEntry {expected:"instance".into(),id:self.id().clone()})};
-		result.context(context)
+		Context::context(result,context)
 	}
 	pub async fn get_path(&self) -> Result<PathBuf>
 	{
@@ -153,6 +152,23 @@ impl Entry
 		extract(obj,tags).into_iter().map(|(key,obj_val)| {
 			self.get(key).map(|entry_val|*entry_val==obj_val)
 		}).collect()
+	}
+}
+
+impl SurrealValue for Entry {
+	fn kind_of() -> Kind {Kind::Object}
+
+	fn is_value(value: &db_types::Value) -> bool {
+		if let Some(obj) = value.as_object() {
+			obj.contains_key("id")
+		} else { false }
+	}
+
+	fn into_value(self) -> db_types::Value {db_types::Value::Object(self.into())}
+
+	fn from_value(value: db_types::Value) -> std::result::Result<Self, db_types::Error> where Self: Sized
+	{
+		Entry::try_from(value.into_object()?)
 	}
 }
 
@@ -200,58 +216,35 @@ impl From<Entry> for db_types::Object {
 		}
 	}
 }
-impl From<Entry> for db_types::Value {
-	fn from(entry: Entry) -> Self {
-		db_types::Object::from(entry).into()
-	}
-}
 
-impl TryFrom<surrealdb::types::Value> for Entry
-{
-	type Error = crate::tools::Error;
-
-	fn try_from(value: db_types::Value) -> std::result::Result<Self, Self::Error>
-	{
-		let kind = value.kind().to_string();
-		let err = UnexpectedResult {expected:"single object".into(),found:kind};
-		match value {
-			db_types::Value::Array(mut array) => { //@todo probably unnecessary
-				if array.len() == 1 {
-					let last = array.drain(..1).last().unwrap();
-					Entry::try_from(last)
-				} else {
-					Err(err)
-				}
-			}
-			db_types::Value::Object(obj) =>
-				Entry::try_from(obj),
-			_ => Err(err),
-		}.context("trying to convert database value into an Entry")
-	}
-}
 impl TryFrom<db_types::Object> for Entry
 {
-	type Error = crate::tools::Error;
+	type Error = db_types::Error;
 
 	fn try_from(mut obj: db_types::Object) -> std::result::Result<Self, Self::Error>
 	{
-		let ctx = "trying to convert database object into an Entry";
 		let id = obj.remove("id")
-			.ok_or(Self::Error::ElementMissing{element:"id".into(),parent:obj.to_sql_pretty()}) // @todo find something better
-			.context(ctx)?;
+			.ok_or(Self::Error::serialization(
+				format!("'id' is missing in '{}'",obj.to_sql_pretty()),
+				SerializationError::Deserialization
+			))?;
 		match id
 		{
 			db_types::Value::RecordId(id) =>
-			{
 				match id.table.as_str() {
 					"instances" => Ok(Instance((RecordId(id), obj))),
 					"series" => Ok(Series((RecordId(id), obj))),
 					"studies" => Ok(Study((RecordId(id), obj))),
-					_ => Err(Self::Error::InvalidTable{table:id.table.to_string()})
-				}
-			}
-			_ => Err(UnexpectedResult{expected:"id".into(),found:id.kind().to_string()})
-		}.context(ctx)
+					_ => Err(Self::Error::serialization(
+						format!("Invalid table {}",id.table.to_string()),
+							 SerializationError::Deserialization
+					)),
+				},
+			_ => Err(Self::Error::serialization(
+				format!("'id' should be a RecordID, but it is '{}'", id.kind().to_string()),
+				SerializationError::Deserialization
+			))
+		}
 	}
 }
 
@@ -264,13 +257,13 @@ impl From<Entry> for serde_json::Value
 }
 
 impl Pickable for Entry {
-	fn pick_ref<Q>(&self, element: Q) -> Result<&Value>	where String: From<Q>
+	fn pick_ref<Q>(&self, element: Q) -> Result<&db_types::Value>	where String: From<Q>
 	{
 		let obj:&db_types::Object = self.as_ref();
 		obj.pick_ref(element)
 	}
 
-	fn pick_remove<Q>(&mut self, element: Q) -> Result<Value> where String: From<Q>
+	fn pick_remove<Q>(&mut self, element: Q) -> Result<db_types::Value> where String: From<Q>
 	{
 		self.as_mut().pick_remove(element)
 	}

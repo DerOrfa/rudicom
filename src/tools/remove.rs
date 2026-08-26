@@ -2,15 +2,14 @@ use crate::db;
 use crate::tools::entries_for_record;
 use crate::tools::Result;
 use std::path::{Path, PathBuf};
-use crate::db::{if_retry, DB};
-use surrealdb::types as db_types;
+use crate::db::{if_retry, DB, Entry};
 use tokio::fs::remove_dir;
 
 pub async fn remove(id:&db::RecordId) -> Result<()>
 {
 	let mut jobs=tokio::task::JoinSet::new();
 	for job in entries_for_record(id,"instances").await?
-		.into_iter().map(|e|remove_instance(e.id().clone()))
+		.into_iter().map(remove_instance)
 	{
 		jobs.spawn(job);
 	}
@@ -18,24 +17,21 @@ pub async fn remove(id:&db::RecordId) -> Result<()>
 	res.map(|_|())
 }
 
-async fn remove_instance(id:db::RecordId) -> Result<Option<db::Entry>>
+async fn remove_instance(e:Entry) -> Result<Option<Entry>>
 {
 	let mut res;
 	let mut retry = 0;
 	loop {
-		res = DB.delete::<Option<db_types::Value>>(id.0.clone()).await;
+		res = DB.delete::<Option<Entry>>(e.id().0.clone()).await;
 		match &res {
 			Err(e) => if if_retry(e,&mut retry).await?{continue},
 			_ => {break},
 		}
 	}
-	let res = res?.unwrap();
-	if res.is_nullish(){
-		return Ok(None)
-	}
-	let removed= db::Entry::try_from(res)?;
-	removed.get_file()?.remove().await?;
-	Ok(Some(removed))
+	if let Some(removed) = res? {
+		removed.get_file()?.remove().await?;
+		Ok(Some(removed))
+	} else { Ok(None) }
 }
 
 /// removes given directory and all parents until path is empty or stop_path is reached

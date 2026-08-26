@@ -97,7 +97,7 @@ async fn query_series(headers: HeaderMap,Path(path):Path<(String, String)>) -> R
 }
 async fn query_table(headers: HeaderMap,Path(table):Path<String>) -> Result<Response, HttpError>
 {
-	let qry = db::list_entries(table).await.into_http_error(&headers)?;
+	let qry = db::list_entries(&table).await.into_http_error(&headers)?;
 	Ok(Json(serde_json::Value::from(qry)).into_response())
 }
 
