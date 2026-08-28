@@ -1,21 +1,22 @@
-use crate::db::{Entry, lookup_uid};
+use crate::db::{DB, Entry, lookup_uid};
 use crate::dcm::{AttributeSelector, INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::store::store_single_ob;
-use crate::{db, tools};
-use dicom::core::VR;
+use crate::tools;
+use dicom::core::header::Header;
 use dicom::dictionary_std::tags;
-use dicom::object::mem::InMemElement;
-use dicom::object::{FileDicomObject, InMemDicomObject};
+use dicom::object::{DefaultDicomObject, FileDicomObject, InMemDicomObject, Tag};
 use dimse::RetrieveLevel;
 use dimse::definitions::FailureCode;
 use dimse::identifier::Identifier;
 use dimse::io::ItemResult;
 use dimse::status::{Comment, Offending, Status, StatusFailure, failure, success};
-use futures::{StreamExt, stream, stream::BoxStream};
+use futures::{stream, stream::BoxStream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
+use surrealdb::types as db_types;
 use surrealdb::types::ToSql;
+use tracing::debug;
 
 #[derive(Clone)]
 pub struct Accessor {}
@@ -89,7 +90,8 @@ impl dimse::io::FileAccess for Accessor {
 			Some(RetrieveLevel::PATIENT) => return Err(failure(FailureCode::InvalidArgument).comment("Cannot do patient level find")),
 			None => Err(tags::QUERY_RETRIEVE_LEVEL)
 		}.map_err(|e|failure(FailureCode::MissingAttribute).offending([e]))?;
-		// compute a dicom tag -> db field mapping from that (multiple dicom tags might habe the same db field)
+		let mut table = table.to_string();
+		// compute a dicom tag -> db field mapping from that (multiple dicom tags might have the same db field)
 		let mut search_map:HashMap<_,_> = Default::default();
 		for (db_key,dicom_attrs) in known_db_tags {
 			for attr in dicom_attrs.into_iter()
@@ -98,32 +100,74 @@ impl dimse::io::FileAccess for Accessor {
 				search_map.insert(attr.last_tag(),db_key.clone());
 			}
 		}
-		// get all entries from the table
-		// @todo do a propper DB lookup
-		let entries = db::list_entries(table).await.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))?;
-		let mut ret =vec![];
-		//Build a dicom object for each entry with its identifier and the fields in search_map
-		for entry in entries.iter() {
-			let parents = db::find_down_tree(entry.id()).await.map_err(|e|failure(FailureCode::InvalidArgument).comment(e))?
-				.into_iter().rev()
-				.zip([tags::STUDY_INSTANCE_UID,tags::SERIES_INSTANCE_UID,tags::SOP_INSTANCE_UID]);
-			let mut matcher = InMemDicomObject::new_empty();
-			for (id,t) in parents
-			{
-				matcher.put(InMemElement::new(t,VR::UI,id.str_key()));
-			}
-			for (tag, db) in &search_map {
-				if let Some(found) = entry.get(db).and_then(|v|v.as_string()){
-					matcher.put_str(tag.to_owned(),VR::LO,found);
-				}
-			}
-			ret.push(matcher);
+		// build a where clause for the lookup
+		let mut whr = vec![];
+		if ident.filters.is_empty(){
+			Err(failure(FailureCode::MissingAttribute).comment("Search attribute is missing"))?
 		}
-		// filter those for match with the request
-		let ret:Vec<_> = ret.into_iter()
-			.filter_map(|matcher|ident.matches_all(&matcher).then_some(Ok(matcher)))
-			.collect();
-		Ok(stream::iter(ret).boxed())
 
+		// remap filters to make them easier to deal with here
+		let mut filters = ident.filters.into_iter().map(|f|
+			f.to_str()
+				.map_err(|e| failure(FailureCode::InvalidAttributeValue).offending([f.tag()]).comment(e))
+					.map(|s|(f.tag(),s.to_string()))
+		).collect::<Result<HashMap<Tag,String>,_>>()?;
+
+		// try to reduce search area
+		if let Some(instance) = filters.remove(&tags::SOP_INSTANCE_UID) {
+			let instance = db_types::RecordId::new("instances",instance);
+			table = match ident.level {
+				Some(RetrieveLevel::IMAGE) => format!("{}",instance.to_sql()),
+				_ => table
+			}
+		} else if let Some(series) = filters.remove(&tags::SERIES_INSTANCE_UID) {
+			let series = db_types::RecordId::new("series",series);
+			table = match ident.level {
+				Some(RetrieveLevel::IMAGE) => format!("{}.instances", series.to_sql()),
+				Some(RetrieveLevel::SERIES) => format!("{}", series.to_sql()),
+				_ => table
+			}
+		} else if let Some(study) = filters.remove(&tags::STUDY_INSTANCE_UID){
+			let study = db_types::RecordId::new("studies",study);
+			table = match ident.level {
+				Some(RetrieveLevel::IMAGE) => format!("{}.series.instances",study.to_sql()),
+				Some(RetrieveLevel::SERIES) => format!("{}.series",study.to_sql()),
+				Some(RetrieveLevel::STUDY) => format!("{}",study.to_sql()),
+				_ => table
+			}
+		}
+
+		for (tag, f) in filters {
+			let filter_regex = f.replace('*', ".*"); // replace "*" with ".*" for regex
+
+			// if a UID is given we can limit the search range ahead
+			if filter_regex.is_empty() { continue; }
+			else if let Some(d) = search_map.get(&tag){ // if we have what caller is looking for
+				whr.push(format!("{d}.matches(\"{filter_regex}\")")); // collect parts of a where clause
+			} else { // bail, let caller know we don't like his request
+				Err(failure(FailureCode::NoSuchAttribute).offending([tag]))?;
+			}
+		}
+		let query = if whr.is_empty() {
+			format!("select * from {}", table)
+		} else {
+			format!("select * from {} where {}",table, whr.join(" and "))
+		};
+		let found:Vec<Entry> = DB.query(&query).await
+			.and_then(|mut r|r.take(0))
+			.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))?;
+		debug!("Query \"{query}\" generated {} results", found.len());
+
+		let stream = stream::iter(found)
+			.then(|f|async move { f.get_files().await })
+			.and_then(|f|async move {
+				f.first().unwrap().read().await
+			})
+			.map(|o|o
+				.map(DefaultDicomObject::into_inner)
+				.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))
+			);
+
+		Ok(stream.boxed())
 	}
 }
