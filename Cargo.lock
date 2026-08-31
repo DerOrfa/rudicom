@@ -1520,7 +1520,7 @@ dependencies = [
 [[package]]
 name = "dimse"
 version = "0.1.0"
-source = "git+https://github.com/DerOrfa/dimse.git#85440a916db88c673398be1b422fb07dc4c879ab"
+source = "git+https://github.com/DerOrfa/dimse.git#79b73a7781f040b4954d8ebd981d32c89c193f04"
 dependencies = [
  "comfy-table",
  "dicom",

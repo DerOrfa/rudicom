@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use crate::db::{if_retry, Entry, RecordId, RegisterResult, Session, register_manager, lookup};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
-use crate::tools::{extract_from_dicom, Error};
+use crate::tools::{extract_from_dicom, Error, Context};
 use crate::{dcm, tools};
 use dcm::AttributeSelector;
 use dicom::dictionary_std::tags;
@@ -12,7 +12,7 @@ use surrealdb::{types as db_types, Connection};
 use surrealdb::types::{SurrealValue, ToSql};
 use tracing::{debug, error};
 use crate::db::RegisterResult::AlreadyStored;
-use crate::tools::Error::{DataConflict, FieldConflict, SurrealError};
+use crate::tools::Error::{DataConflict, FieldConflict, IdNotFound, SurrealError};
 
 #[derive(Default,Debug,Clone,SurrealValue)]
 struct Diff
@@ -111,7 +111,8 @@ pub async fn queued_insert<S,C>(
 					let entry = images.remove(idx);
 					let my_md5 = entry.image.get_md5().expect("Image should be saved and should have a checksum");
 					let existing_md5 = lookup(&r).await?
-						.expect("existing entry should exist").get_file()?.get_md5().to_string();
+						.ok_or(IdNotFound {id:r.to_string()}).context("When looking for a supposedly already existing entry")?
+						.get_file()?.get_md5().to_string();
 					if let Err(e) = entry.tx.send(
 					if existing_md5 != my_md5 {
 							Err(Error::Md5Conflict {
