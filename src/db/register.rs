@@ -108,11 +108,15 @@ pub async fn queued_insert<S,C>(
 					idx+=1
 				},
 				Ok(AlreadyStored(r)) => {
+					// remove image from to-be-stored list
 					let entry = images.remove(idx);
+					// chack against md5 sum of stored file
 					let my_md5 = entry.image.get_md5().expect("Image should be saved and should have a checksum");
 					let existing_md5 = lookup(&r).await?
 						.ok_or(IdNotFound {id:r.to_string()}).context("When looking for a supposedly already existing entry")?
 						.get_file()?.get_md5().to_string();
+					// let receiver know if it's all right (aka exactly same file stored already) or checksum doesn't fit
+					// this will not cancel the queued store, only drop the specific image
 					if let Err(e) = entry.tx.send(
 					if existing_md5 != my_md5 {
 							Err(Error::Md5Conflict {

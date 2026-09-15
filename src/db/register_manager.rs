@@ -126,11 +126,12 @@ impl RegisterManager {
 		Ok(rx)
 	}
 
-	/// Runs [register::queued_insert] on a list of [QEntry] and bisects the list recursively if an
-	/// error occurs.
+	/// Runs [register::queued_insert] on a list of [QEntry] and bisects the list recursively if an error occurs.
 	/// Returns list of entries that where successfully inserted.
+	///
 	/// Failed [QEntry] and their [storage::Image] will be dropped, together with their potentially uncommited files.
-	/// Receivers will be told about that via a [tools::Result].
+	/// This does *not* necessarily mean a fail of the whole commit (and with that a bisect).
+	/// Receivers will be told about fails via a [tools::Result].
 	async fn inner_commit<S,C>(mut entries:Vec<QEntry>, session: &mut S) -> Vec<QEntry> where S:Session<C>, C:Connection
 	{
 		if let Err(e) =  db::register::queued_insert(&mut entries, session).await { // something is bad,
