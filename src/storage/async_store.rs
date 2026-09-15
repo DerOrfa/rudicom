@@ -1,20 +1,17 @@
-use std::io::{Cursor, Error, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use crate::tools::{Context, Result};
+use std::io::{Error, Write};
+use std::path::Path;
 use std::pin::Pin;
 use std::task::Poll;
-use dicom::object::DefaultDicomObject;
 use tokio::fs::File;
-use tokio::task::spawn_blocking;
-use crate::tools::Error::DicomError;
-use crate::tools::{Context, Result};
 
 pub struct AsyncMd5(md5::Context);
 
 impl AsyncMd5
 {
 	pub fn new() -> Self
-	{Self(md5::Context::new())}
-	pub fn finalize(self) -> md5::Digest	{self.0.finalize()}
+	{ Self(md5::Context::new()) }
+	pub fn finalize(self) -> md5::Digest { self.0.finalize()}
 }
 impl tokio::io::AsyncWrite for AsyncMd5{
 	fn poll_write(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>, buf: &[u8]) -> Poll<std::result::Result<usize, Error>> {
@@ -28,28 +25,6 @@ impl tokio::io::AsyncWrite for AsyncMd5{
 	fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), Error>> {
 		Poll::Ready(Ok(()))
 	}
-}
-
-pub async fn read(filename: impl Into<PathBuf>) -> Result<DefaultDicomObject>
-{
-	let filename = filename.into();
-	spawn_blocking(move ||dicom::object::open_file(filename)).await?
-		.map_err(|e|DicomError(e.into()))
-}
-
-pub fn write(obj:&DefaultDicomObject, with_md5:Option<&mut md5::Context>) -> Result<Vec<u8>>{
-	let mut out = Cursor::new(Vec::new());
-	out.seek(SeekFrom::Start(128))?;
-	Write::write_all(&mut out, b"DICM")?;
-	obj
-		.write_meta(&mut out)
-		.and_then(|_|obj.write_dataset(&mut out))
-		.map_err(|e|DicomError(e.into()))?;
-	if let Some( md5) = with_md5{
-		out.seek(SeekFrom::Start(0))?;
-		std::io::copy(&mut out,md5).unwrap();
-	}
-	Ok(out.into_inner())
 }
 
 pub async fn compute_md5(filename:&Path) -> Result<md5::Digest>
