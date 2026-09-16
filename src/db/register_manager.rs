@@ -156,7 +156,7 @@ impl RegisterManager {
 	///
 	/// - Calls [storage::Image::into_saved] on all [storage::Image] in all [QEntry] in separate tasks
 	///   (The amount of concurrently run tasks is determined by the limit of concurrently open files)
-	/// - calls [Self::inner_commit] for all successfully saved images to register them in the DB in as little as possible transactions.
+	/// - calls [Self::inner_commit] for all successfully saved images to register them in the DB in as few as possible transactions.
 	/// - calls [storage::Image::commit] on all successfully registered images
 	///
 	/// Failing [QEntry] are dropped as well as their [storage::Image].
