@@ -1,5 +1,5 @@
-use crate::db::{self, RecordId, Session, SharedSession, DB, RegisterResult, lookup};
-use crate::tools::Error::FieldConflict;
+use crate::db::{self, RecordId, Session, SharedSession, DB, RegisterResult};
+use crate::tools::Error::{FieldConflict, IdNotFound};
 use crate::tools::extract_from_dicom;
 use crate::{storage, tools};
 use dicom::dictionary_std::tags;
@@ -172,23 +172,20 @@ impl RegisterManager {
 		let instance_uid = extract_from_dicom(image.as_ref(), tags::SOP_INSTANCE_UID)
 			.expect("No SOPInstanceUID??").to_string();
 
+		// first check if image exists, saves us a file access, also allows more detailed error handling
+		match image.check_existing_record(RecordId::from_instance(instance_uid.as_str())).await {
+			Err(IdNotFound { .. }) => {} // that's just fine, expected
+			r => { // either image is already registered, or something is wrong
+				if let Err(_) = tx.send(r) {
+					error!("failed to let receiver know about {} already being there",instance_uid);
+				};
+				return None;
+			}
+		}
+
 		match image.into_saved().await {
 			Ok(image) => Some(QEntry { tx, image, register_result }),
-			Err(tools::Error::IoError(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-				// file exists, probably because its already registered
-				if let Some(entry) = lookup(&RecordId::from_instance(instance_uid)).await.ok().flatten(){ // yep already there, just tell the receiver
-					if let Err(_) = tx.send(Ok(RegisterResult::AlreadyStored(entry.id().clone()))) {
-						error!("failed to let receiver know about {} already being there",entry.id());
-					};
-					None
-				} else { // something weired is going on, bail
-					if let Err(Err(e)) = tx.send(Err(e.into())){
-						error!("failed to let receiver know about failed insert ({e})")
-					};
-					None
-				}
-			},
-			Err(e) => {
+			Err(e) => { // it could still happen that there is already a file, but that would be an error
 				if let Err(Err(e)) = tx.send(Err(e)){
 					error!("failed to let receiver know about failed insert ({e})")
 				};
