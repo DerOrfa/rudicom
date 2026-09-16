@@ -25,6 +25,8 @@ def filter(input:dict[tuple[int,int],Any]) -> dict[tuple[int,int],Optional[Any]]
 "#;
 
 static MISSING_INPUT:&str = r#"
+from typing import Any, Optional
+
 input_tags = [(0x0010,0x0010)]
 
 def filter(input:dict[tuple[int,int],Any]) -> dict[tuple[int,int],Optional[Any]]:
