@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
-use crate::db::{if_retry, Entry, RecordId, RegisterResult, Session, register_manager, lookup};
+use crate::db::{if_retry, Entry, RecordId, RegisterResult, Session, register_manager};
 use crate::dcm::{INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
-use crate::tools::{extract_from_dicom, Error, Context};
+use crate::tools::extract_from_dicom;
 use crate::{dcm, tools};
 use dcm::AttributeSelector;
 use dicom::dictionary_std::tags;
@@ -12,7 +12,7 @@ use surrealdb::{types as db_types, Connection};
 use surrealdb::types::{SurrealValue, ToSql};
 use tracing::{debug, error};
 use crate::db::RegisterResult::AlreadyStored;
-use crate::tools::Error::{DataConflict, FieldConflict, IdNotFound, SurrealError};
+use crate::tools::Error::{DataConflict, FieldConflict, SurrealError};
 
 #[derive(Default,Debug,Clone,SurrealValue)]
 struct Diff
@@ -107,25 +107,13 @@ pub async fn queued_insert<S,C>(
 					images[idx].register_result=Some(RegisterResult::Stored(r));
 					idx+=1
 				},
-				Ok(AlreadyStored(r)) => {
-					// remove image from to-be-stored list
+				Ok(AlreadyStored(r)) => { // unlikely, but possible. Just figure out if it's ok, and respond
+					// remove image from to-be-stored list anyway
 					let entry = images.remove(idx);
-					// chack against md5 sum of stored file
-					let my_md5 = entry.image.get_md5().expect("Image should be saved and should have a checksum");
-					let existing_md5 = lookup(&r).await?
-						.ok_or(IdNotFound {id:r.to_string()}).context("When looking for a supposedly already existing entry")?
-						.get_file()?.get_md5().to_string();
 					// let receiver know if it's all right (aka exactly same file stored already) or checksum doesn't fit
 					// this will not cancel the queued store, only drop the specific image
-					if let Err(e) = entry.tx.send(
-					if existing_md5 != my_md5 {
-							Err(Error::Md5Conflict {
-								existing_md5:existing_md5.to_string(),
-								existing_id:r.clone(),
-								my_md5:my_md5.to_string(),
-							})
-						} else { Ok(AlreadyStored(r)) }
-					) { // log error if that fails
+					if let Err(e) = entry.tx.send(entry.image.check_existing_record(r).await)
+					{ // log error if that fails
 						error!("failed to let receiver know about failed insert ({})",
 						e.map(|_|"already exists".to_string()).unwrap_or_else(|e|e.to_string()));
 					};

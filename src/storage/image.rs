@@ -3,7 +3,7 @@ use std::io::ErrorKind;
 use crate::dcm::gen_filepath;
 use crate::storage::file::{Committable, StandardFile};
 use crate::tools;
-use crate::tools::Error::DicomError;
+use crate::tools::Error::{DataConflict, DicomError, IdNotFound};
 use crate::tools::{complete_filepath, create_complete_path, Context};
 use dicom::object::DefaultDicomObject;
 use md5::Digest;
@@ -13,7 +13,8 @@ use pyo3::prelude::PyModule;
 use pyo3::Python;
 use tokio::task::spawn_blocking;
 use tracing::{trace, warn};
-use crate::db::FileInfo;
+use crate::db::{lookup, FileInfo, RecordId, RegisterResult};
+use crate::db::RegisterResult::AlreadyStored;
 use crate::storage::checked_load;
 
 /// An object representing an existing or about to be written dicom image file in its various stages.
@@ -279,6 +280,34 @@ impl<C> Image<C> where C:Committable + 'static {
 					Err(_) => {} // not a Committable, nothing to be done, just keep it
 				}
 			}
+		}
+	}
+	pub async fn check_existing_record(&self, r:RecordId) -> tools::Result<RegisterResult> {
+		match self {
+			Image::Create { obj } => {
+				let existing = lookup(&r).await?.ok_or(IdNotFound {id:r.to_string()})?;
+				if existing == *obj {
+					Ok(AlreadyStored(r))
+				} else {
+					Err(DataConflict(existing))
+				}
+			}
+			Image::Existing { checksum, obj, ..}
+			| Image::Copy { checksum, obj, .. } | Image::Copied { checksum, obj, .. }
+			| Image::Move { checksum, obj, .. }| Image::Moved { checksum, obj, .. }
+			| Image::Created { checksum, obj, .. }
+			=> {
+				let existing = lookup(&r).await?.ok_or(IdNotFound {id:r.to_string()})?;
+				let existing_md5 = existing.get_file()?.get_md5().to_string();
+				let my_md5 = format!("{checksum:x}");
+				if existing_md5 == my_md5 {return Ok(AlreadyStored(r.clone()));} // they're exactly the same
+				if existing == *obj {
+					Ok(AlreadyStored(r))
+				} else {
+					Err(DataConflict(existing))
+				}
+			}
+			Image::Committed { .. } => panic!("Checking already commited image against already existing entry."),
 		}
 	}
 }
