@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::task::Poll;
 use tokio::fs::File;
 
-pub struct AsyncMd5(md5::Context);
+struct AsyncMd5(md5::Context);
 
 impl AsyncMd5
 {
