@@ -1,11 +1,9 @@
-use crate::db;
-use crate::tools::entries_for_record;
+use crate::db::{self,DB, Entry, if_retry};
 use crate::tools::Result;
+use crate::tools::entries_for_record;
 use std::path::{Path, PathBuf};
-use crate::db::{if_retry, DB, Entry};
-use tokio::fs::remove_dir;
 
-pub async fn remove(id:&db::RecordId) -> Result<()>
+pub async fn remove(id: &db::RecordId) -> Result<()>
 {
 	let mut jobs=tokio::task::JoinSet::new();
 	for job in entries_for_record(id,"instances").await?
@@ -35,10 +33,10 @@ async fn remove_instance(e:Entry) -> Result<Option<Entry>>
 }
 
 /// removes given directory and all parents until path is empty or stop_path is reached
-pub async fn remove_path(mut path:PathBuf, stop_path:&Path) -> std::io::Result<()>
+pub fn remove_path(mut path:PathBuf, stop_path:&Path) -> std::io::Result<()>
 {
 	loop {
-		if let Err(e) = remove_dir(path.as_path()).await
+		if let Err(e) = std::fs::remove_dir(path.as_path())
 		{
 			return match e.kind() {
 				std::io::ErrorKind::NotFound => Ok(()), //dir is gone already (that's fine, some other thread deleted it)
