@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
-use std::io::{ErrorKind, Write};
-use tracing::{debug, error, warn};
-use crate::tools::complete_filepath;
+use std::io::Write;
+use tracing::warn;
+use crate::tools;
+use crate::tools::{complete_filepath, Context};
 
 /// Wrapper around an implementor of [Write] that will be deleted from storage when dropped.
 /// Unless it's committed.
@@ -27,7 +28,7 @@ pub trait Committable: Sized + Write + Send {
 	/// Cancel, and with this remove the file.
 	///
 	/// This may fail.
-	fn cancel(&mut self) -> std::io::Result<()>;
+	fn cancel(&mut self) -> tools::Result<()>;
 
 	/// Get intended path for the commited file.
 	///
@@ -55,26 +56,17 @@ impl Committable for StandardFile {
 
 	fn commit(&mut self) {self.committed = true;}
 
-	fn cancel(&mut self) -> std::io::Result<()> {
+	fn cancel(&mut self) -> tools::Result<()> {
 		let mut filename = complete_filepath(&self.filepath);
 		if self.committed {
-			error!("Cancelling already committed file");
+			panic!("Cancelling already committed file");
 		} else {
-			tokio::spawn(async move {
-				match tokio::fs::remove_file(&filename).await {
-					Ok(()) => {
-						if filename.pop(){// if there is a parent path, try to delete it as far as possible
-							crate::tools::remove::remove_path(filename.clone(), &crate::config::get().paths.storage_path).await
-						} else { Ok(()) }
-					},
-					Err(e) => match e.kind() {
-						ErrorKind::NotFound => {debug!("Trying to roll back file {}, but its not there??", filename.display());Ok(())}, // that's fine, weird though
-						_ => Err(e)
-					}
-				}.map_err(|e|error!("Error rolling back file {}: {e}",filename.display()))
-			});
+			std::fs::remove_file(&filename).and_then(|_|{
+					if filename.pop(){// if there is a parent path, try to delete it as far as possible
+						crate::tools::remove::remove_path(filename.clone(), &crate::config::get().paths.storage_path)
+					} else { Ok(()) }
+			}).context(format!("Error rolling back file {}",filename.display()))
 		}
-		Ok(())
 	}
 
 	fn get_targetpath(&self) -> &Path { self.filepath.as_path() }

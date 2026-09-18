@@ -7,6 +7,7 @@ use dicom::object::DefaultDicomObject;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use surrealdb::types as db_types;
+use tokio::task::spawn_blocking;
 use tracing::log::warn;
 use crate::storage::checked_load;
 
@@ -97,8 +98,8 @@ impl FileInfo {
 				std::fs::remove_file(&path).context(format!("deleting {}", path.display()))?;
 				if path.pop(){// if there is a parent path, try to delete it as far as possible
 					let ctx = format!("deleting {}",path.display());
-					crate::tools::remove::remove_path(path, &crate::config::get().paths.storage_path)
-						.await.context(ctx)?;
+					spawn_blocking(||crate::tools::remove::remove_path(path, &crate::config::get().paths.storage_path))
+						.await.unwrap().context(ctx)?;
 				}
 			} else {
 				warn!("trying to delete file {} but it does not exist",path.to_string_lossy())
