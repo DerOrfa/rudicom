@@ -175,7 +175,7 @@ impl<C> Image<C> where C:Committable + 'static {
 					}
 					let p = c_path.parent().unwrap();
 					trace!("Moving image file from {} to {}", org_path.display(),c_path.display());
-
+					// @todo causes race condition
 					create_complete_path(p).await?;
 					if let Err(_)=tokio::fs::hard_link(&org_path,&c_path).await { // try hardlink
 						tokio::fs::copy(&org_path,&c_path).await// fall back to copy

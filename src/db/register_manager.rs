@@ -65,7 +65,10 @@ pub struct RegisterManager {
 
 impl RegisterManager {
 	pub fn new() -> Self {
-		Self{ queues: Arc::new(Default::default()), session: SharedSession::create(&DB, 5) }
+		Self{
+			queues: Arc::new(Default::default()),
+			session: SharedSession::create(&DB, crate::config::get().limits.parallel_commits)
+		}
 	}
 	/// Collect images to be inserted "in bulk".
 	///

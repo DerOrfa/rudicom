@@ -104,7 +104,7 @@ pub async fn init_remote(addr:&str) -> surrealdb::Result<()>
 }
 pub async fn init_local(addr:&str) -> surrealdb::Result<()>
 {
-	DB.connect(addr).with_capacity(crate::config::get().limits.db_capacity).await
+	DB.connect(addr).await
 }
 
 #[derive(Serialize)]
