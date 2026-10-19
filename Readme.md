@@ -44,15 +44,16 @@
 ## /tools
 ### /backup
 generates SureQL snapshot of the database
-### /{import,move,store} (POST)
-`curl http://localhost:3000/tools/{import,move,store}[?<parameters>] -d"<glob>"`
+### /{import,move,store,copy} (POST)
+`curl http://localhost:3000/tools/{import,move,store,copy}[?<parameters>] -d"<glob>"`
 - `echo=true` generate output for successfully registered or stored files (default:false)
 - `echo_existing=true` generate output for already existing (and thus ignored) files (default:false)
 
 #### Modes
-- `import` Won't touch or own the file, but register it in the DB.
-- `store`  Won't touch the original file but create an owned copy inside the configured storage path (which might collide with the source file).
-- `move`  The DB takes ownership of the existing file. If the source is outside the configured storage path it will be moved into it.
+- `import` Won't touch or own the file, but register it in the DB. The data will **not** be altered.
+- `store`  Stores the data inside the configured storage path (which might collide with the source file) and owns the destination file. The data might be altered.
+- `copy`  Won't touch the original file but create an owned copy inside the configured storage path (which might collide with the source file). The data will **not** be altered.
+- `move`  The DB takes ownership of the existing file. If the source is outside the configured storage path it will be moved into it. The data will **not** be altered.
 
 ### Json feedback
 Force json formatted feedback by adding header to the request `Content-Type: application/json`  
