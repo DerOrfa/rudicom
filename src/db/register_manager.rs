@@ -14,7 +14,7 @@ use tokio::spawn;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::{AbortHandle, JoinSet};
-use tracing::error;
+use tracing::{error, warn};
 
 fn btree_diff(a: &BTreeMap<String, db_types::Value>, mut b:BTreeMap<String,db_types::Value>) -> Vec<String> {
 	let mut diff = vec![];
@@ -142,7 +142,7 @@ impl RegisterManager {
 			if entries.len()<=1{ // tell its receiver
 				entries.pop().map(|entry|
 					if let Err(Err(e)) = entry.tx.send(Err(e)){
-						error!("failed to let receiver know about failed insert ({e})")
+						warn!("failed to let receiver know about failed insert ({e})")
 					}
 				);
 				// entries is empty now / the image is dropped
@@ -180,7 +180,7 @@ impl RegisterManager {
 			Err(IdNotFound { .. }) => {} // that's just fine, expected
 			r => { // either image is already registered, or something is wrong
 				if let Err(_) = tx.send(r) {
-					error!("failed to let receiver know about {} already being there",instance_uid);
+					warn!("failed to let receiver know about {} already being there",instance_uid);
 				};
 				return None;
 			}
@@ -190,7 +190,7 @@ impl RegisterManager {
 			Ok(image) => Some(QEntry { tx, image, register_result }),
 			Err(e) => { // it could still happen that there is already a file, but that would be an error
 				if let Err(Err(e)) = tx.send(Err(e)){
-					error!("failed to let receiver know about failed insert ({e})")
+					warn!("failed to let receiver know about failed insert ({e})")
 				};
 				None
 			},
@@ -230,7 +230,7 @@ impl RegisterManager {
 		commited_entries.into_iter().for_each(|mut entry|{
 			entry.image.commit();
 			if let Err(_) = entry.tx.send(Ok(entry.register_result.expect("Missing register result"))) {
-				error!("failed to let receiver know about successful insert")
+				warn!("failed to let receiver know about successful insert")
 			}
 		});
 	}

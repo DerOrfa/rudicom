@@ -10,7 +10,7 @@ use itertools::Itertools;
 use surrealdb::method::Transaction;
 use surrealdb::{types as db_types, Connection};
 use surrealdb::types::{SurrealValue, ToSql};
-use tracing::{debug, error};
+use tracing::{debug, warn};
 use crate::db::RegisterResult::AlreadyStored;
 use crate::tools::Error::{DataConflict, FieldConflict, SurrealError};
 
@@ -114,13 +114,13 @@ pub async fn queued_insert<S,C>(
 					// this will not cancel the queued store, only drop the specific image
 					if let Err(e) = entry.tx.send(entry.image.check_existing_record(r).await)
 					{ // log error if that fails
-						error!("failed to let receiver know about failed insert ({})",
+						warn!("failed to let receiver know about failed insert ({})",
 						e.map(|_|"already exists".to_string()).unwrap_or_else(|e|e.to_string()));
 					};
 				},
 				// everything else can already be dropped, just let the receiver know
 				Err(e) => if let Err(e) = images.remove(idx).tx.send(Err(e)) { // log error if that fails
-					error!("failed to let receiver know about failed insert ({})",e.err().unwrap());
+					warn!("failed to let receiver know about failed insert ({})",e.err().unwrap());
 				}
 			}
 		}
@@ -139,7 +139,7 @@ pub async fn queued_insert<S,C>(
 						_ => unreachable!()
 					};
 					if let Err(e) = entry.tx.send(Err(e_cloned)) { // log error if that fails
-						error!("failed to let receiver know about failed insert ({})",e.err().unwrap());
+						warn!("failed to let receiver know about failed insert ({})",e.err().unwrap());
 					}
 				});
 				return Err(e.into());
