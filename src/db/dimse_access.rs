@@ -61,9 +61,9 @@ impl dimse::io::FileAccess for Accessor {
 
 		// figure out what table to look in
 		let retrieve_table = match ident.level {
-			Some(RetrieveLevel::IMAGE) => instance.map_or(Err(tags::SOP_INSTANCE_UID),|_|Ok("instances")),
-			Some(RetrieveLevel::SERIES) => series.map_or(Err(tags::SERIES_INSTANCE_UID),|_|Ok("series")),
-			Some(RetrieveLevel::STUDY) => study.map_or(Err(tags::STUDY_INSTANCE_UID),|_|Ok("studies")),
+			Some(RetrieveLevel::IMAGE) => Ok("instances"),
+			Some(RetrieveLevel::SERIES) => Ok("series"),
+			Some(RetrieveLevel::STUDY) => Ok("studies"),
 			Some(RetrieveLevel::PATIENT) => return Err(failure(FailureCode::InvalidArgument).comment("Cannot do patient level retrieve")),
 			None => Err(tags::QUERY_RETRIEVE_LEVEL)
 		}.map_err(|e|failure(FailureCode::MissingAttribute).offending([e]))?;
