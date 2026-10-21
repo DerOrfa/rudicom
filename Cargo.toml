@@ -10,7 +10,9 @@ rust-version = "1.90.0"
 default = ["html", "embedded"]
 # enable HTML interface
 html = ["dep:html"]
+# enables /instances/{id}/json-ext
 dicom-json = ["dep:dicom-json"]
+# enables embedded DB (running server with `--file`)
 embedded = ["surrealdb/kv-surrealkv", "surrealdb/kv-mem" ]
 dhat-heap = ["dhat"]
 # needs rustflags = ["--cfg", "tokio_unstable"] in .cargo/config.toml
