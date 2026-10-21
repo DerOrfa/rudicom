@@ -14,6 +14,7 @@ use futures::{stream, stream::BoxStream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
+use dicom::core::VR;
 use surrealdb::types as db_types;
 use surrealdb::types::ToSql;
 use tracing::debug;
@@ -110,24 +111,24 @@ impl dimse::io::FileAccess for Accessor {
 		let mut filters = ident.filters.into_iter().map(|f|
 			f.to_str()
 				.map_err(|e| failure(FailureCode::InvalidAttributeValue).offending([f.tag()]).comment(e))
-					.map(|s|(f.tag(),s.to_string()))
-		).collect::<Result<HashMap<Tag,String>,_>>()?;
+					.map(|s|(f.tag(),(s.to_string(),f.vr())))
+		).collect::<Result<HashMap<Tag,_>,_>>()?;
 
 		// try to reduce search area
-		if let Some(instance) = filters.remove(&tags::SOP_INSTANCE_UID) {
+		if let Some((instance,_)) = filters.remove(&tags::SOP_INSTANCE_UID) {
 			let instance = db_types::RecordId::new("instances",instance);
 			table = match ident.level {
 				Some(RetrieveLevel::IMAGE) => format!("{}",instance.to_sql()),
 				_ => table
 			}
-		} else if let Some(series) = filters.remove(&tags::SERIES_INSTANCE_UID) {
+		} else if let Some((series,_)) = filters.remove(&tags::SERIES_INSTANCE_UID) {
 			let series = db_types::RecordId::new("series",series);
 			table = match ident.level {
 				Some(RetrieveLevel::IMAGE) => format!("{}.instances", series.to_sql()),
 				Some(RetrieveLevel::SERIES) => format!("{}", series.to_sql()),
 				_ => table
 			}
-		} else if let Some(study) = filters.remove(&tags::STUDY_INSTANCE_UID){
+		} else if let Some((study,_)) = filters.remove(&tags::STUDY_INSTANCE_UID){
 			let study = db_types::RecordId::new("studies",study);
 			table = match ident.level {
 				Some(RetrieveLevel::IMAGE) => format!("{}.series.instances",study.to_sql()),
@@ -137,16 +138,34 @@ impl dimse::io::FileAccess for Accessor {
 			}
 		}
 
-		for (tag, f) in filters {
-			let filter_regex = f.replace('*', ".*"); // replace "*" with ".*" for regex
-
-			// if a UID is given we can limit the search range ahead
-			if filter_regex.is_empty() { continue; }
-			else if let Some(d) = search_map.get(&tag){ // if we have what caller is looking for
-				whr.push(format!("{d}.matches(\"{filter_regex}\")")); // collect parts of a where clause
+		for (tag, (f,vr)) in filters {
+			if f.is_empty() { continue; }
+			else if let Some(db_field) = search_map.get(&tag){ // if we have what caller is looking for
+				match vr { // collect parts of a where clause
+					// if it's a date string or range
+					VR::DA if !f.contains(|c:char|!(c.is_ascii_digit() || c == '-') ) => {
+						if let Some(split)= f.find('-') { // it's a range
+							let (start,mut end) = f.split_at(split);
+							end = end.get(1..).expect("there should be a '-'");
+							// add first part
+							whr.push(format!("fn::date_from_str({db_field}) >= fn::date_from_str('{start}')"));
+							if !end.is_empty() { // if there
+								whr.push(format!("fn::date_from_str({db_field}) < fn::date_from_str('{end}')"));
+							}
+						} else { // exact date
+							whr.push(format!("{db_field}) == {f}"));
+						}
+					}
+					_ => {
+						let filter_regex = f.replace('*', ".*"); // replace "*" with ".*" for regex
+						// if a UID is given we can limit the search range ahead
+						whr.push(format!("{db_field}.matches(\"{filter_regex}\")"));
+					}
+				}
 			} else { // bail, let caller know we don't like his request
 				Err(failure(FailureCode::NoSuchAttribute).offending([tag]))?;
 			}
+
 		}
 		let query = if whr.is_empty() {
 			format!("select * from {}", table)
@@ -158,10 +177,20 @@ impl dimse::io::FileAccess for Accessor {
 			.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))?;
 		debug!("Query \"{query}\" generated {} results", found.len());
 
+		let number_tag= match ident.level {
+			Some(RetrieveLevel::SERIES) => Some(tags::NUMBER_OF_SERIES_RELATED_INSTANCES),
+			Some(RetrieveLevel::STUDY) => Some(tags::NUMBER_OF_STUDY_RELATED_INSTANCES),
+			_ => None,
+		};
+
 		let stream = stream::iter(found)
 			.then(|f|async move { f.get_files().await })
-			.and_then(|f|async move {
-				f.first().unwrap().read().await
+			.and_then(move|f|async move {
+				let mut obj = f.first().unwrap().read().await;
+				if let Ok(obj) = &mut obj && let Some(number_tag) = number_tag {
+					obj.put_str(number_tag,VR::IS,f.len().to_string());
+				}
+				obj
 			})
 			.map(|o|o
 				.map(DefaultDicomObject::into_inner)

@@ -21,3 +21,7 @@ DEFINE EVENT OVERWRITE del_series ON TABLE series WHEN $event == "DELETE" ASYNC 
 // set up studies table
 DEFINE FIELD IF NOT EXISTS timestamp ON studies TYPE datetime DEFAULT time::now() READONLY;
 DEFINE FIELD IF NOT EXISTS series ON studies COMPUTED <~ series;
+
+DEFINE FUNCTION OVERWRITE fn::date_from_str($str: string) -> datetime {
+	<datetime> (string::join('-', $str.slice(0, 4), $str.slice(4, 6), $str.slice(6, 8)))
+}
