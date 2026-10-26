@@ -178,6 +178,7 @@ async fn upsert_meta<'a,C>(
 		.bind(("content",meta)).bind(("rec",record_id.0.clone()));
 	let diff  = q.await?.take::<Vec<Diff>>(0)?.into_iter()
 		.filter(|d|d.op!="add")
+		.filter(|d|d.op!="replace" && d.path.len()>1)
 		.filter(|d|!d.path.starts_with("/instances")).filter(|d|!d.path.starts_with("/series"))
 		.collect::<Vec<_>>();
 	if diff.is_empty(){
