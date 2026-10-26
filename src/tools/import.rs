@@ -138,8 +138,8 @@ pub fn import_glob<T>(pattern:T, config:ImportConfig, mode: ImportMode) -> tools
 	let manager = RegisterManager::new();
 
 	// if there is not at least one file, it's probably a good idea to return an error
-	if let Some(file)=files.next().transpose()? {
-		let files = [Ok(file)].into_iter().chain(files);
+	if let Some(file)=files.next() {
+		let files = [file].into_iter().chain(files);
 		let stream = stream::iter(files)
 			.map_err(ImportResult::GlobError)
 			.map_ok(move|p|async move {
