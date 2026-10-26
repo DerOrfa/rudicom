@@ -230,7 +230,7 @@ impl RegisterManager {
 		commited_entries.into_iter().for_each(|mut entry|{
 			entry.image.commit();
 			if let Err(_) = entry.tx.send(Ok(entry.register_result.expect("Missing register result"))) {
-				warn!("failed to let receiver know about successful insert")
+				warn!("failed to let receiver know about successful register of {}", entry.image.get_path().display());
 			}
 		});
 	}
