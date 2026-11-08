@@ -123,6 +123,7 @@ async fn store_instance(
 				StatusCode::CONFLICT,
 				Json(json!({
 					"Status":"ConflictingMetadata",
+					"id":e.id().str_key(),
 					"ExistingPath":e.id().str_path(),
 					"ExistingData":serde_json::Value::from(e),
 				}))
@@ -133,6 +134,7 @@ async fn store_instance(
 				StatusCode::CONFLICT,
 				Json(json!({
 					"Status":"ConflictingFields",
+					"id":id.str_key(),
 					"ExistingPath":id.str_path(),
 					"ConflictingFields":fields,
 				}))
@@ -143,6 +145,7 @@ async fn store_instance(
 				StatusCode::CONFLICT,
 				Json(json!({
 					"Status":"ConflictingMd5",
+					"id":existing_id.str_key(),
 					"ExistingPath":existing_id.str_path(),
 					"ExistingMd5":existing_md5,
 					"ReceivedMd5":my_md5,
