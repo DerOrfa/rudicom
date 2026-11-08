@@ -87,7 +87,7 @@ pub fn extract<'a>(obj: &DefaultDicomObject, requested:&'a HashMap<String,Vec<At
 			.unwrap_or_default()
 		)
 	)
-	.filter(|(_,v)|!v.is_none())
+	.filter(|(_,v)|!v.is_empty())
 	.collect()
 }
 
