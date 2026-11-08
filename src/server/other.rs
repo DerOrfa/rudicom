@@ -1,6 +1,6 @@
 use crate::db;
 use crate::db::register_manager::RegisterManager;
-use crate::db::{Entry, RegisterResult};
+use crate::db::{AggregateData, Entry, RegisterResult};
 use crate::server::http_error::{HttpError, InnerHttpError, IntoHttpError};
 use crate::server::lookup_or;
 use crate::tools::tar::{TarStream, make_tar};
@@ -37,6 +37,7 @@ pub(super) fn router() -> axum::Router
 		.route("/statistics", get(get_statistics))
         .route("/instances",post(store_instance))
         .route("/{table}/{id}",delete(del_entry))
+		.route("/{table}/{id}/statistics",get(get_entry_statistics))
 		.route("/{table}/{id}/verify",get(verify))
 		.route("/{table}/{id}/tar",get(get_tar))
 		.route("/{table}/{id}/tar/{suffix}",get(get_tar_comp))
@@ -53,6 +54,13 @@ pub(super) fn router() -> axum::Router
 async fn get_statistics(headers: HeaderMap) -> Result<Json<db::Stats>, HttpError>
 {
 	db::statistics().await.map(Json).into_http_error(&headers)
+}
+
+async fn get_entry_statistics(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<Json<AggregateData>, HttpError>
+{
+	lookup_or(&path).await.into_http_error(&headers)?
+		.get_aggregate().await.into_http_error(&headers)
+		.map(Json)
 }
 
 async fn del_entry(headers: HeaderMap,Path(path):Path<(String, String)>) -> Result<(), HttpError>

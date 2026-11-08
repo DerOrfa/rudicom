@@ -32,6 +32,7 @@
 - /:table (GET)
 - /:table/:id (GET,DELETE)
 - /:table/:id/instances (GET)
+- /:table/:id/statistics (GET)
 - /studies/:id/series (GET)
 - /:table/:id/parents (GET)
 - /:table/:id/verify (GET)

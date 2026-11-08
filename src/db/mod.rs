@@ -27,7 +27,7 @@ mod session;
 pub mod dimse_access;
 pub mod register_manager;
 
-#[derive(Deserialize,Debug,SurrealValue)]
+#[derive(Serialize,Deserialize,Debug,SurrealValue)]
 pub struct AggregateData
 {
 	pub id:db_types::RecordId,
