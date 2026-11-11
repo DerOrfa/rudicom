@@ -6,6 +6,7 @@ use mime::Mime;
 use thiserror::Error;
 use crate::server::json::{get_mime, is_json};
 use crate::tools;
+use crate::tools::error::DicomError::DicomPixelError;
 
 #[derive(Error,Debug)]
 pub enum InnerHttpError {
@@ -38,6 +39,7 @@ impl InnerHttpError
 						_ => StatusCode::INTERNAL_SERVER_ERROR,
 					}
 				tools::Error::DataConflict(_)|tools::Error::FieldConflict {..} => StatusCode::CONFLICT,
+				tools::Error::DicomError(DicomPixelError(e)) => StatusCode::BAD_REQUEST,
 				_ => StatusCode::INTERNAL_SERVER_ERROR
 			});
 		error_code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
@@ -55,6 +57,7 @@ impl InnerHttpError
 			InnerHttpError::Internal(e) => {
 				match e {
 					tools::Error::IdNotFound {id} => tracing::debug!("{id} reported as not found"),
+					tools::Error::DicomError(DicomPixelError(e)) => tracing::debug!("no pixel data ({e})"),
 					_ => tracing::error!("internal error {} reported (root cause '{}')", e, e.root_cause()),
 				}
 			}
