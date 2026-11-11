@@ -1,3 +1,4 @@
+use std::time::Duration;
 use crate::common::dcm::{bulk_insert, synthesize_study, UidSynthesizer};
 use crate::common::init_db;
 use dicom::dictionary_std::tags;
@@ -8,6 +9,7 @@ use rand::random;
 use rudicom::db::{list_entries, lookup_uid};
 use rudicom::tools::remove::remove;
 use tokio::task::JoinSet;
+use tokio::time::sleep;
 use rudicom::db::RegisterResult;
 
 mod common;
@@ -95,6 +97,9 @@ async fn study() -> Result<(), Box<dyn std::error::Error>>
 	}
 	remove_set.join_all().await.into_iter().collect::<Result<Vec<()>,_>>()
 		.map_err(|e| format!("failed to remove remaining instances: {e}"))?;
+
+	// give DB some time to clean up
+	tokio::time::sleep(Duration::from_secs(2)).await;
 
 	assert!(list_entries("series").await?.is_empty(),"All series should be gone.");
 	assert!(list_entries("studies").await?.is_empty(),"All studies should be gone.");

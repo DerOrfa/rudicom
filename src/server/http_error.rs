@@ -39,7 +39,7 @@ impl InnerHttpError
 						_ => StatusCode::INTERNAL_SERVER_ERROR,
 					}
 				tools::Error::DataConflict(_)|tools::Error::FieldConflict {..} => StatusCode::CONFLICT,
-				tools::Error::DicomError(DicomPixelError(e)) => StatusCode::BAD_REQUEST,
+				tools::Error::DicomError(DicomPixelError(_)) => StatusCode::BAD_REQUEST,
 				_ => StatusCode::INTERNAL_SERVER_ERROR
 			});
 		error_code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
