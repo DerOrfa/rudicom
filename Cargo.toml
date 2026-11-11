@@ -7,7 +7,7 @@ rust-version = "1.90.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["html", "embedded"]
+default = ["html", "embedded", "dicom-json"]
 # enable HTML interface
 html = ["dep:html"]
 # enables /instances/{id}/json-ext
@@ -57,10 +57,7 @@ tempfile = "3.27.0"
 [profile.release]
 strip = true
 lto = true
-opt-level = 3
 panic = 'abort'
-#codegen-units = 1
-#debug = 1
 
 [target.'cfg(windows)'.dependencies]
 ansi_term = "0.12.1"
