@@ -41,7 +41,7 @@ fn replace_filter()  -> Result<(), Box<dyn std::error::Error>>
 {
 //	tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 	let code = CString::new(REPLACE_TIME)?;
-	let mut obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1).into_inner();
+	let mut obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1, None).into_inner();
 	assert_eq!(String::get(&obj, tags::STUDY_DATE)?, "20250101");
 	assert_eq!(String::get(&obj, tags::STUDY_TIME)?, "000000.000000");
 
@@ -61,7 +61,7 @@ fn missing_input()  -> Result<(), Box<dyn std::error::Error>>
 {
 //	tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 	let code = CString::new(MISSING_INPUT)?;
-	let mut obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1).into_inner();
+	let mut obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1, None).into_inner();
 	Python::attach(|py|{
 		let code = PyModule::from_code(py, code.as_ref(), c"test.py", c"test")?;
 		// first check with name existing

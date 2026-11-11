@@ -13,7 +13,7 @@ async fn single_dicom() -> Result<(), Box<dyn std::error::Error>>
 {
 	//tracing_subscriber::fmt().with_max_level(tracing::Level::TRACE).init();
 	init_db().await?.health().await?;
-	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
+	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1, None);
 	if let RegisterResult::Stored(_) = store_single_ob(obj.clone()).await? {}
 	else { panic!("First store should return stored."); }
 	if let RegisterResult::AlreadyStored(stored) = store_single_ob(obj.clone()).await? {

@@ -19,7 +19,7 @@ async fn from_obj() -> Result<(), Box<dyn std::error::Error>>
 	init_config().unwrap();
 	tracing_subscriber::fmt().with_max_level(LOG_LEVEL).try_init().ok();
 
-	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
+	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1, "John_Obj");
 	let saved:Image = Image::from_obj(obj.clone()).into_saved().await.unwrap();
 	
 	// should be saved in storage
@@ -56,7 +56,7 @@ async fn from_existing() -> Result<(), Box<dyn std::error::Error>>
 
 	// create an existing dicom file
 	let tmp = NamedTempFile::with_prefix("from_existing_").unwrap();
-	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
+	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1, "John_Exist");
 	obj.write_all(&tmp).unwrap();
 
 	let existing:Image = Image::from_existing(tmp.path()).await.unwrap().into_saved().await.unwrap();
@@ -80,10 +80,11 @@ async fn move_existing() -> Result<(), Box<dyn std::error::Error>>
 
 	// create an existing dicom file
 	let tmp = NamedTempFile::with_prefix("move_existing_").unwrap();
-	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
+	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1, "John_Move");
 	obj.write_all(&tmp).unwrap();
 
-	let moved:Image = Image::move_existing(tmp.path()).await.unwrap().into_saved().await.unwrap();
+	let moved:Image = Image::move_existing(tmp.path()).await.unwrap();
+	let moved = moved.into_saved().await.unwrap();
 	// should be there
 	let path = complete_filepath(moved.get_path());
 	assert!(std::fs::exists(&path).unwrap());
@@ -124,16 +125,17 @@ async fn copy_existing() -> Result<(), Box<dyn std::error::Error>>
 
 	// create an existing dicom file
 	let tmp = NamedTempFile::with_prefix("copy_existing_").unwrap();
-	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1);
+	let obj = dcm::synthesize_dicom_obj(&dcm::UidSynthesizer::default(), 1, 1, 1, "John_Copy");
 	obj.write_all(&tmp).unwrap();
 
-	let moved:Image = Image::copy_existing(tmp.path()).await.unwrap().into_saved().await.unwrap();
+	let copied:Image = Image::copy_existing(tmp.path()).await.unwrap();
+	let copied = copied.into_saved().await.unwrap();
 	// should be there
-	let path = complete_filepath(moved.get_path());
+	let path = complete_filepath(copied.get_path());
 	assert!(std::fs::exists(&path).unwrap());
 	assert_ne!(path, tmp.path()); // but not the same path as origin
 
-	drop(moved);
+	drop(copied);
 	sleep(Duration::from_millis(100)).await;
 	// should be gone
 	assert!(!std::fs::exists(&path).unwrap());
