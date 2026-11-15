@@ -1,20 +1,21 @@
-use crate::db::{DB, Entry, lookup_uid};
+use crate::db::{lookup_uid, Entry, Pickable, DB};
 use crate::dcm::{AttributeSelector, INSTANCE_TAGS, SERIES_TAGS, STUDY_TAGS};
 use crate::tools::store::store_single_ob;
 use crate::tools;
 use dicom::core::header::Header;
 use dicom::dictionary_std::tags;
-use dicom::object::{DefaultDicomObject, FileDicomObject, InMemDicomObject, Tag};
+use dicom::object::{FileDicomObject, InMemDicomObject, Tag};
 use dimse::RetrieveLevel;
 use dimse::definitions::FailureCode;
 use dimse::identifier::Identifier;
 use dimse::io::ItemResult;
 use dimse::status::{Comment, Offending, Status, StatusFailure, failure, success};
-use futures::{stream, stream::BoxStream, StreamExt, TryStreamExt};
+use futures::{stream, stream::BoxStream, StreamExt};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
 use dicom::core::VR;
+use dicom::dictionary_std::tags::{NUMBER_OF_SERIES_RELATED_INSTANCES, NUMBER_OF_STUDY_RELATED_INSTANCES, NUMBER_OF_STUDY_RELATED_SERIES};
 use surrealdb::types as db_types;
 use surrealdb::types::ToSql;
 use tracing::debug;
@@ -177,26 +178,33 @@ impl dimse::io::FileAccess for Accessor {
 			.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))?;
 		debug!("Query \"{query}\" generated {} results", found.len());
 
-		let number_tag= match ident.level {
-			Some(RetrieveLevel::SERIES) => Some(tags::NUMBER_OF_SERIES_RELATED_INSTANCES),
-			Some(RetrieveLevel::STUDY) => Some(tags::NUMBER_OF_STUDY_RELATED_INSTANCES),
-			_ => None,
-		};
-
 		let stream = stream::iter(found)
-			.then(|f|async move { f.get_files().await })
-			.and_then(move|f|async move {
-				let mut obj = f.first().unwrap().read().await;
-				if let Ok(obj) = &mut obj && let Some(number_tag) = number_tag {
-					obj.put_str(number_tag,VR::IS,f.len().to_string());
-				}
-				obj
-			})
+			.then(move|e| process_entry(e,ident.level.clone()))
 			.map(|o|o
-				.map(DefaultDicomObject::into_inner)
 				.map_err(|e|failure(FailureCode::ProcessingFailure).comment(e))
 			);
 
 		Ok(stream.boxed())
 	}
+}
+
+async fn process_entry(entry: Entry, level: Option<RetrieveLevel>) -> tools::Result<InMemDicomObject> {
+	let files = entry.get_files().await?;
+	let mut obj = files.first().unwrap().read().await?;
+
+	if let Some(level) = level {
+		match level {
+			RetrieveLevel::SERIES => {
+				obj.put_str(NUMBER_OF_SERIES_RELATED_INSTANCES, VR::IS, files.len().to_string());
+			},
+			RetrieveLevel::STUDY => {
+				obj.put_str(NUMBER_OF_STUDY_RELATED_INSTANCES, VR::IS, files.len().to_string());
+				if let Some(ser) = entry.pick_ref("series").ok().and_then(|v|v.as_array()) {
+					obj.put_str(NUMBER_OF_STUDY_RELATED_SERIES, VR::IS, ser.len().to_string());
+				}
+			},
+			_ => {},
+		};
+	}
+	Ok(obj.into_inner())
 }
