@@ -4,7 +4,7 @@ use crate::tools::extract_from_dicom;
 use crate::{storage, tools};
 use dicom::dictionary_std::tags;
 use itertools::Itertools;
-use std::collections::{BTreeMap, HashMap, LinkedList};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::any::Any;
@@ -45,7 +45,7 @@ pub struct QEntry {
 #[derive(Debug)]
 struct Queue
 {
-	objects: LinkedList<QEntry>,
+	objects: BTreeMap<String, QEntry>,
 	series_elements:BTreeMap<String,db_types::Value>,
 	timer:AbortHandle
 }
@@ -91,22 +91,29 @@ impl RegisterManager {
 			[("study", study_id.0.into_value())],
 			&crate::dcm::SERIES_TAGS
 		);
-
-		// determine series to group objects so we can insert them in bulk
 		let series_uid = extract_from_dicom(image.as_ref(), tags::SERIES_INSTANCE_UID)?.to_string();
-
-		// get or make a new queue
-		let mut queues = self.queues.lock().await;
-		let queue = queues.entry(series_uid.clone()).or_insert_with(|| {
+		let instance_uid = extract_from_dicom(image.as_ref(), tags::SOP_INSTANCE_UID)?.to_string();
+		let new_queue = |mut manager: RegisterManager| {
 			// it's a new queue, make a timeout commit task for it
 			let series_uid_shared = series_uid.clone();
-			let mut self_shared = self.clone();
 			let timer = spawn(async move {
 				tokio::time::sleep(Duration::from_millis(200)).await;
-				self_shared.commit(series_uid_shared,false).await;
+				manager.commit(series_uid_shared,false).await;
 			}).abort_handle();
 			Queue{ objects: Default::default(), series_elements:series_elements.clone(), timer }
-		});
+		};
+
+		// take or make a new queue
+		let mut queues = self.queues.lock().await;
+		let queue = queues.remove(&series_uid);
+
+		let mut queue = if let Some(queue) = queue {
+			// if queue exists, and instance is already in, commit this queue and create a new one
+			if queue.objects.contains_key(&instance_uid) {
+				Self::_commit(queue, true, &mut self.session).await;
+				new_queue(self.clone())
+			} else {queue} // otherwise just use existing one
+		} else { new_queue(self.clone()) };
 
 		// detect conflict and reject object if necessary
 		let diff = btree_diff(&queue.series_elements, series_elements);
@@ -118,14 +125,14 @@ impl RegisterManager {
 		}
 
 		// insert
-		queue.objects.push_back(QEntry{tx, image, register_result: None });
+		queue.objects.insert(instance_uid, QEntry{tx, image, register_result: None });
 
-		// if bulk is big enough, trigger commit
+		// if queue is big enough, trigger commit
 		if queue.objects.len() >= crate::config::get().limits.max_files as usize{
-			drop(queues);
-			self.commit(series_uid,true).await;
+			Self::_commit(queue, true, &mut self.session).await;
+		} else { // otherwise put it back into manager (lock will be released here)
+			queues.insert(series_uid,queue);
 		};
-
 		Ok(rx)
 	}
 
@@ -167,7 +174,7 @@ impl RegisterManager {
 	async fn commit(&mut self, series_uid:String, kill_timer:bool) {
 		let queue = self.queues.lock().await.remove(&series_uid);
 		if let Some(queue) = queue{
-			self._commit(queue,kill_timer).await;
+			Self::_commit(queue, kill_timer, &mut self.session).await;
 		}
 	}
 	async fn write_image(entry:QEntry) -> Option<QEntry> {
@@ -196,7 +203,7 @@ impl RegisterManager {
 			},
 		}
 	}
-	async fn _commit(&mut self, queue:Queue, kill_timer:bool) {
+	async fn _commit<S,C>(queue:Queue, kill_timer:bool, session: &mut S) where S:Session<C>, C:Connection {
 		let Queue { mut objects, timer, .. } = queue;
 		if kill_timer{
 			timer.abort();
@@ -207,7 +214,7 @@ impl RegisterManager {
 		let mut saved_entries = vec![];
 		// fill up joinset
 		while saver.len() < crate::config::get().limits.max_files as usize {
-			if let Some(entry) = objects.pop_front() {
+			if let Some((_,entry)) = objects.pop_first() {
 				saver.spawn(Self::write_image(entry));
 			} else { break; }
 		}
@@ -218,13 +225,13 @@ impl RegisterManager {
 				Err(e) => error!("Task to write image failed: {e}"),
 				_ => {},
 			}
-			if let Some(new)= objects.pop_front(){
+			if let Some((_,new))= objects.pop_first(){
 				saver.spawn(Self::write_image(new));
 			}
 		}
 
 		// next commit to db /////////////////////////////////////////////
-		let commited_entries = Self::inner_commit(saved_entries,&mut self.session).await;
+		let commited_entries = Self::inner_commit(saved_entries, session).await;
 
 		// last, commit the files and let receivers know /////////////
 		commited_entries.into_iter().for_each(|mut entry|{
@@ -241,7 +248,7 @@ impl RegisterManager {
 			.map(|(_,q)|q)
 			.collect::<Vec<_>>();
 		for entries in queues {
-			self._commit(entries,true).await
+			Self::_commit(entries,true,&mut self.session).await
 		}
 	}
 }
