@@ -45,6 +45,11 @@ async fn from_obj() -> Result<(), Box<dyn std::error::Error>>
 
 	// cleanup
 	std::fs::remove_file(&path).unwrap();
+	rudicom::tools::remove::remove_path(
+		path.parent().unwrap().to_path_buf(),
+		&rudicom::config::get().paths.storage_path
+	).unwrap();
+
 	Ok(())
 }
 
@@ -112,8 +117,11 @@ async fn move_existing() -> Result<(), Box<dyn std::error::Error>>
 	// dropping the same should not remove it
 	assert!(std::fs::exists(&path).unwrap());
 
-	std::fs::remove_file(path).unwrap();
-
+	std::fs::remove_file(&path).unwrap();
+	rudicom::tools::remove::remove_path(
+		path.parent().unwrap().to_path_buf(),
+		&rudicom::config::get().paths.storage_path
+	).unwrap();
 	Ok(())
 }
 
@@ -155,7 +163,10 @@ async fn copy_existing() -> Result<(), Box<dyn std::error::Error>>
 		assert_eq!(e.kind(), ErrorKind::AlreadyExists);
 	} else { assert!(false); }
 
-	std::fs::remove_file(path).unwrap();
-
+	std::fs::remove_file(&path).unwrap();
+	rudicom::tools::remove::remove_path(
+		path.parent().unwrap().to_path_buf(),
+		&rudicom::config::get().paths.storage_path
+	).unwrap();
 	Ok(())
 }

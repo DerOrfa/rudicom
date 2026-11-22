@@ -9,7 +9,6 @@ use rand::random;
 use rudicom::db::{list_entries, lookup_uid};
 use rudicom::tools::remove::remove;
 use tokio::task::JoinSet;
-use tokio::time::sleep;
 use rudicom::db::RegisterResult;
 
 mod common;
