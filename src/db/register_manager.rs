@@ -108,7 +108,7 @@ impl RegisterManager {
 		let queue = queues.remove(&series_uid);
 
 		let mut queue = if let Some(queue) = queue {
-			// if queue exists, and instance is already in, commit this queue and create a new one
+			// if queue exists and instance is already in, commit this queue and create a new one
 			if queue.objects.contains_key(&instance_uid) {
 				Self::_commit(queue, true, &mut self.session).await;
 				new_queue(self.clone())
@@ -213,6 +213,9 @@ impl RegisterManager {
 		let mut saver = JoinSet::new();
 		let mut saved_entries = vec![];
 		// fill up joinset
+		// @todo this creates files *before* they're registered in the DB, could cause race
+		// condition leading to failure to write the file, if another task is registering the same
+		// instance, but was fater creating the file
 		while saver.len() < crate::config::get().limits.max_files as usize {
 			if let Some((_,entry)) = objects.pop_first() {
 				saver.spawn(Self::write_image(entry));

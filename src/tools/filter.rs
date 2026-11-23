@@ -12,7 +12,7 @@ use pyo3::{Bound, IntoPyObject, PyAny, PyErr, Python};
 use pyo3::conversion::FromPyObjectOwned;
 use pyo3::exceptions::PyValueError;
 use pyo3::types::{PyAnyMethods, PyDict, PyModule};
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 use crate::tools;
 
 fn auto_array<'py, T>(val: Bound<'py, PyAny>) -> Result<C<T>, PyErr> where T:FromPyObjectOwned<'py>, T:Clone
@@ -159,7 +159,7 @@ pub fn filter(code:Bound<PyModule>, obj:&mut InMemDicomObject) -> tools::Result<
 			error!("Ignoring {} as it is not a primitive value", e.to_str().unwrap());
 		}
 	}
-	debug!("Running filter {code}");
+	trace!("Running filter {code}");
 	let res:HashMap<(u16,u16),Option<Bound<PyAny>>> = code.call_method1("filter", (param,))?.extract()?;
 	for (tag,val) in res {
 		let tag = Tag::from(tag);
@@ -167,10 +167,10 @@ pub fn filter(code:Bound<PyModule>, obj:&mut InMemDicomObject) -> tools::Result<
 			let new_e = if let Some(e) = obj.take_element(tag).ok() {
 				replace_element(val, e)?
 			} else { make_element(val, tag)?};
-			debug!("Replacing {} with {}", tag.to_string(), new_e.to_str().unwrap());
+			trace!("Replacing {} with {}", tag.to_string(), new_e.to_str().unwrap());
 			obj.put_element(new_e);
 		} else {
-			debug!("Removing {}", tag.to_string());
+			trace!("Removing {}", tag.to_string());
 			obj.remove_element(tag);
 		}
 	}
